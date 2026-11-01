@@ -27,7 +27,7 @@ Este documento registra objetivos e decisões preliminares. A sintaxe e a semân
 
 ## Sintaxe e gramática
 
-A gramática em [grammar.ebnf](grammar.ebnf) descreve apenas um subconjunto lexical inicial. Ela não define a sintaxe completa de declarações, expressões, tipos, funções, módulos ou atributos.
+A [referência preliminar da linguagem](language_reference.md) reúne exemplos ilustrativos de arquivos `.kyn`. Os [princípios de design](language_design.md) registram os objetivos arquiteturais. A gramática em [grammar.ebnf](grammar.ebnf) descreve apenas um subconjunto lexical inicial observado no lexer; [syntax.ebnf](syntax.ebnf) é um esboço sintático proposto e ainda não normativo. Nenhum desses documentos deve ser interpretado como prova de que a sintaxe correspondente já é aceita pelo compilador.
 
 ## Modelo de memória
 
