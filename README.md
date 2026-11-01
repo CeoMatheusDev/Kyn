@@ -94,6 +94,10 @@ Os testes Zig ainda localizados diretamente em `src/test_*.zig` serão consolida
 - [Histórico de alterações](CHANGELOG.md)
 - [Como contribuir](CONTRIBUTING.md)
 
+## Versionamento
+
+A versão de desenvolvimento está em `VERSION`. O projeto usa SemVer e ainda não declara uma release estável. Consulte [a política de versionamento](docs/versioning.md) e o [changelog](CHANGELOG.md).
+
 ## Contribuindo
 
 Contribuições são bem-vindas. Antes de abrir uma alteração, leia [CONTRIBUTING.md](CONTRIBUTING.md) e descreva claramente o comportamento que foi implementado e como foi verificado.
