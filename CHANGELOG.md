@@ -2,6 +2,10 @@
 
 Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
 
+## [v0.5.0-alpha.1] — 2026-11-01
+- Marco 2.1: `std/core/core.zig` (unsafe, @align, alocadores explícitos), `tests/core_basic.kyn`, `src/test_core.zig`.
+- Separação `kyn:core` (bare-metal) iniciada.
+
 ## [v0.4.0-alpha.1] — 2026-11-01
 - Marco 1.4: `src/codegen/codegen.zig` (emissão LLVM IR básico), testes `tests/codegen_basic.kyn` + `src/test_codegen.zig`.
 - Ciclo completo do compilador Bootstrap: Lexer → Parser → AST → Sema → CodeGen.
