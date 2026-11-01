@@ -10,7 +10,10 @@ Esta pasta concentra a documentação técnica do projeto. Os documentos disting
 | [Estado de implementação](status.md) | O que está presente, parcial ou ausente |
 | [Desenvolvimento](development.md) | Requisitos, comandos de teste e fluxo de contribuição |
 | [Especificação](spec.md) | Princípios e decisões de linguagem ainda em evolução |
-| [Gramática](grammar.ebnf) | Gramática lexical mínima documentada |
+| [Referência da linguagem](language_reference.md) | Exemplos de sintaxe `.kyn`, tipos, funções, memória, erros e módulos |
+| [Princípios de design](language_design.md) | Identidade, requisitos e diretrizes arquiteturais da linguagem |
+| [Gramática lexical](grammar.ebnf) | Regras lexicais observadas no lexer bootstrap |
+| [Gramática sintática](syntax.ebnf) | Esboço sintático proposto, ainda não normativo |
 | [Modelo de memória](memory_model.md) | Diretrizes propostas para memória, ownership e FFI |
 
 ## Convenções
