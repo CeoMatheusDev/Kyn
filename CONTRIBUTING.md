@@ -31,7 +31,9 @@ Cada PR deve:
 
 Execute os testes Zig relevantes. Os comandos atualmente disponíveis estão descritos em [docs/development.md](docs/development.md). Os fixtures `.kyn` ainda não possuem um runner integrado.
 
-## Commits
+## Branches e commits
+
+Crie branches de trabalho a partir de `main`, usando os prefixos `feat/`, `fix/`, `docs/` ou `chore/`. Abra PRs direcionados a `main`. Consulte [docs/versioning.md](docs/versioning.md) para o fluxo completo.
 
 Prefira commits pequenos, com mensagens objetivas, por exemplo:
 
