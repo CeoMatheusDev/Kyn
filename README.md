@@ -10,7 +10,7 @@
   <img src="https://img.shields.io/badge/version-v1.0.0-blueviolet?style=for-the-badge" alt="Version">
   <img src="https://img.shields.io/badge/bootstrap-Zig%200.17.0-orange?style=for-the-badge" alt="Bootstrap">
   <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue?style=for-the-badge" alt="License">
-  <img src="https://img.shields.io/badge/status-Release%20Candidate-success?style=for-the-badge" alt="Status">
+  <img src="https://img.shields.io/badge/status-Stable-success?style=for-the-badge" alt="Status">
 </p>
 
 ---
