@@ -1,0 +1,5 @@
+// src/kyn/parser.kyn — Parser self-hosted (Kyn)
+fn parse(tokens: Vec<Token>) -> AST {
+    // placeholder
+    return AST::new();
+}

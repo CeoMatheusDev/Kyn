@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.9.0--rc.1-blueviolet?style=for-the-badge" alt="Version">
+  <img src="https://img.shields.io/badge/version-v1.0.0-blueviolet?style=for-the-badge" alt="Version">
   <img src="https://img.shields.io/badge/bootstrap-Zig%200.17.0-orange?style=for-the-badge" alt="Bootstrap">
   <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue?style=for-the-badge" alt="License">
   <img src="https://img.shields.io/badge/status-Release%20Candidate-success?style=for-the-badge" alt="Status">
@@ -34,8 +34,8 @@ O compilador evoluiu de forma incremental e rigorosa sob o versionamento **SemVe
 | `v0.5.0-alpha.1` | **Core & Bare-Metal** | Camada `kyn:core`, alocadores explícitos e semântica `unsafe`. | Concluído ✅ |
 | `v0.6.0-beta.1` | **Segurança Avançada** | Validação semântica estrita para blocos `unsafe` e `#[repr(C)]`. | Concluído ✅ |
 | `v0.8.0-beta.2` | **Std & FFI** | Biblioteca padrão `kyn:std` (I/O, Threads, Net) e FFI com C de custo zero. | Concluído ✅ |
-| `v0.9.0-rc.1` | **Release Candidate** | Otimizações de pipeline, cobertura de testes > 90% e congelamento da spec. | **Atual 🚀** |
-| `v1.0.0` | **Self-Hosted** | Compilador reescrito na própria linguagem Kyn (Estável). | Planejado ⏳ |
+| `v0.9.0-rc.1` | **Release Candidate** | Otimizações de pipeline, cobertura de testes > 90% e congelamento da spec. | Concluído ✅ |
+| `v1.0.0` | **Self-Hosted** | Compilador reescrito na própria linguagem Kyn (Estável). | **Atual 🚀** |
 
 ---
 

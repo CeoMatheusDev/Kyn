@@ -1,0 +1,4 @@
+// src/kyn/main.kyn — Entry point self-hosted (Kyn)
+fn main() {
+    // placeholder: orquestra lexer → parser → ast → sema → codegen
+}

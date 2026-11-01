@@ -2,6 +2,10 @@
 
 Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
 
+## [v1.0.0] — 2026-11-01
+- Marco 3.1/3.2: Self-Hosting — compilador reescrito em Kyn (`src/kyn/`), testes `tests/self_host.kyn`.
+- Linguagem estável oficial, pronta para produção.
+
 ## [v0.9.0-rc.1] — 2026-11-01
 - Marco 2.4: Release Candidate do compilador Bootstrap. Cobertura de testes > 90%, otimizações de pipeline, especificações congeladas.
 - README profissional com badges, roadmap SemVer e arquitetura.

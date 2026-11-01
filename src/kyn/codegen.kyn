@@ -1,0 +1,5 @@
+// src/kyn/codegen.kyn — CodeGen self-hosted (Kyn)
+fn emit(node: *Node) -> str {
+    // placeholder
+    return "define i32 @main() { ret i32 0 }";
+}

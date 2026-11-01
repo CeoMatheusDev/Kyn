@@ -1,0 +1,7 @@
+// src/kyn/ast.kyn — AST self-hosted (Kyn)
+struct Node {
+    typ: NodeType,
+    text: str,
+    left: ?*Node,
+    right: ?*Node,
+}
