@@ -1,0 +1,5 @@
+// Teste básico de sintaxe para o Marco 1.1
+fn main() {
+    let x = 42;
+    return x;
+}
