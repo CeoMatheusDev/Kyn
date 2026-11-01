@@ -2,6 +2,9 @@
 
 Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
 
+## [v1.8.0] — 2026-11-01
+- Marco 3.5: Suporte a FFI Nativa com C (`src/compiler/ffi.kyn`, `tests/ffi_basic.kyn`).
+
 ## [v1.7.0] — 2026-11-01
 - Marco 3.4: Otimizações de registradores no CodeGen (`src/compiler/regopt.kyn`, `tests/regopt_basic.kyn`).
 
