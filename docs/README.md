@@ -6,6 +6,7 @@ Esta pasta concentra a documentação técnica do projeto. Os documentos disting
 
 | Documento | Conteúdo |
 | --- | --- |
+| [Diretrizes de design](language_design.md) | Objetivos de desempenho, baixo nível, segurança, modernidade e decisões pendentes |
 | [Arquitetura](architecture.md) | Componentes do compilador bootstrap e organização dos módulos |
 | [Estado de implementação](status.md) | O que está presente, parcial ou ausente |
 | [Desenvolvimento](development.md) | Requisitos, comandos de teste e fluxo de contribuição |
