@@ -1,8 +1,17 @@
-(* Gramática mínima — Marco 1.1 / Lexer *)
+(* Kyn — gramática lexical inicial.
+   Este arquivo descreve apenas tokens observados no lexer bootstrap.
+   Não é a gramática sintática completa da linguagem. *)
 
-token = letter | digit | symbol | whitespace | comment ;
-letter = "a" ... "z" | "A" ... "Z" ;
-digit = "0" ... "9" ;
-symbol = "+" | "-" | "*" | "/" | "=" | ";" | "," | "(" | ")" | "{" | "}" ;
-whitespace = " " | "\t" | "\n" ;
-comment = "//" { any_char - "\n" } ;
+letter      = "a"…"z" | "A"…"Z" | "_" ;
+digit       = "0"…"9" ;
+
+identifier  = ( letter ), { letter | digit } ;
+integer     = digit, { digit } ;
+
+whitespace  = " " | "\t" | "\n" ;
+comment     = "//", { any_char - "\n" } ;
+
+(* O lexer atual classifica qualquer caractere não reconhecido pelas
+   regras acima como um token symbol individual. A lista de operadores
+   e delimitadores ainda não está formalizada. *)
+symbol      = any_char - ( letter | digit | whitespace ) ;
