@@ -1,0 +1,11 @@
+// src/compiler/span.kyn — Span de localização (Diagnostics)
+pub struct Span {
+    file_path: []u8,
+    line: usize,
+    column: usize,
+    length: usize,
+}
+
+pub fn span_new(file_path: []u8, line: usize, column: usize, length: usize) Span {
+    return Span { file_path: file_path, line: line, column: column, length: length };
+}

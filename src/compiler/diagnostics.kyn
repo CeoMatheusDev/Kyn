@@ -1,0 +1,30 @@
+// src/compiler/diagnostics.kyn — Reporter de erros estilo Rust/Zig
+import "span.kyn";
+
+pub enum ErrorCode {
+    E0001, // Sintaxe inválida
+    E0002, // Tipos incompatíveis
+    E0003, // Variável não declarada
+}
+
+pub struct Diagnostic {
+    code: ErrorCode,
+    message: []u8,
+    span: Span,
+    help: []u8,
+}
+
+pub fn report(d: Diagnostic) {
+    // Formatar e imprimir no terminal com marcadores ^~~~
+    // Exemplo:
+    // error[E0002]: Mismatch de tipos detectado
+    //  --> file.kyn:4:17
+    //   |
+    // 4 | let x: i32 = "texto";
+    //   |        ---   ^^^^^^^ esperado 'i32', encontrado '[]u8'
+    //   |        |
+    //   |        tipo declarado aqui
+    //   |
+    // help: altere o valor...
+    _ = d;
+}

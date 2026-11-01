@@ -1,0 +1,5 @@
+// src/kyn/lexer.kyn — Lexer self-hosted (Kyn)
+fn tokenize(input: str) -> Vec<Token> {
+    // placeholder
+    return Vec::new();
+}

@@ -1,0 +1,11 @@
+// src/compiler/mutability.kyn — Verificação de mutabilidade estrita (v1.6.0)
+import "core";
+
+pub fn check_mutability(var_decl: VarDecl) Result<(), Error> {
+    // Impede modificações de variáveis imutáveis
+    // Garante referências ref mut válidas
+    if !var_decl.mutable and var_decl.assigned {
+        return Err(Error::ImmutableModification);
+    }
+    return Ok(());
+}

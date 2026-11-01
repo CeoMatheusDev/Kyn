@@ -1,0 +1,23 @@
+// std/core/arena.kyn — ArenaAllocator nativo sem dependência de OS (v1.5.0)
+import "core";
+
+pub struct Arena {
+    buffer: []u8,
+    offset: usize,
+}
+
+impl Arena {
+    pub fn init(size: usize) Arena {
+        return Arena { buffer: []u8 { size }, offset: 0 };
+    }
+
+    pub fn alloc(ref mut self, size: usize) []u8 {
+        let ptr = self.buffer[self.offset..self.offset + size];
+        self.offset += size;
+        return ptr;
+    }
+
+    pub fn reset(ref mut self) {
+        self.offset = 0;
+    }
+}

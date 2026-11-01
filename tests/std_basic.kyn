@@ -1,0 +1,10 @@
+// tests/std_basic.kyn
+import kyn:std::io;
+import kyn:std::thread;
+import kyn:std::net;
+
+fn main() {
+    let f = io::open("file.txt");
+    thread::spawn(|| {});
+    let s = net::connect("localhost", 80);
+}

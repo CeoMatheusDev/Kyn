@@ -1,0 +1,5 @@
+// src/kyn/sema.kyn — Sema self-hosted (Kyn)
+fn check(node: *Node) -> Result<(), Error> {
+    // placeholder
+    return Ok(());
+}

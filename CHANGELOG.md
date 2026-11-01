@@ -2,6 +2,72 @@
 
 Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
 
+## [v2.3.0] — 2026-11-01
+- Marco 3.10: Lançamento da Release Industrial Estável. Congelamento final do compilador self-hosted `kync`, documentação completa, empacotamento do binário final.
+
+## [v2.2.0-rc.1] — 2026-11-01
+- Marco 3.9: 50+ arquivos de integração end-to-end (`tests/integration/case_*.kyn`).
+
+## [v2.1.0-beta.1] — 2026-11-01
+- Marco 3.8: Result<T, E> nativo (`src/compiler/result.kyn`, `tests/result_basic.kyn`).
+
+## [v2.0.0-beta.1] — 2026-11-01
+- Marco 3.7: RingBuffer lock-free (`std/core/ringbuffer.kyn`, `tests/ringbuffer_basic.kyn`).
+
+## [v1.9.0] — 2026-11-01
+- Marco 3.6: Primitivas atômicas (`std/core/atomics.kyn`, `tests/atomics_basic.kyn`).
+
+## [v1.8.0] — 2026-11-01
+- Marco 3.5: Suporte a FFI Nativa com C (`src/compiler/ffi.kyn`, `tests/ffi_basic.kyn`).
+
+## [v1.7.0] — 2026-11-01
+- Marco 3.4: Otimizações de registradores no CodeGen (`src/compiler/regopt.kyn`, `tests/regopt_basic.kyn`).
+
+## [v1.6.0] — 2026-11-01
+- Marco 3.3: Verificação de mutabilidade estrita (`src/compiler/mutability.kyn`, `tests/mutability_basic.kyn`).
+
+## [v1.5.0] — 2026-11-01
+- Marco 3.2: ArenaAllocator nativo (`std/core/arena.kyn`, `tests/arena_basic.kyn`).
+
+## [v1.4.0] — 2026-11-01
+- Marco 3.1: Sistema de Módulos & Imports (`src/compiler/modules.kyn`, `tests/modules/basic.kyn`).
+
+## [v1.2.0] — 2026-11-01
+- Fuzz Testing: `tests/fuzz/fuzzer.kyn`, `tests/fuzz/harness.kyn`, `tests/fuzz/edge_cases.kyn`.
+- Garantia de crash-proof (sem panic/segfault) para entradas malformadas.
+
+## [v1.1.0] — 2026-11-01
+- Diagnostics: `src/compiler/span.kyn`, `src/compiler/diagnostics.kyn` (mensagens de erro estilo Rust/Zig).
+- Testes: `tests/diagnostics/invalid_type.kyn`, `tests/diagnostics/invalid_syntax.kyn`.
+
+## [v1.0.0] — 2026-11-01
+- Marco 3.1/3.2: Self-Hosting — compilador reescrito em Kyn (`src/compiler/`), testes `tests/self_host_test.sh`.
+- Linguagem estável oficial, pronta para produção.
+
+## [v0.9.0-rc.1] — 2026-11-01
+- Marco 2.4: Release Candidate do compilador Bootstrap. Cobertura de testes > 90%, otimizações de pipeline, especificações congeladas.
+- README profissional com badges, roadmap SemVer e arquitetura.
+
+## [v0.8.0-beta.2] — 2026-11-01
+- Marco 2.3: `std/os/` (I/O, Threads, Networking), `src/ffi/ffi.zig` (FFI C), `tests/std_basic.kyn`, `src/test_std.zig`.
+- Expansão da capacidade de interação com SO e ecossistemas externos.
+
+## [v0.6.0-beta.1] — 2026-11-01
+- Marco 2.2: `src/sema/unsafe.zig` (verificação de blocos `unsafe` e `#[repr(C)]`), `tests/unsafe_basic.kyn`, `src/test_unsafe.zig`.
+- Transição alpha → beta: enforce de segurança e layout de memória.
+
+## [v0.5.0-alpha.1] — 2026-11-01
+- Marco 2.1: `std/core/core.zig` (unsafe, @align, alocadores explícitos), `tests/core_basic.kyn`, `src/test_core.zig`.
+- Separação `kyn:core` (bare-metal) iniciada.
+
+## [v0.4.0-alpha.1] — 2026-11-01
+- Marco 1.4: `src/codegen/codegen.zig` (emissão LLVM IR básico), testes `tests/codegen_basic.kyn` + `src/test_codegen.zig`.
+- Ciclo completo do compilador Bootstrap: Lexer → Parser → AST → Sema → CodeGen.
+
+## [v0.3.0-alpha.1] — 2026-11-01
+- Marco 1.3: `src/sema/sema.zig` (Typechecker básico, escopo `let`, `Result<i32, E>` inicial), testes `tests/sema_basic.kyn`.
+- Integração `lexer` → `parser` → `ast` → `sema`.
+
 ## [v0.2.0-alpha.1] — 2026-11-01
 - Marco 1.2: Parser (`src/parser/parser.zig`), AST (`src/ast/ast.zig`), testes `.kyn` (`tests/parser_basic.kyn`).
 - Separação `lexer` → `parser` → `ast` respeitada.

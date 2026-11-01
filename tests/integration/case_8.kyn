@@ -1,0 +1,2 @@
+// tests/integration/case_8.kyn
+fn main() -> i32 { return 8; }

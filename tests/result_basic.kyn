@@ -1,0 +1,14 @@
+// tests/result_basic.kyn
+import "core";
+
+fn divide(a: i32, b: i32) -> Result<i32, Error> {
+    if b == 0 {
+        return Err(Error::DivisionByZero);
+    }
+    return Ok(a / b);
+}
+
+fn main() {
+    let x = divide(10, 2)?; // propagação com ?
+    let y = divide(10, 0)?; // erro propagado
+}

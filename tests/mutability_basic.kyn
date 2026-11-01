@@ -1,0 +1,7 @@
+// tests/mutability_basic.kyn
+fn main() {
+    let x = 10;
+    // x = 20; // erro: variável imutável
+    let mut y = 5;
+    y = 15; // ok
+}
