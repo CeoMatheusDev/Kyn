@@ -22,6 +22,6 @@ Kyn/
 
 ## Versão atual
 
-`v0.5.0-alpha.1` — Marco 2.1 (`std/core/`: unsafe, @align, alocadores explícitos).
+`v0.6.0-beta.1` — Marco 2.2 (Sema unsafe + #[repr(C)]).
 
 Veja `CHANGELOG.md` para histórico SemVer (v0.1.0-alpha.1 → v0.2.0-alpha.1).

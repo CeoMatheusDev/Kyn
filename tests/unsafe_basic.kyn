@@ -1,0 +1,10 @@
+// tests/unsafe_basic.kyn
+unsafe {
+    // acesso direto ao silício
+}
+
+#[repr(C)]
+struct Point {
+    x: i32,
+    y: i32,
+}
