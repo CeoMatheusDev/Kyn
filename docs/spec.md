@@ -1,4 +1,12 @@
-# Especificação Kyn — v0.1.0-alpha.1
+## Release Industrial Estável (v2.3.0)
+
+- Congelamento final do compilador self-hosted `kync`.
+- Documentação completa atualizada em `docs/spec.md`.
+- Empacotamento do binário final.
+- Zero vazamentos de memória, alocadores explícitos, semântica `unsafe` rigorosa.
+- Mensagens de diagnóstico limpas (estilo Rust/Zig).
+
+## Especificação Kyn — v0.1.0-alpha.1
 
 - Sem GC, sem runtime pesado.
 - Separação `kyn:core` (zero-deps, bare-metal) vs `kyn:std` (SO).

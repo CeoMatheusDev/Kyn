@@ -2,6 +2,9 @@
 
 Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
 
+## [v2.3.0] — 2026-11-01
+- Marco 3.10: Lançamento da Release Industrial Estável. Congelamento final do compilador self-hosted `kync`, documentação completa, empacotamento do binário final.
+
 ## [v2.2.0-rc.1] — 2026-11-01
 - Marco 3.9: 50+ arquivos de integração end-to-end (`tests/integration/case_*.kyn`).
 
