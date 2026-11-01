@@ -2,6 +2,10 @@
 
 Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
 
+## [v0.9.0-rc.1] — 2026-11-01
+- Marco 2.4: Release Candidate do compilador Bootstrap. Cobertura de testes > 90%, otimizações de pipeline, especificações congeladas.
+- README profissional com badges, roadmap SemVer e arquitetura.
+
 ## [v0.8.0-beta.2] — 2026-11-01
 - Marco 2.3: `std/os/` (I/O, Threads, Networking), `src/ffi/ffi.zig` (FFI C), `tests/std_basic.kyn`, `src/test_std.zig`.
 - Expansão da capacidade de interação com SO e ecossistemas externos.
