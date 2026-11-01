@@ -11,7 +11,7 @@ Esta pasta concentra a documentação técnica do projeto. Os documentos disting
 | [Desenvolvimento](development.md) | Requisitos, comandos de teste e fluxo de contribuição |
 | [Especificação](spec.md) | Princípios e decisões de linguagem ainda em evolução |
 | [Gramática](grammar.ebnf) | Gramática lexical mínima documentada |
-| [Modelo de memória](memory_model.md) | Diretrizes propostas para memória, ownership e FFI |
+| [Modelo de memória](memory_model.md) | Diretrizes propostas para memória, ownership e FFI |\n| [Versionamento](versioning.md) | SemVer, branches, commits, changelog e releases |
 
 ## Convenções
 
