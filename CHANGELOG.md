@@ -2,8 +2,12 @@
 
 Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
 
+## [v1.1.0] — 2026-11-01
+- Diagnostics: `src/compiler/span.kyn`, `src/compiler/diagnostics.kyn` (mensagens de erro estilo Rust/Zig).
+- Testes: `tests/diagnostics/invalid_type.kyn`, `tests/diagnostics/invalid_syntax.kyn`.
+
 ## [v1.0.0] — 2026-11-01
-- Marco 3.1/3.2: Self-Hosting — compilador reescrito em Kyn (`src/kyn/`), testes `tests/self_host.kyn`.
+- Marco 3.1/3.2: Self-Hosting — compilador reescrito em Kyn (`src/compiler/`), testes `tests/self_host_test.sh`.
 - Linguagem estável oficial, pronta para produção.
 
 ## [v0.9.0-rc.1] — 2026-11-01
