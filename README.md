@@ -1,73 +1,105 @@
-<p align="center">
-  <h1 align="center">Kyn Programming Language</h1>
-</p>
+# Kyn
 
-<p align="center">
-  <b>A modern, ultra-low-level, memory-safe, and high-performance system programming language.</b>
-</p>
+**Kyn** é um projeto experimental de linguagem de programação de sistemas, desenvolvido com foco em controle explícito de recursos, interoperabilidade com C e compilação de baixo nível.
 
-<p align="center">
-  <img src="https://img.shields.io/badge/version-v1.0.0-blueviolet?style=for-the-badge" alt="Version">
-  <img src="https://img.shields.io/badge/bootstrap-Zig%200.17.0-orange?style=for-the-badge" alt="Bootstrap">
-  <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue?style=for-the-badge" alt="License">
-  <img src="https://img.shields.io/badge/status-Stable-success?style=for-the-badge" alt="Status">
-</p>
+O repositório reúne um protótipo de compilador escrito em Zig, experimentos de implementação da linguagem Kyn, módulos iniciais de biblioteca padrão e testes/fixtures. O projeto ainda está em desenvolvimento: a implementação disponível não corresponde a uma linguagem estável ou pronta para produção.
 
----
+> **Estado atual:** protótipo em estágio inicial. Interfaces, sintaxe, semântica e comandos de build ainda podem mudar.
 
-## 🚀 Sobre o Kyn
+## Objetivos de projeto
 
-O **Kyn** foi concebido para o Santo Graal da engenharia de software: controle absoluto de hardware (ARM, x86, RISC-V), segurança moderna sem *garbage collector*, performance de nível de metal cru (*bare-metal*), e portabilidade total para sistemas operacionais, motores de jogos (*game engines*) e sistemas embarcados.
+- Controle explícito de alocação e ciclo de vida de memória.
+- Ausência de garbage collector como objetivo de projeto.
+- Interoperabilidade com C e possibilidade de uso em sistemas de baixo nível.
+- Separação conceitual entre recursos essenciais (`kyn:core`) e recursos dependentes do sistema operacional (`kyn:std`).
+- Compilador com implementação bootstrap em Zig e, futuramente, componentes reimplementados em Kyn.
 
----
+Esses itens descrevem objetivos e direção arquitetural; não devem ser interpretados como garantias de recursos já completos.
 
-## 📈 Evolução e Marcos de Desenvolvimento (Roadmap)
+## Estado de implementação
 
-O compilador evoluiu de forma incremental e rigorosa sob o versionamento **SemVer 2.0.0**:
+| Área | O que existe no repositório | Estado |
+| --- | --- | --- |
+| Lexer | Lexer inicial em `src/lexer/lexer.zig` | Experimental |
+| Parser e AST | Estruturas e parsing parcial em `src/parser/` e `src/ast/` | Experimental |
+| Análise semântica | Estrutura inicial em `src/sema/` | Experimental |
+| Geração de código | Emissor mínimo em `src/codegen/codegen.zig` | Experimental |
+| Implementação em Kyn | Arquivos iniciais em `src/kyn/` e `src/compiler/` | Esqueleto / incompleto |
+| Biblioteca padrão | Módulos iniciais em `std/` | Experimental |
+| Testes | Testes Zig e arquivos de casos `.kyn` em `src/` e `tests/` | Parcial |
 
-| Versão / Tag | Estágio | Foco Principal | Status |
-| :--- | :--- | :--- | :--- |
-| `v0.1.0-alpha.1` | **Bootstrap Base** | Estrutura de pastas, CLI `kync` e Lexer básico em Zig 0.17.0. | Concluído ✅ |
-| `v0.2.0-alpha.1` | **Parser & AST** | Construção da Árvore Sintática Abstrata e descida recursiva. | Concluído ✅ |
-| `v0.3.0-alpha.1` | **Análise Semântica** | Typechecker básico, escopos e checagem de variáveis `let`. | Concluído ✅ |
-| `v0.4.0-alpha.1` | **Code Generation** | Emissão de LLVM IR nativo para o pipeline completo. | Concluído ✅ |
-| `v0.5.0-alpha.1` | **Core & Bare-Metal** | Camada `kyn:core`, alocadores explícitos e semântica `unsafe`. | Concluído ✅ |
-| `v0.6.0-beta.1` | **Segurança Avançada** | Validação semântica estrita para blocos `unsafe` e `#[repr(C)]`. | Concluído ✅ |
-| `v0.8.0-beta.2` | **Std & FFI** | Biblioteca padrão `kyn:std` (I/O, Threads, Net) e FFI com C de custo zero. | Concluído ✅ |
-| `v0.9.0-rc.1` | **Release Candidate** | Otimizações de pipeline, cobertura de testes > 90% e congelamento da spec. | Concluído ✅ |
-| `v1.0.0` | **Self-Hosted** | Compilador reescrito na própria linguagem Kyn (Estável). | **Atual 🚀** |
+Consulte [o estado detalhado](docs/status.md) antes de depender de qualquer funcionalidade.
 
----
+## Requisitos
 
-## 🛠️ Arquitetura do Repositório
+- Zig **0.17.0**, conforme declarado pelos metadados e comentários atuais do projeto.
+- Git para obter o código-fonte.
 
-```text
-Kyn/
-├── docs/             # Especificação formal, gramática EBNF e modelo de memória
-├── src/              # Compilador Bootstrap (Lexer, Parser, AST, Sema, CodeGen, FFI)
-├── std/              # Biblioteca Padrão (kyn:core para bare-metal e kyn:std para OS)
-├── tests/            # Testes de integração e suítes end-to-end (.kyn)
-└── examples/         # Exemplos para Kernel, Embarcados e Game Engines
+A versão do compilador Zig deve ser confirmada no ambiente antes de compilar. O repositório ainda não contém um `build.zig` nem um sistema de build unificado.
+
+## Obtendo o código
+
+```sh
+git clone https://github.com/CeoMatheusDev/Kyn.git
+cd Kyn
 ```
 
----
+## Compilação e testes
 
-## ⚙️ Compilação e Uso (Bootstrap em Zig 0.17.0)
+Não há, no estado atual, um comando único de build ou uma CLI funcional documentada. Para executar isoladamente os testes Zig existentes:
 
-Para compilar e testar o compilador `kync`:
-
-```bash
-# Executar testes unitários e internos
+```sh
+zig test src/test_core.zig
 zig test src/test_sema.zig
 zig test src/test_codegen.zig
 zig test src/test_std.zig
-
-# Compilar o executável CLI do compilador
-zig build-exe src/main.zig -I src --name kync
+zig test src/test_unsafe.zig
 ```
 
----
+Esses comandos executam apenas os arquivos de teste indicados; não representam uma validação completa do compilador, da biblioteca padrão ou dos arquivos `.kyn`.
 
-## 📄 Licença
+A entrada `src/main.zig` é atualmente um ponto de entrada mínimo de bootstrap, não um compilador de produção. Os arquivos `.kyn` em `tests/` são fixtures/casos de teste e não devem ser considerados executáveis até existir um runner integrado.
 
-Distribuído sob os termos das licenças MIT e Apache-2.0. Consulte o arquivo `LICENSE` para detalhes.
+## Estrutura do repositório
+
+```text
+.
+├── docs/              # Especificação, gramática, arquitetura e guias
+├── src/
+│   ├── ast/           # Nós da AST
+│   ├── codegen/       # Geração de código experimental
+│   ├── compiler/      # Módulos iniciais escritos em Kyn
+│   ├── ffi/           # Experimentos de interoperabilidade
+│   ├── kyn/           # Protótipos do compilador em Kyn
+│   ├── lexer/          # Lexer bootstrap em Zig
+│   ├── parser/         # Parser bootstrap em Zig
+│   └── sema/           # Análise semântica bootstrap
+├── std/
+│   ├── core/           # Primitivas independentes de SO (em desenvolvimento)
+│   └── os/             # Integrações dependentes de SO (em desenvolvimento)
+└── tests/              # Fixtures e casos de teste da linguagem
+```
+
+Os testes Zig ainda localizados diretamente em `src/test_*.zig` serão consolidados em uma estrutura própria quando os caminhos de importação e o fluxo de build forem padronizados.
+
+## Documentação
+
+- [Visão geral e arquitetura](docs/architecture.md)
+- [Estado de implementação e limitações](docs/status.md)
+- [Desenvolvimento, build e testes](docs/development.md)
+- [Especificação em evolução](docs/spec.md)
+- [Gramática lexical inicial](docs/grammar.ebnf)
+- [Modelo de memória — proposta](docs/memory_model.md)
+- [Roadmap](ROADMAP.md)
+- [Histórico de alterações](CHANGELOG.md)
+- [Como contribuir](CONTRIBUTING.md)
+
+## Contribuindo
+
+Contribuições são bem-vindas. Antes de abrir uma alteração, leia [CONTRIBUTING.md](CONTRIBUTING.md) e descreva claramente o comportamento que foi implementado e como foi verificado.
+
+Não apresente protótipos, stubs ou objetivos do roadmap como funcionalidades concluídas.
+
+## Licença
+
+O projeto declara licenciamento duplo MIT e Apache-2.0. Consulte os arquivos de licença presentes no repositório e confirme os termos aplicáveis antes de redistribuir.
