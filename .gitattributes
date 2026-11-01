@@ -1,0 +1,4 @@
+# Linguagem Kyn / Zig
+*.zig text diff=zig
+*.kyn text eol=lf
+*.md text eol=lf

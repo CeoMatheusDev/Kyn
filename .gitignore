@@ -1,0 +1,5 @@
+# Ignorar build artifacts do Zig 0.17.0
+zig-cache/
+zig-out/
+kync
+*.o

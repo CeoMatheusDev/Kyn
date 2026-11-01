@@ -1,0 +1,8 @@
+(* Gramática mínima — Marco 1.1 / Lexer *)
+
+token = letter | digit | symbol | whitespace | comment ;
+letter = "a" ... "z" | "A" ... "Z" ;
+digit = "0" ... "9" ;
+symbol = "+" | "-" | "*" | "/" | "=" | ";" | "," | "(" | ")" | "{" | "}" ;
+whitespace = " " | "\t" | "\n" ;
+comment = "//" { any_char - "\n" } ;

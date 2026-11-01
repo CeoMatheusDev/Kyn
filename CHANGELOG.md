@@ -1,0 +1,13 @@
+# Changelog — Kyn
+
+Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
+
+## [v0.2.0-alpha.1] — 2026-11-01
+- Marco 1.2: Parser (`src/parser/parser.zig`), AST (`src/ast/ast.zig`), testes `.kyn` (`tests/parser_basic.kyn`).
+- Separação `lexer` → `parser` → `ast` respeitada.
+- Erros sintáticos reportados via `!AST.Error`.
+
+## [v0.1.0-alpha.1] — 2026-11-01
+- Marco 1.1: estrutura de repositório, CLI `kync`, Lexer básico, testes Zig + `.kyn`.
+- Dependência estrita: Zig 0.17.0.
+- Target emissão: LLVM IR direto (Fase 1.4).
