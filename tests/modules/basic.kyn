@@ -1,0 +1,7 @@
+// tests/modules/basic.kyn
+import "core";
+import "std/io";
+
+fn main() {
+    // Teste de resolução de módulos
+}

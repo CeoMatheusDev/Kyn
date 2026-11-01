@@ -2,6 +2,9 @@
 
 Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
 
+## [v1.4.0] — 2026-11-01
+- Marco 3.1: Sistema de Módulos & Imports (`src/compiler/modules.kyn`, `tests/modules/basic.kyn`).
+
 ## [v1.2.0] — 2026-11-01
 - Fuzz Testing: `tests/fuzz/fuzzer.kyn`, `tests/fuzz/harness.kyn`, `tests/fuzz/edge_cases.kyn`.
 - Garantia de crash-proof (sem panic/segfault) para entradas malformadas.
