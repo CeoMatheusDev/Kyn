@@ -1,0 +1,9 @@
+// tests/ringbuffer_basic.kyn
+import "core";
+import "std/core/ringbuffer.kyn";
+
+fn main() {
+    let mut rb = RingBuffer::new(16);
+    rb.push(42);
+    let val = rb.pop();
+}

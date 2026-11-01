@@ -1,0 +1,31 @@
+// std/core/ringbuffer.kyn — RingBuffer atômico lock-free (v2.0.0-beta.1)
+import "core";
+import "std/core/atomics.kyn";
+
+pub struct RingBuffer {
+    buffer: []u8,
+    head: u32,
+    tail: u32,
+    capacity: u32,
+}
+
+impl RingBuffer {
+    pub fn new(capacity: u32) RingBuffer {
+        return RingBuffer { buffer: []u8 { capacity }, head: 0, tail: 0, capacity: capacity };
+    }
+
+    pub fn push(ref mut self, value: u8) bool {
+        let next = (self.tail + 1) % self.capacity;
+        if next == self.head { return false; }
+        self.buffer[self.tail] = value;
+        atomic_store(&self.tail, next);
+        return true;
+    }
+
+    pub fn pop(ref mut self) Option<u8> {
+        if self.head == self.tail { return None; }
+        let val = self.buffer[self.head];
+        atomic_store(&self.head, (self.head + 1) % self.capacity);
+        return Some(val);
+    }
+}

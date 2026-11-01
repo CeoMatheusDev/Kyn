@@ -2,6 +2,9 @@
 
 Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
 
+## [v2.0.0-beta.1] — 2026-11-01
+- Marco 3.7: RingBuffer lock-free (`std/core/ringbuffer.kyn`, `tests/ringbuffer_basic.kyn`).
+
 ## [v1.9.0] — 2026-11-01
 - Marco 3.6: Primitivas atômicas (`std/core/atomics.kyn`, `tests/atomics_basic.kyn`).
 
