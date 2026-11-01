@@ -2,6 +2,10 @@
 
 Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
 
+## [v0.3.0-alpha.1] — 2026-11-01
+- Marco 1.3: `src/sema/sema.zig` (Typechecker básico, escopo `let`, `Result<i32, E>` inicial), testes `tests/sema_basic.kyn`.
+- Integração `lexer` → `parser` → `ast` → `sema`.
+
 ## [v0.2.0-alpha.1] — 2026-11-01
 - Marco 1.2: Parser (`src/parser/parser.zig`), AST (`src/ast/ast.zig`), testes `.kyn` (`tests/parser_basic.kyn`).
 - Separação `lexer` → `parser` → `ast` respeitada.

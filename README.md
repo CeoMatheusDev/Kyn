@@ -22,6 +22,6 @@ Kyn/
 
 ## Versão atual
 
-`v0.2.0-alpha.1` — Marco 1.2 (Parser + AST: `src/parser/parser.zig`, `src/ast/ast.zig`, `tests/parser_basic.kyn`).
+`v0.3.0-alpha.1` — Marco 1.3 (Análise Semântica: `src/sema/sema.zig`, `tests/sema_basic.kyn`).
 
 Veja `CHANGELOG.md` para histórico SemVer (v0.1.0-alpha.1 → v0.2.0-alpha.1).
