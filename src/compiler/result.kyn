@@ -1,0 +1,17 @@
+// src/compiler/result.kyn — Result<T, E> nativo com propagação ? (v2.1.0-beta.1)
+import "core";
+
+pub enum Result<T, E> {
+    Ok(T),
+    Err(E),
+}
+
+pub fn propagate<T, E>(r: Result<T, E>) -> T {
+    match r {
+        Ok(val) => val,
+        Err(e) => return Err(e),
+    }
+}
+
+// Operador ? implementado via macro/comptime
+// let x = foo()?; // propaga erro automaticamente
