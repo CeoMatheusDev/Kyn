@@ -2,6 +2,9 @@
 
 Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
 
+## [v1.9.0] — 2026-11-01
+- Marco 3.6: Primitivas atômicas (`std/core/atomics.kyn`, `tests/atomics_basic.kyn`).
+
 ## [v1.8.0] — 2026-11-01
 - Marco 3.5: Suporte a FFI Nativa com C (`src/compiler/ffi.kyn`, `tests/ffi_basic.kyn`).
 

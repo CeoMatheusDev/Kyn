@@ -1,0 +1,10 @@
+// tests/atomics_basic.kyn
+import "core";
+import "std/core/atomics.kyn";
+
+fn main() {
+    let mut val = 0;
+    atomic_store(&val, 42);
+    let x = atomic_load(&val);
+    memory_barrier();
+}
