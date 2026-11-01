@@ -1,0 +1,9 @@
+// tests/arena_basic.kyn
+import "core";
+import "std/core/arena.kyn";
+
+fn main() {
+    let mut arena = Arena::init(1024);
+    let buf = arena.alloc(64);
+    arena.reset();
+}
