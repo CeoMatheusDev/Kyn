@@ -22,6 +22,6 @@ Kyn/
 
 ## Versão atual
 
-`v0.3.0-alpha.1` — Marco 1.3 (Análise Semântica: `src/sema/sema.zig`, `tests/sema_basic.kyn`).
+`v0.4.0-alpha.1` — Marco 1.4 (CodeGen LLVM IR: `src/codegen/codegen.zig`, `tests/codegen_basic.kyn`).
 
 Veja `CHANGELOG.md` para histórico SemVer (v0.1.0-alpha.1 → v0.2.0-alpha.1).

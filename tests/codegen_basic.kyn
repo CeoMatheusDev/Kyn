@@ -1,0 +1,4 @@
+// tests/codegen_basic.kyn
+fn main() -> i32 {
+    return 42;
+}

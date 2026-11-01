@@ -2,6 +2,10 @@
 
 Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
 
+## [v0.4.0-alpha.1] — 2026-11-01
+- Marco 1.4: `src/codegen/codegen.zig` (emissão LLVM IR básico), testes `tests/codegen_basic.kyn` + `src/test_codegen.zig`.
+- Ciclo completo do compilador Bootstrap: Lexer → Parser → AST → Sema → CodeGen.
+
 ## [v0.3.0-alpha.1] — 2026-11-01
 - Marco 1.3: `src/sema/sema.zig` (Typechecker básico, escopo `let`, `Result<i32, E>` inicial), testes `tests/sema_basic.kyn`.
 - Integração `lexer` → `parser` → `ast` → `sema`.
