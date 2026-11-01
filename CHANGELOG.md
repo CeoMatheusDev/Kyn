@@ -2,6 +2,9 @@
 
 Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
 
+## [v1.6.0] — 2026-11-01
+- Marco 3.3: Verificação de mutabilidade estrita (`src/compiler/mutability.kyn`, `tests/mutability_basic.kyn`).
+
 ## [v1.5.0] — 2026-11-01
 - Marco 3.2: ArenaAllocator nativo (`std/core/arena.kyn`, `tests/arena_basic.kyn`).
 
