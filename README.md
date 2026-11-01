@@ -12,6 +12,7 @@ Linguagem de baixo nível extremo, moderna, segura por padrão, sem GC e sem run
 
 ```text
 Kyn/
+├── assets/       # Logotipo oficial (branding)
 ├── docs/         # spec.md, grammar.ebnf, memory_model.md
 ├── src/          # Compilador Bootstrap (Zig 0.17.0)
 ├── std/          # kyn:core (bare-metal) / kyn:std (SO)
