@@ -2,6 +2,9 @@
 
 Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
 
+## [v2.2.0-rc.1] — 2026-11-01
+- Marco 3.9: 50+ arquivos de integração end-to-end (`tests/integration/case_*.kyn`).
+
 ## [v2.1.0-beta.1] — 2026-11-01
 - Marco 3.8: Result<T, E> nativo (`src/compiler/result.kyn`, `tests/result_basic.kyn`).
 
