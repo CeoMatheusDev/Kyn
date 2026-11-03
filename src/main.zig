@@ -62,8 +62,15 @@ pub fn main(init: std.process.Init) !u8 {
     defer arena.deinit();
     const a = arena.allocator();
 
+    // Argumentos em UTF-8 em qualquer plataforma: no Windows o vetor bruto é
+    // UTF-16 e precisa de conversão, por isso o iterador com alocador.
+    var arg_it = try std.process.Args.Iterator.initAllocator(init.minimal.args, gpa);
+    defer arg_it.deinit();
+    var argv: std.ArrayList([]const u8) = .empty;
+    while (arg_it.next()) |arg| try argv.append(a, arg);
+
     var args = Args{};
-    if (!try parseArgs(a, init.minimal.args.vector, &args)) return ExitCode.usage.code();
+    if (!try parseArgs(a, argv.items, &args)) return ExitCode.usage.code();
 
     if (std.mem.eql(u8, args.command, "help") or std.mem.eql(u8, args.command, "--help") or
         std.mem.eql(u8, args.command, "-h"))
@@ -231,25 +238,25 @@ fn report(io: std.Io, a: std.mem.Allocator, diags: *diag.List, source: []const u
     return ExitCode.diagnostics.code();
 }
 
-fn parseArgs(a: std.mem.Allocator, argv: std.process.Args.Vector, args: *Args) !bool {
+fn parseArgs(a: std.mem.Allocator, argv: []const []const u8, args: *Args) !bool {
     var i: usize = 1;
     var seen_command = false;
     while (i < argv.len) : (i += 1) {
-        const raw: []const u8 = std.mem.span(argv[i]);
+        const raw: []const u8 = argv[i];
         if (raw.len == 0) continue;
         if (raw[0] == '-' and raw.len > 1) {
             if (std.mem.eql(u8, raw, "-o")) {
                 i += 1;
                 if (i >= argv.len) return false;
-                args.output = std.mem.span(argv[i]);
+                args.output = argv[i];
             } else if (std.mem.eql(u8, raw, "--cc")) {
                 i += 1;
                 if (i >= argv.len) return false;
-                args.cc = std.mem.span(argv[i]);
+                args.cc = argv[i];
             } else if (std.mem.eql(u8, raw, "--emit-c")) {
                 i += 1;
                 if (i >= argv.len) return false;
-                args.emit_c = std.mem.span(argv[i]);
+                args.emit_c = argv[i];
             } else if (std.mem.eql(u8, raw, "--warn-unused")) {
                 args.warn_unused = true;
             } else if (std.mem.eql(u8, raw, "--no-main")) {
