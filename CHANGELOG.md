@@ -26,7 +26,7 @@ realmente faz. Veja a nota em [Histórico anterior](#histórico-anterior-não-ve
 - **Token `=>`** (`fat_arrow`) e palavra-chave `match` no lexer.
 - **CI** (`.github/workflows/ci.yml`): `zig build test` + `zig build integration` +
   smoke test da CLI em Linux e macOS, e `zig build test` no Windows, com Zig fixado
-  em 0.17.0.
+  em 0.17.0. **Executado e verde nas três plataformas** (run 41554129555, PR #5).
 - 2 casos executáveis (`34_match_enum`, `35_match_in_loop`) e 5 de diagnóstico
   (`d33`…`d37`).
 - Teste unitário de `alwaysReturns`/`alwaysReturnsForC` para `match` exaustivo.
@@ -41,6 +41,13 @@ realmente faz. Veja a nota em [Histórico anterior](#histórico-anterior-não-ve
   exaustivo: o backend usa `alwaysReturnsForC` (que desconsidera a exaustividade,
   invisível para o C) e insere um `return 0;` inalcançável.
 - O teste do lexer `lexes multi-character operators` passou a cobrir `=>`.
+- **Build quebrado no Windows** (encontrado pelo próprio CI, não localmente):
+  `parseArgs` recebia `std.process.Args.Vector`, que é `[*:0]u16` no Windows, e
+  `std.mem.span` só aceita ponteiros de `u8` — `zig build` falhava com
+  `invalid type given to std.mem.span: u16`. Os argumentos agora passam por
+  `std.process.Args.Iterator` com alocador (converte UTF-16 → UTF-8 no Windows,
+  identidade no POSIX). Reproduzido e verificado por compilação cruzada em
+  `x86_64-windows`, `aarch64-windows`, `x86_64-macos` e `aarch64-linux`.
 
 ### Limitações
 
@@ -48,8 +55,8 @@ realmente faz. Veja a nota em [Histórico anterior](#histórico-anterior-não-ve
   ligação de variável, guardas `if`, faixas (`1..=5`) nem `match` como expressão.
 - `break`/`continue` diretamente em um braço são rejeitados (E0021): no C gerado
   eles sairiam do `switch`, não do laço.
-- O CI ainda não executou no GitHub; o Windows roda apenas os testes unitários
-  porque a suíte de integração exige `cc` no `PATH`.
+- O Windows roda apenas os testes unitários em CI porque a suíte de integração
+  exige `cc` no `PATH`, ausente nos runners do Windows.
 
 ### Números desta revisão
 

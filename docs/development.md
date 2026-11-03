@@ -98,7 +98,19 @@ houver um `cc` configurado lá (MSYS2/MinGW, por exemplo), basta incluir a plata
 na matriz com `integration: true`.
 
 O workflow fixa o Zig em `0.17.0` via `mlugg/setup-zig@v2` — a mesma versão declarada
-em `build.zig.zon`.
+em `build.zig.zon`. Está verde nas três plataformas (run 41554129555).
+
+Para antecipar problemas de portabilidade sem sair da sua máquina, o Zig compila para
+outros alvos:
+
+```sh
+zig build -Dtarget=x86_64-windows
+zig build -Dtarget=x86_64-macos
+zig build -Dtarget=aarch64-linux
+```
+
+Foi assim que o erro de argv UTF-16 no Windows foi reproduzido antes do log do CI
+estar disponível.
 
 ## Convenções de implementação
 

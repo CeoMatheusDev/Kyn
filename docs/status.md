@@ -41,6 +41,11 @@ $ zig build test        # All 27 tests passed.
 $ zig build integration # integração OK: 122 caso(s), 0 falha(s)
 ```
 
+O CI (`.github/workflows/ci.yml`) executou e passou em `ubuntu-latest`,
+`macos-latest` e `windows-latest` (run 41554129555). No Windows rodam apenas os testes
+unitários e o build: a suíte de integração precisa de `cc` no `PATH`. A mesma execução
+revelou e fez corrigir um build quebrado no Windows (argv em UTF-16).
+
 ## Subconjunto implementado
 
 **Itens de nível superior:** `fn`, `extern fn` (com varargs), `struct`, `enum`, `impl`

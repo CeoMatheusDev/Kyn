@@ -45,8 +45,9 @@ Itens marcados com ✅ foram verificados com `zig build check` (27 testes unitá
 ## Fase 3 — Qualidade e portabilidade
 
 - ✅ CI para build e testes em Linux, macOS e Windows
-  (`.github/workflows/ci.yml`). O Windows roda só os unitários: a suíte de integração
-  exige `cc` no `PATH`, ausente nos runners do Windows.
+  (`.github/workflows/ci.yml`), verde nas três plataformas (run 41554129555). O
+  Windows roda só os unitários: a suíte de integração exige `cc` no `PATH`, ausente
+  nos runners do Windows.
 - ⬜ Adicionar formatação/lint ao CI.
 - ✅ Cobrir diagnósticos, entradas malformadas e casos de fronteira
   (`tests/diagnostics`, 26 casos, incluindo entrada malformada).
@@ -66,6 +67,6 @@ Itens marcados com ✅ foram verificados com `zig build check` (27 testes unitá
 
 ## Próximo passo recomendado
 
-Confirmar o primeiro resultado do CI no GitHub (o workflow foi adicionado mas ainda
-não executou) e, em seguida, atacar `Result<T, E>` — que exige generics mínimos e é o
-pré-requisito para qualquer API da biblioteca padrão.
+`Result<T, E>`: exige generics mínimos (monomorfização por instanciação) e é o
+pré-requisito para qualquer API real da biblioteca padrão. Na sequência, `cc` no CI do
+Windows (MSYS2/MinGW) para que a suíte de integração rode nas três plataformas.
