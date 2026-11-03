@@ -37,9 +37,11 @@ pub const Codegen = struct {
 
     pub fn emit(self: *Codegen, program: ast.Program) Error![]const u8 {
         try self.emitHeader();
-        try self.emitSliceTypes();
         try self.emitEnums();
         try self.emitStructs();
+        // Depois de enums e structs: um slice de tipo nomeado
+        // (`[]Estado`) referencia o typedef correspondente.
+        try self.emitSliceTypes();
         try self.emitExternDecls(program);
         try self.emitForwardDecls();
         try self.emitFunctions(program);
@@ -250,9 +252,10 @@ pub const Codegen = struct {
             try self.paramList(func),
         });
         for (decl.body.stmts) |stmt| try self.emitStmt(stmt, 4);
-        if (!self.sema.type_table.isVoid(func.ret) and !sema.alwaysReturns(decl.body)) {
-            // Alcançável apenas quando a semântica já reportou E0016; o valor
-            // mantém o C válido para inspeção manual.
+        if (!self.sema.type_table.isVoid(func.ret) and !sema.alwaysReturnsForC(decl.body)) {
+            // Alcançável quando a semântica já reportou E0016 ou quando o corpo
+            // termina em um `match` exaustivo: o compilador C não prova que um
+            // `switch` cobre todos os casos, e sem isto ele emite -Wreturn-type.
             try self.writeRaw("    return 0;\n");
         }
         try self.writeRaw("}\n\n");
@@ -342,6 +345,7 @@ pub const Codegen = struct {
                 try self.indent(level);
                 try self.writeRaw("}\n");
             },
+            .match_ => |match| try self.emitMatch(match, level),
             .cond => |cond| try self.emitIf(cond, level),
             .loop => |loop| {
                 try self.indent(level);
@@ -387,6 +391,31 @@ pub const Codegen = struct {
                 try self.writeRaw("}\n");
             },
         }
+    }
+
+    /// `match` vira um `switch` de C. Cada braço recebe seu próprio bloco e um
+    /// `break` próprio, então a queda entre casos ("fallthrough") não acontece.
+    fn emitMatch(self: *Codegen, match: ast.Match, level: usize) Error!void {
+        const enum_name = self.sema.nameOfType(match.subject.type_id) orelse return error.CodegenFailed;
+        try self.indent(level);
+        try self.writeRaw("switch (");
+        try self.emitExpr(match.subject);
+        try self.writeRaw(") {\n");
+        for (match.arms) |arm| {
+            try self.indent(level + 4);
+            if (arm.variant) |variant| {
+                try self.write("case Kyn{s}_{s}: {{\n", .{ enum_name, variant });
+            } else {
+                try self.writeRaw("default: {\n");
+            }
+            for (arm.body.stmts) |inner| try self.emitStmt(inner, level + 8);
+            try self.indent(level + 4);
+            try self.writeRaw("    break;\n");
+            try self.indent(level + 4);
+            try self.writeRaw("}\n");
+        }
+        try self.indent(level);
+        try self.writeRaw("}\n");
     }
 
     fn emitIf(self: *Codegen, cond: ast.If, level: usize) Error!void {

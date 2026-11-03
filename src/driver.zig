@@ -14,7 +14,7 @@ const sema = @import("sema/sema.zig");
 const codegen = @import("codegen/c.zig");
 const diag = @import("diag.zig");
 
-pub const version = "0.4.0-alpha.1";
+pub const version = "0.5.0-alpha.1";
 pub const language_version = "0.3";
 
 pub const Options = struct {
@@ -157,6 +157,11 @@ fn dumpStmt(out: *std.ArrayList(u8), alloc: std.mem.Allocator, stmt: ast.Stmt, l
         .loop => try diag.appendf(out, alloc, "{s}while\n", .{prefix.items}),
         .range_for => |r| try diag.appendf(out, alloc, "{s}for {s} in ..\n", .{ prefix.items, r.var_name }),
         .collection_for => |c| try diag.appendf(out, alloc, "{s}for {s} in coleção\n", .{ prefix.items, c.var_name }),
+        .match_ => |m| try diag.appendf(out, alloc, "{s}match ({d} braços{s})\n", .{
+            prefix.items,
+            m.arms.len,
+            if (m.exhaustive) ", exaustivo" else "",
+        }),
         .break_ => try diag.appendf(out, alloc, "{s}break\n", .{prefix.items}),
         .continue_ => try diag.appendf(out, alloc, "{s}continue\n", .{prefix.items}),
         .block => |b| try diag.appendf(out, alloc, "{s}block ({d} statements)\n", .{ prefix.items, b.stmts.len }),

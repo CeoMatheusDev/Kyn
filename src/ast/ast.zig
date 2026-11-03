@@ -119,6 +119,7 @@ pub const Stmt = union(enum) {
     loop: While,
     range_for: RangeFor,
     collection_for: CollectionFor,
+    match_: Match,
     break_: Span,
     continue_: Span,
     block: Block,
@@ -175,6 +176,25 @@ pub const CollectionFor = struct {
     collection: Expr,
     body: Block,
     span: Span,
+};
+
+pub const MatchArm = struct {
+    /// `null` representa o padrão curinga `_`.
+    variant: ?[]const u8,
+    /// Nome do enum escrito no padrão (`Cor` em `Cor::Vermelho`), se houver.
+    head: ?[]const u8,
+    span: Span,
+    body: Block,
+};
+
+/// `match sujeito { Padrao => { ... }, ... }`.
+pub const Match = struct {
+    subject: Expr,
+    arms: []MatchArm,
+    span: Span,
+    /// Preenchido pela análise semântica: verdadeiro quando todo valor possível
+    /// do sujeito está coberto. Usado para decidir caminhos de retorno.
+    exhaustive: bool = false,
 };
 
 /// `for i in start..end { ... }` — intervalo semiaberto.

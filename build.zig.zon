@@ -1,6 +1,6 @@
 .{
     .name = .kyn,
-    .version = "0.4.0-alpha.1",
+    .version = "0.5.0-alpha.1",
     // Identidade do pacote. Gerada pelo toolchain Zig na criação do pacote e
     // não deve mudar; ao fazer fork, regenere apagando o campo e rodando
     // `zig build`.

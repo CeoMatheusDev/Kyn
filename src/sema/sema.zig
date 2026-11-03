@@ -103,6 +103,9 @@ pub const Sema = struct {
     scopes: std.ArrayList(Scope),
     unsafe_ctx: unsafe.Context = .{},
     loop_depth: u32 = 0,
+    /// > 0 dentro de um braço de `match`: `break`/`continue` ali sairiam do
+    /// `switch` gerado em C, não do laço, então são rejeitados.
+    match_depth: u32 = 0,
     current_func: ?*FuncInfo = null,
 
     pub fn init(alloc: std.mem.Allocator, diags: *diag.List, opts: Options) !Sema {
@@ -518,7 +521,7 @@ pub const Sema = struct {
         try self.checkBlock(body);
         try self.popScope();
 
-        if (!self.type_table.isVoid(func.ret) and !blockAlwaysReturns(body)) {
+        if (!self.type_table.isVoid(func.ret) and !blockAlwaysReturnsInner(body, true)) {
             self.reportHelp(
                 .return_mismatch,
                 std.fmt.allocPrint(self.alloc, "a função `{s}` deve retornar `{s}` em todos os caminhos", .{
@@ -603,19 +606,37 @@ pub const Sema = struct {
             .cond => |*cond| try self.checkIf(cond),
             .loop => |*loop| {
                 _ = try self.checkExpr(&loop.cond, self.type_table.bool_id);
+                const saved_match = self.match_depth;
+                self.match_depth = 0;
                 self.loop_depth += 1;
                 try self.checkBlock(loop.body);
                 self.loop_depth -= 1;
+                self.match_depth = saved_match;
             },
             .range_for => |*range| try self.checkRangeFor(range),
             .collection_for => |*loop| try self.checkCollectionFor(loop),
+            .match_ => |*match| try self.checkMatch(match),
             .break_ => |span| {
-                if (self.loop_depth == 0) {
+                if (self.match_depth > 0) {
+                    self.reportHelp(
+                        .invalid_control_flow,
+                        "`break` dentro de um braço de `match` sairia do `match`, não do laço",
+                        span,
+                        "use `return`, ou mova o laço para fora do `match`",
+                    );
+                } else if (self.loop_depth == 0) {
                     self.reportHelp(.invalid_control_flow, "`break` fora de um laço", span, "use `break` apenas dentro de `while` ou `for`");
                 }
             },
             .continue_ => |span| {
-                if (self.loop_depth == 0) {
+                if (self.match_depth > 0) {
+                    self.reportHelp(
+                        .invalid_control_flow,
+                        "`continue` dentro de um braço de `match` é ambíguo",
+                        span,
+                        "use `return`, ou mova o laço para fora do `match`",
+                    );
+                } else if (self.loop_depth == 0) {
                     self.reportHelp(.invalid_control_flow, "`continue` fora de um laço", span, "use `continue` apenas dentro de `while` ou `for`");
                 }
             },
@@ -739,6 +760,95 @@ pub const Sema = struct {
         for (range.body.stmts) |*stmt| try self.checkStmt(stmt);
         try self.popScope();
         self.loop_depth -= 1;
+    }
+
+    /// `match sujeito { Padrao => { ... }, ... }` sobre enum, com verificação
+    /// de exaustividade: sem curinga, todas as variantes precisam aparecer.
+    fn checkMatch(self: *Sema, match: *ast.Match) Error!void {
+        const subject_ty = try self.checkExpr(&match.subject, null);
+        const info = self.enumByType(subject_ty) orelse {
+            self.reportHelp(
+                .invalid_pattern,
+                std.fmt.allocPrint(self.alloc, "`match` exige um enum como sujeito, encontrado `{s}`", .{self.typeName(subject_ty)}) catch "sujeito inválido",
+                match.subject.span,
+                "para outros tipos use `if`/`else if`",
+            );
+            return;
+        };
+
+        var covered: std.ArrayList([]const u8) = .empty;
+        var has_wildcard = false;
+        for (match.arms) |*arm| {
+            if (arm.variant == null) has_wildcard = true;
+            if (arm.variant) |name| {
+                var found = false;
+                for (info.variants) |candidate| {
+                    if (std.mem.eql(u8, candidate, name)) found = true;
+                }
+                if (!found) {
+                    self.report(
+                        .invalid_pattern,
+                        std.fmt.allocPrint(self.alloc, "`{s}` não tem variante `{s}`", .{ info.name, name }) catch "variante inexistente",
+                        arm.span,
+                    );
+                }
+                if (arm.head) |head| {
+                    if (!std.mem.eql(u8, head, info.name)) {
+                        self.report(
+                            .invalid_pattern,
+                            std.fmt.allocPrint(self.alloc, "`{s}::{s}` não pertence a `{s}`", .{ head, name, info.name }) catch "variante de outro enum",
+                            arm.span,
+                        );
+                    }
+                }
+                for (covered.items) |previous| {
+                    if (std.mem.eql(u8, previous, name)) {
+                        self.report(
+                            .invalid_pattern,
+                            std.fmt.allocPrint(self.alloc, "braço duplicado para `{s}`", .{name}) catch "braço duplicado",
+                            arm.span,
+                        );
+                        break;
+                    }
+                }
+                covered.append(self.alloc, name) catch {};
+            }
+
+            const saved = self.match_depth;
+            self.match_depth += 1;
+            try self.pushScope();
+            for (arm.body.stmts) |*stmt| try self.checkStmt(stmt);
+            try self.popScope();
+            self.match_depth = saved;
+        }
+
+        match.exhaustive = true;
+        if (!has_wildcard) {
+            var missing: std.ArrayList([]const u8) = .empty;
+            for (info.variants) |candidate| {
+                var present = false;
+                for (covered.items) |name| {
+                    if (std.mem.eql(u8, name, candidate)) present = true;
+                }
+                if (!present) missing.append(self.alloc, candidate) catch {};
+            }
+            if (missing.items.len > 0) {
+                match.exhaustive = false;
+                var list: std.ArrayList(u8) = .empty;
+                for (missing.items, 0..) |name, i| {
+                    if (i > 0) list.appendSlice(self.alloc, ", ") catch {};
+                    list.appendSlice(self.alloc, "`") catch {};
+                    list.appendSlice(self.alloc, name) catch {};
+                    list.appendSlice(self.alloc, "`") catch {};
+                }
+                self.reportHelp(
+                    .non_exhaustive_match,
+                    std.fmt.allocPrint(self.alloc, "`match` não cobre todas as variantes de `{s}`: falta {s}", .{ info.name, list.items }) catch "match não exaustivo",
+                    match.span,
+                    "adicione os braços faltantes ou um curinga `_ => { ... }`",
+                );
+            }
+        }
     }
 
     /// `for item in colecao { ... }` sobre array ou slice. O elemento é uma
@@ -1716,6 +1826,16 @@ pub const Sema = struct {
         };
     }
 
+    fn enumByType(self: *Sema, ty: types.Id) ?*EnumInfo {
+        switch (self.type_table.get(ty)) {
+            .named => |named| {
+                if (named.kind != .enumeration) return null;
+                return self.enums.get(named.name);
+            },
+            else => return null,
+        }
+    }
+
     fn structByType(self: *Sema, ty: types.Id) ?*StructInfo {
         switch (self.type_table.get(ty)) {
             .named => |named| {
@@ -1812,27 +1932,47 @@ fn isPlace(expr: ast.Expr) bool {
 /// Verdadeiro quando todo caminho de execução do bloco termina em `return`.
 /// Exportado para o backend decidir se precisa de um `return` de segurança.
 pub fn alwaysReturns(block: ast.Block) bool {
-    return blockAlwaysReturns(block);
+    return blockAlwaysReturnsInner(block, true);
 }
 
-fn blockAlwaysReturns(block: ast.Block) bool {
+/// Como `alwaysReturns`, mas desconsiderando a exaustividade de `match`: um
+/// compilador C não consegue provar que um `switch` cobre todos os casos de um
+/// enum, então o backend usa esta versão para decidir se insere um `return` de
+/// segurança e evitar o aviso `-Wreturn-type`.
+pub fn alwaysReturnsForC(block: ast.Block) bool {
+    return blockAlwaysReturnsInner(block, false);
+}
+
+fn blockAlwaysReturnsInner(block: ast.Block, trust_match: bool) bool {
     if (block.stmts.len == 0) return false;
     const last = block.stmts[block.stmts.len - 1];
     return switch (last) {
         .ret => true,
-        .block => |inner| blockAlwaysReturns(inner),
-        .unsafe_block => |inner| blockAlwaysReturns(inner),
-        .cond => |cond| ifAlwaysReturns(cond),
+        .block => |inner| blockAlwaysReturnsInner(inner, trust_match),
+        .unsafe_block => |inner| blockAlwaysReturnsInner(inner, trust_match),
+        .cond => |cond| ifAlwaysReturns(cond, trust_match),
+        .match_ => |match| if (trust_match) matchAlwaysReturns(match) else false,
         else => false,
     };
 }
 
-fn ifAlwaysReturns(cond: ast.If) bool {
+/// Um `match` termina em `return` quando é exaustivo (a semântica já validou)
+/// e todos os braços terminam em `return`.
+fn matchAlwaysReturns(match: ast.Match) bool {
+    if (!match.exhaustive) return false;
+    if (match.arms.len == 0) return false;
+    for (match.arms) |arm| {
+        if (!blockAlwaysReturnsInner(arm.body, true)) return false;
+    }
+    return true;
+}
+
+fn ifAlwaysReturns(cond: ast.If, trust_match: bool) bool {
     const els = cond.els orelse return false;
-    if (!blockAlwaysReturns(cond.then)) return false;
+    if (!blockAlwaysReturnsInner(cond.then, trust_match)) return false;
     return switch (els) {
-        .block => |block| blockAlwaysReturns(block),
-        .cond => |nested| ifAlwaysReturns(nested.*),
+        .block => |block| blockAlwaysReturnsInner(block, trust_match),
+        .cond => |nested| ifAlwaysReturns(nested.*, trust_match),
     };
 }
 
@@ -1877,8 +2017,27 @@ test "blockAlwaysReturns follows if/else" {
 
     var ret_stmts = [_]ast.Stmt{.{ .ret = .{ .value = null, .span = .{} } }};
     const returning = ast.Block{ .stmts = &ret_stmts, .span = .{} };
-    try std.testing.expect(blockAlwaysReturns(returning));
-    try std.testing.expect(!blockAlwaysReturns(.{ .stmts = &.{}, .span = .{} }));
+    try std.testing.expect(blockAlwaysReturnsInner(returning, true));
+    try std.testing.expect(!blockAlwaysReturnsInner(.{ .stmts = &.{}, .span = .{} }, true));
+
+    // `match` exaustivo cujos braços retornam encerra a função para a
+    // semântica, mas não para o compilador C (`alwaysReturnsForC`).
+    var arm_block = [_]ast.Stmt{.{ .ret = .{ .value = null, .span = .{} } }};
+    var arms = [_]ast.MatchArm{.{
+        .variant = "A",
+        .head = null,
+        .span = .{},
+        .body = .{ .stmts = &arm_block, .span = .{} },
+    }};
+    var match_stmts = [_]ast.Stmt{.{ .match_ = .{
+        .subject = .{ .kind = .{ .ident = "x" }, .span = .{} },
+        .arms = &arms,
+        .span = .{},
+        .exhaustive = true,
+    } }};
+    const match_block = ast.Block{ .stmts = &match_stmts, .span = .{} };
+    try std.testing.expect(alwaysReturns(match_block));
+    try std.testing.expect(!alwaysReturnsForC(match_block));
 
     var if_stmts = [_]ast.Stmt{.{ .cond = .{
         .cond = .{ .kind = .{ .bool_lit = true }, .span = .{} },
@@ -1887,5 +2046,5 @@ test "blockAlwaysReturns follows if/else" {
         .span = .{},
     } }};
     _ = a;
-    try std.testing.expect(blockAlwaysReturns(.{ .stmts = &if_stmts, .span = .{} }));
+    try std.testing.expect(blockAlwaysReturnsInner(.{ .stmts = &if_stmts, .span = .{} }, true));
 }

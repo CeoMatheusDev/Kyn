@@ -6,13 +6,13 @@
 
 Este documento reúne exemplos e decisões de design para a experiência de
 programação em Kyn. **Parte da sintaxe abaixo ainda não é suportada** pelo
-compilador 0.4.0-alpha.1: consulte a tabela de estado antes de copiar um exemplo.
+compilador 0.5.0-alpha.1: consulte a tabela de estado antes de copiar um exemplo.
 Nomes de módulos, funções e tipos marcados como ilustrativos não representam APIs
 existentes na biblioteca padrão.
 
 ## Estado dos exemplos deste documento
 
-| Seção | Estado no compilador 0.4.0-alpha.1 |
+| Seção | Estado no compilador 0.5.0-alpha.1 |
 | --- | --- |
 | 1. Arquivo e estrutura mínima | Parcial: `fn main() -> i32` funciona; `import std.io` é aceito, mas não fornece `io.println` |
 | 2. Importações e módulos | Parcial: `import` é aceito e o nome é validado; nenhum símbolo é importado |
@@ -20,7 +20,7 @@ existentes na biblioteca padrão.
 | 4. Variáveis e mutabilidade | Implementado (`let`, `var`, `let mut`); shadowing entre escopos permitido |
 | 5. Tipos primitivos | Implementado, com `str` = `const char *` terminado em NUL |
 | 6. Estruturas e métodos | Implementado para `self: &T` / `&mut T`; funções como `sqrt` não existem |
-| 7. Enumerações e resultados | Enums implementados; `Result<T, E>` e `?` **não** |
+| 7. Enumerações e resultados | Enums e `match` exaustivo implementados; `Result<T, E>` e `?` **não** |
 | 8. Coleções, slices e ponteiros | `&T`, `&mut T`, `*T`, `*const T`, `[N]T`, `[]T`, `[]const T`, indexação `a[i]`, fatias `a[lo..hi]` e `.len` implementados; `Vec`/`Map` da biblioteca padrão **não** existem |
 | 9. Alocação e ciclo de vida | **Não implementado** (sem `Allocator`) |
 | 10. Controle de fluxo | `if`/`else`, `while`, `break`, `continue`, `for i in a..b` e `for x in colecao` implementados |

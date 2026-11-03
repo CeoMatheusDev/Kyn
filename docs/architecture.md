@@ -107,6 +107,7 @@ Consome a AST anotada; **não** repete análise de tipos. Mapeamentos principais
 | `xs[i]` | `((xs)[i])` em array, `((xs).data[i])` em slice |
 | `xs[lo..hi]` | literal composto `(KynSlice_T){ ptr + lo, hi - lo }` |
 | `xs.len` | constante `N` em array, `((xs).len)` em slice |
+| `match e { … }` | `switch` com um bloco e um `break` por braço (sem fallthrough) |
 | `struct Ponto` | `struct KynPonto` |
 | `enum Cor { Vermelho }` | `enum { KynCor_Vermelho }` |
 | método `Ponto::soma(self)` | `KynPonto_soma(const KynPonto *kyn_self)` |
@@ -116,6 +117,11 @@ Consome a AST anotada; **não** repete análise de tipos. Mapeamentos principais
 Nomes de tipos ganham o prefixo `Kyn` e símbolos de função ganham `kyn_`, evitando
 colisão com palavras reservadas do C. `extern fn` preserva o nome C original para
 linkar contra a libc.
+
+`match` sobre enum vira um `switch` de C. A exaustividade é provada pela semântica
+(E0024 caso contrário), mas o compilador C não consegue provar o mesmo; por isso o
+backend insere um `return 0;` inalcançável ao fim de funções não-`void` que terminam em
+`match`, evitando o aviso `-Wreturn-type`.
 
 Arrays e slices seguem o modelo do C: parâmetros `[N]T` decaem para `[]T` na análise
 semântica (nó `to_slice` na AST, inserido pela semântica e nunca pelo parser), e o

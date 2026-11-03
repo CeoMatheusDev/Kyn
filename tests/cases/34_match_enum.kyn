@@ -1,0 +1,38 @@
+enum Cor {
+    Vermelho,
+    Verde,
+    Azul,
+}
+
+fn codigo(c: Cor) -> i32 {
+    match c {
+        Cor::Vermelho => {
+            return 1;
+        },
+        Cor::Verde => {
+            return 2;
+        },
+        Cor::Azul => {
+            return 3;
+        },
+    }
+}
+
+fn descrever(c: Cor) {
+    match c {
+        Vermelho => {
+            println("quente");
+        },
+        _ => {
+            println("fria");
+        },
+    }
+}
+
+fn main() -> i32 {
+    println(codigo(Cor::Vermelho));
+    println(codigo(Cor::Azul));
+    descrever(Cor::Vermelho);
+    descrever(Cor::Azul);
+    return 0;
+}

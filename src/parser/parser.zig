@@ -513,6 +513,10 @@ pub const Parser = struct {
             }
             return;
         }
+        if (self.at(.kw_match)) {
+            stmts.append(self.alloc, .{ .match_ = try self.parseMatch() }) catch return error.ParseFailed;
+            return;
+        }
         if (self.at(.kw_break)) {
             const tok = self.peek();
             self.pos += 1;
@@ -667,6 +671,53 @@ pub const Parser = struct {
             .end = end.*,
             .body = body,
             .span = .{ .start = tok.span.start, .end = body.span.end },
+        };
+    }
+
+    /// `match sujeito { Padrao => { ... }, ... }`.
+    /// Padrões aceitos: `Enum::Variante`, `Variante` e o curinga `_`.
+    fn parseMatch(self: *Parser) Error!ast.Match {
+        const tok = self.peek();
+        self.pos += 1;
+        const subject = try self.parseExpr(0);
+        _ = try self.expect(.lbrace);
+        var arms: std.ArrayList(ast.MatchArm) = .empty;
+        while (!self.at(.rbrace) and !self.at(.eof)) {
+            const first = try self.expectIdent();
+            var head: ?[]const u8 = null;
+            var variant: ?[]const u8 = null;
+            if (self.eat(.coloncolon) != null) {
+                const second = try self.expectIdent();
+                head = first.text;
+                variant = second.text;
+            } else if (!std.mem.eql(u8, first.text, "_")) {
+                variant = first.text;
+            }
+            if (self.eat(.fat_arrow) == null) {
+                return self.failHelp(
+                    self.peek().span,
+                    "esperava `=>` depois do padrão do `match`",
+                    .{},
+                    "a forma é `Enum::Variante => {{ ... }}`",
+                );
+            }
+            const body = try self.parseBlock();
+            arms.append(self.alloc, .{
+                .variant = variant,
+                .head = head,
+                .span = .{ .start = first.span.start, .end = first.span.end },
+                .body = body,
+            }) catch return error.ParseFailed;
+            _ = self.eat(.comma);
+        }
+        const end_tok = try self.expect(.rbrace);
+        if (arms.items.len == 0) {
+            return self.failHelp(tok.span, "`match` precisa de pelo menos um braço", .{}, "adicione `Padrao => {{ ... }}` ou o curinga `_ => {{ ... }}`");
+        }
+        return .{
+            .subject = subject.*,
+            .arms = arms.items,
+            .span = .{ .start = tok.span.start, .end = end_tok.span.end },
         };
     }
 

@@ -6,6 +6,56 @@ Versionamento: SemVer 2.0.0. Abaixo de 1.0.0 tudo é pré-lançamento e pode que
 A partir desta versão o número do compilador passa a refletir o que o código
 realmente faz. Veja a nota em [Histórico anterior](#histórico-anterior-não-verificado).
 
+## [0.5.0-alpha.1] — 2026-11-03
+
+`match` sobre enums com verificação de exaustividade, e CI.
+
+### Adicionado
+
+- **`match` sobre enum** como statement, com três formas de padrão:
+  `Enum::Variante`, `Variante` (sem qualificar) e o curinga `_`. Cada braço é um
+  bloco, e o backend gera um `switch` de C com bloco e `break` próprios por braço
+  (sem fallthrough).
+- **Verificação de exaustividade**: sem curinga, todas as variantes precisam
+  aparecer; caso contrário o compilador lista as que faltam.
+- **Novos códigos de diagnóstico**: `E0024` (`match` não exaustivo) e `E0025`
+  (variante inexistente, variante de outro enum, braço duplicado, sujeito que não é
+  enum).
+- **`match` exaustivo cujos braços terminam em `return` encerra a função** — não é
+  preciso escrever um `return` morto depois dele.
+- **Token `=>`** (`fat_arrow`) e palavra-chave `match` no lexer.
+- **CI** (`.github/workflows/ci.yml`): `zig build test` + `zig build integration` +
+  smoke test da CLI em Linux e macOS, e `zig build test` no Windows, com Zig fixado
+  em 0.17.0.
+- 2 casos executáveis (`34_match_enum`, `35_match_in_loop`) e 5 de diagnóstico
+  (`d33`…`d37`).
+- Teste unitário de `alwaysReturns`/`alwaysReturnsForC` para `match` exaustivo.
+
+### Corrigido
+
+- **Typedefs de slice emitidos antes dos tipos que referenciam**: `[]Estado`
+  gerava `typedef struct { KynEstado *data; … }` antes do `typedef` de `KynEstado`,
+  e o C não compilava. A emissão agora acontece depois de enums e structs
+  (regressão da 0.4.0-alpha.1, encontrada pelo novo caso `35_match_in_loop`).
+- **Aviso `-Wreturn-type` do gcc** em funções não-`void` que terminam em `match`
+  exaustivo: o backend usa `alwaysReturnsForC` (que desconsidera a exaustividade,
+  invisível para o C) e insere um `return 0;` inalcançável.
+- O teste do lexer `lexes multi-character operators` passou a cobrir `=>`.
+
+### Limitações
+
+- `match` só aceita enum como sujeito e só existe como statement: sem padrões com
+  ligação de variável, guardas `if`, faixas (`1..=5`) nem `match` como expressão.
+- `break`/`continue` diretamente em um braço são rejeitados (E0021): no C gerado
+  eles sairiam do `switch`, não do laço.
+- O CI ainda não executou no GitHub; o Windows roda apenas os testes unitários
+  porque a suíte de integração exige `cc` no `PATH`.
+
+### Números desta revisão
+
+`zig build test` → 27 testes; `zig build integration` → 122 casos (35 executáveis +
+37 de diagnóstico + 50 de regressão), 0 falhas.
+
 ## [0.4.0-alpha.1] — 2026-11-03
 
 Arrays, slices e indexação — o primeiro passo para coleções reais.

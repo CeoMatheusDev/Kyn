@@ -1,0 +1,72 @@
+name: CI
+
+# Verificação contínua do compilador Kyn.
+#
+# `zig build check` roda os 27 testes unitários e as 122 fixtures de integração
+# (35 executáveis + 37 de diagnóstico + 50 de regressão). A suíte de integração
+# compila o C gerado com um compilador C99 e executa o binário, então ela precisa
+# de `cc` no PATH — disponível em ubuntu-latest e macos-latest, mas não em
+# windows-latest (que só traz o MSVC). Por isso o Windows roda apenas os testes
+# unitários; isso está registrado em docs/status.md como limitação de cobertura.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: Linux · unitários + integração
+            integration: true
+          - os: macos-latest
+            name: macOS · unitários + integração
+            integration: true
+          - os: windows-latest
+            name: Windows · unitários
+            integration: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Zig 0.17.0
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.0
+
+      - name: Versões
+        run: |
+          zig version
+          cc --version || echo "sem compilador C no PATH"
+
+      - name: Testes unitários
+        run: zig build test
+
+      - name: Testes de integração
+        if: matrix.integration
+        run: zig build integration
+
+      - name: Build da CLI
+        run: zig build
+
+      - name: Smoke test da CLI
+        if: matrix.integration
+        run: |
+          zig-out/bin/kyn version
+          zig-out/bin/kyn check tests/cases/01_hello.kyn
+          zig-out/bin/kyn emit tests/cases/34_match_enum.kyn | head -5

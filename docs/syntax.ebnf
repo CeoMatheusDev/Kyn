@@ -1,5 +1,5 @@
 (* Kyn — gramática sintática do subconjunto implementado.
-   Status: normativa para o compilador 0.4.0-alpha.1 (src/parser/parser.zig).
+   Status: normativa para o compilador 0.5.0-alpha.1 (src/parser/parser.zig).
    Construções fora desta gramática são rejeitadas com E0001. *)
 
 program          = { import_decl }, { declaration } ;
@@ -56,7 +56,14 @@ return_stmt      = "return", [ expression ], ";" ;
 if_stmt          = "if", expression, block, [ "else", ( block | if_stmt ) ] ;
 while_stmt       = "while", expression, block ;
 for_stmt         = "for", identifier, "in", expression, "..", expression, block
-                 | "for", identifier, "in", expression, block ;   (* array ou slice *)
+                 | "for", identifier, "in", expression, block     (* array ou slice *)
+                 | match_stmt ;
+
+match_stmt       = "match", expression, "{", match_arm, { match_arm }, "}" ;
+match_arm        = pattern, "=>", block, [ "," ] ;
+pattern          = identifier, "::", identifier     (* Enum::Variante *)
+                 | identifier                      (* Variante, sem qualificar *)
+                 | "_" ;                           (* curinga *)
 unsafe_block     = "unsafe", block ;
 
 (* Expressões. Números maiores indicam ligação mais forte; todos os operadores
@@ -102,9 +109,18 @@ struct_literal   = identifier, "{", { identifier, ":", expression, [ "," ] }, "}
    - funções não podem retornar `[N]T` (E0099);
    - arrays não são atribuíveis como um todo (E0099);
    - `for x in colecao` percorre uma cópia imutável do elemento;
-   - índices e fatias NÃO são verificados em tempo de execução. *)
+   - índices e fatias NÃO são verificados em tempo de execução.
+
+   Regras do `match`:
+   - o sujeito precisa ser um enum (outros tipos: E0025);
+   - sem curinga `_`, todas as variantes precisam aparecer (senão E0024);
+   - variante inexistente, de outro enum ou braço duplicado: E0025;
+   - `break`/`continue` diretamente em um braço são rejeitados (E0021), porque
+     sairiam do `switch` gerado e não do laço;
+   - um `match` exaustivo cujos braços terminam em `return` encerra a função. *)
 
 (* Ainda fora da gramática (rejeitados com E0001 ou E0099):
-   generics e parâmetros de tipo, traits/interfaces, "match"/padrões, closures,
-   arrays multidimensionais, operador "?", "defer", indexação de `str`,
-   declarações de nível superior que não sejam itens. *)
+   generics e parâmetros de tipo, traits/interfaces, `match` como expressão e
+   padrões com ligação (binding), closures, arrays multidimensionais, operador
+   "?", "defer", indexação de `str`, declarações de nível superior que não sejam
+   itens. *)

@@ -39,6 +39,7 @@ pub const Kind = enum {
     kw_as,
     kw_self,
     kw_pub,
+    kw_match,
 
     int_lit,
     float_lit,
@@ -58,6 +59,7 @@ pub const Kind = enum {
     dot,
     dotdot,
     arrow,
+    fat_arrow,
     plus,
     minus,
     star,
@@ -118,6 +120,7 @@ pub const Kind = enum {
             .kw_as => "as",
             .kw_self => "self",
             .kw_pub => "pub",
+            .kw_match => "match",
             .lparen => "(",
             .rparen => ")",
             .lbrace => "{",
@@ -131,6 +134,7 @@ pub const Kind = enum {
             .dot => ".",
             .dotdot => "..",
             .arrow => "->",
+            .fat_arrow => "=>",
             .plus => "+",
             .minus => "-",
             .star => "*",
@@ -205,6 +209,7 @@ const keywords = [_]Keyword{
     .{ .text = "as", .kind = .kw_as },
     .{ .text = "self", .kind = .kw_self },
     .{ .text = "pub", .kind = .kw_pub },
+    .{ .text = "match", .kind = .kw_match },
 };
 
 pub const Lexer = struct {
@@ -338,7 +343,12 @@ pub const Lexer = struct {
             '/' => if (self.peek(0) == '=') self.takeAssign(.slash_assign) else .slash,
             '&' => if (self.peek(0) == '&') self.takeAssign(.ampamp) else .amp,
             '|' => if (self.peek(0) == '|') self.takeAssign(.pipepipe) else .pipe,
-            '=' => if (self.peek(0) == '=') self.takeAssign(.eqeq) else .assign,
+            '=' => if (self.peek(0) == '=')
+                self.takeAssign(.eqeq)
+            else if (self.peek(0) == '>')
+                self.takeAssign(.fat_arrow)
+            else
+                .assign,
             '!' => if (self.peek(0) == '=') self.takeAssign(.ne) else .bang,
             '<' => if (self.peek(0) == '<')
                 self.takeAssign(.shl)
@@ -551,8 +561,8 @@ test "lexes multi-character operators" {
     var arena = std.heap.ArenaAllocator.init(alloc);
     defer arena.deinit();
     var diags: diag.List = .{};
-    const tokens = try lexTokens(arena.allocator(), "<= >= == != && || -> :: .. += # << >>", &diags);
-    const expected = [_]Kind{ .le, .ge, .eqeq, .ne, .ampamp, .pipepipe, .arrow, .coloncolon, .dotdot, .plus_assign, .hash, .shl, .shr, .eof };
+    const tokens = try lexTokens(arena.allocator(), "<= >= == != && || -> => :: .. += # << >>", &diags);
+    const expected = [_]Kind{ .le, .ge, .eqeq, .ne, .ampamp, .pipepipe, .arrow, .fat_arrow, .coloncolon, .dotdot, .plus_assign, .hash, .shl, .shr, .eof };
     for (expected, 0..) |kind, i| try std.testing.expectEqual(kind, tokens[i].kind);
 }
 

@@ -3,7 +3,7 @@
 Sequência de trabalho proposta. Um item só é marcado como concluído quando o código
 existe, há teste executável e a documentação descreve o comportamento observado.
 Itens marcados com ✅ foram verificados com `zig build check` (27 testes unitários +
-115 casos de integração, 0 falhas, em 2026-11-03).
+122 casos de integração, 0 falhas, em 2026-11-03).
 
 ## Fase 1 — Bootstrap em Zig
 
@@ -35,12 +35,19 @@ Itens marcados com ✅ foram verificados com `zig build check` (27 testes unitá
 - ✅ Slices `[]T`/`[]const T`, arrays `[N]T`, indexação, fatiamento, `.len` e
   `for item in colecao` (0.4.0-alpha.1). Sem verificação de limites em tempo de
   execução e sem ownership de slices — ambos dependem de runtime e borrow checker.
-- ⬜ Generics, traits e `match`.
+- ✅ `match` sobre enum com verificação de exaustividade, curinga `_` e variantes
+  qualificadas ou não (0.5.0-alpha.1). Apenas como statement: sem padrões com ligação,
+  guardas ou faixas.
+- ⬜ Generics e traits.
+- ⬜ `match` como expressão (depende de blocos como expressão).
 - ⬜ Semântica de `str` com comprimento (hoje é `const char *` terminado em NUL).
 
 ## Fase 3 — Qualidade e portabilidade
 
-- ⬜ Adicionar CI para build, testes e formatação.
+- ✅ CI para build e testes em Linux, macOS e Windows
+  (`.github/workflows/ci.yml`). O Windows roda só os unitários: a suíte de integração
+  exige `cc` no `PATH`, ausente nos runners do Windows.
+- ⬜ Adicionar formatação/lint ao CI.
 - ✅ Cobrir diagnósticos, entradas malformadas e casos de fronteira
   (`tests/diagnostics`, 26 casos, incluindo entrada malformada).
 - ⬜ Definir targets e matriz de plataformas suportadas (hoje: Linux x86_64 com
@@ -59,6 +66,6 @@ Itens marcados com ✅ foram verificados com `zig build check` (27 testes unitá
 
 ## Próximo passo recomendado
 
-CI executando `zig build check` em Linux, macOS e Windows: é o menor incremento que
-transforma a verificação local em garantia contínua e destrava a matriz de
-plataformas da Fase 3.
+Confirmar o primeiro resultado do CI no GitHub (o workflow foi adicionado mas ainda
+não executou) e, em seguida, atacar `Result<T, E>` — que exige generics mínimos e é o
+pré-requisito para qualquer API da biblioteca padrão.

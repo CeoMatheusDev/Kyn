@@ -1,6 +1,6 @@
 # Estado de implementação
 
-Revisão de 3 de novembro de 2026 (compilador 0.4.0-alpha.1), com base no que foi
+Revisão de 3 de novembro de 2026 (compilador 0.5.0-alpha.1), com base no que foi
 executado neste repositório (Zig 0.17.0, `cc` = gcc em Linux x86_64). Nada aqui é
 certificação de qualidade; é o registro do que os comandos do projeto produziram.
 
@@ -8,10 +8,11 @@ certificação de qualidade; é o registro do que os comandos do projeto produzi
 
 O Kyn deixou de ser um conjunto de esqueletos: existe um **pipeline de compilação
 integrado e verificável** (fonte `.kyn` → C99 → binário) com CLI, build reproduzível,
-testes unitários e suíte de integração. Nesta revisão entraram **arrays `[N]T`,
-slices `[]T`, indexação, fatias e `for` sobre coleções**. A **linguagem** continua
-sendo um subconjunto experimental: não há generics, traits, verificação de limites em
-tempo de execução, borrow checker nem biblioteca padrão funcional.
+testes unitários e suíte de integração. Nas duas últimas revisões entraram **arrays
+`[N]T`, slices `[]T`, indexação, fatias, `for` sobre coleções** e **`match` sobre enums
+com verificação de exaustividade**. A **linguagem** continua sendo um subconjunto
+experimental: não há generics, traits, verificação de limites em tempo de execução,
+borrow checker nem biblioteca padrão funcional.
 
 ## Evidências por componente
 
@@ -26,7 +27,7 @@ tempo de execução, borrow checker nem biblioteca padrão funcional.
 | Backend | `src/codegen/c.zig` | Implementado (C99) | 1 teste unitário + 83 fixtures compiladas com `cc` e executadas |
 | Diagnósticos | `src/diag.zig` | Implementado | 2 testes unitários; formato `error[E00xx]` com linha, coluna e `^^^` |
 | Pipeline | `src/driver.zig` | Implementado | 3 testes unitários de ponta a ponta |
-| Suíte de integração | `src/runner.zig` | Implementado | `zig build integration` → 115 casos, 0 falhas |
+| Suíte de integração | `src/runner.zig` | Implementado | `zig build integration` → 122 casos, 0 falhas |
 | Biblioteca padrão | `std/` | Não implementado | imports são validados, mas nenhum símbolo é fornecido |
 | Self-hosting | `experiments/self-host-sketch/` | Rascunho | arquivos `.kyn` que o compilador atual não aceita |
 
@@ -37,7 +38,7 @@ Resultados medidos nesta revisão:
 
 ```console
 $ zig build test        # All 27 tests passed.
-$ zig build integration # integração OK: 115 caso(s), 0 falha(s)
+$ zig build integration # integração OK: 122 caso(s), 0 falha(s)
 ```
 
 ## Subconjunto implementado
@@ -53,8 +54,8 @@ ignorado).
 alias de ponteiro cru.
 
 **Statements:** `let`, `var`, `let mut`, atribuição (`=`, `+=`, `-=`, `*=`, `/=`, `%=`),
-`if`/`else if`/`else`, `while`, `for i in a..b`, `for x in colecao`, `return`, `break`,
-`continue`, blocos aninhados, `unsafe { … }`.
+`if`/`else if`/`else`, `while`, `for i in a..b`, `for x in colecao`,
+`match enum { … }`, `return`, `break`, `continue`, blocos aninhados, `unsafe { … }`.
 
 **Expressões:** precedência completa (`||`, `&&`, `|`, `^`, `&`, `==`/`!=`,
 comparações, `<<`/`>>`, `+`/`-`, `*`/`/`/`%`), unários (`-`, `!`, `~`, `*`, `&`,
@@ -87,11 +88,16 @@ funções não podem retornar `[N]T` (E0099); arrays não são atribuíveis como
 | E0021 | `break`/`continue` fora de laço |
 | E0022 | operando inválido para o operador |
 | E0023 | módulo sem `fn main` (quando se compila um executável) |
+| E0024 | `match` não cobre todas as variantes do enum |
+| E0025 | padrão de `match` inválido (variante inexistente, de outro enum, braço duplicado ou sujeito que não é enum) |
 | E0099 | recurso explicitamente não suportado |
 | W0001 | variável nunca lida (só com `--warn-unused`) |
 
 ## Limitações conhecidas e honestidade
 
+- **`match` só aceita enum como sujeito** e é apenas statement (não expressão): não
+  há padrões com ligação de variável, guardas `if`, faixas (`1..=5`) nem `match`
+  aninhado como valor.
 - **Sem backend nativo.** A geração de código produz C99; não há emissor de LLVM IR,
   assembly nem código de máquina. O emissor mínimo de LLVM IR que existia em
   `src/codegen` foi substituído pelo backend C.

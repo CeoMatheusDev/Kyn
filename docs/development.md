@@ -26,7 +26,7 @@ zig build              # instala zig-out/bin/kyn
 | --- | --- |
 | `zig build` | compila a CLI `kyn` em `zig-out/bin/kyn` |
 | `zig build test` | 27 testes unitários (lexer, parser, AST, semântica, unsafe, codegen, driver, runner) |
-| `zig build integration` | compila e executa as 115 fixtures de `tests/cases`, `tests/diagnostics` e `tests/regression` |
+| `zig build integration` | compila e executa as 122 fixtures de `tests/cases`, `tests/diagnostics` e `tests/regression` |
 | `zig build check` | `test` + `integration` |
 | `zig build run -- <args>` | executa a CLI (ex.: `zig build run -- check tests/cases/01_hello.kyn`) |
 
@@ -82,6 +82,24 @@ ficam em `tests/pending/` com o motivo registrado em `tests/pending/README.md`.
    memória, ABI ou comandos.
 6. Declare explicitamente o que **não** foi validado.
 
+## Integração contínua
+
+`.github/workflows/ci.yml` roda em cada push em `main` e em cada pull request:
+
+| Plataforma | O que roda |
+| --- | --- |
+| `ubuntu-latest` | `zig build test`, `zig build integration`, build da CLI e smoke test |
+| `macos-latest` | idem |
+| `windows-latest` | `zig build test` e build da CLI |
+
+O Windows fica sem a suíte de integração porque ela precisa de um compilador C99
+chamado `cc` no `PATH`, e os runners do Windows trazem apenas o MSVC (`cl`). Quando
+houver um `cc` configurado lá (MSYS2/MinGW, por exemplo), basta incluir a plataforma
+na matriz com `integration: true`.
+
+O workflow fixa o Zig em `0.17.0` via `mlugg/setup-zig@v2` — a mesma versão declarada
+em `build.zig.zon`.
+
 ## Convenções de implementação
 
 - Toda alocação do compilador vem da arena do pipeline (`init.arena`/`init.gpa` na
@@ -100,5 +118,6 @@ ficam em `tests/pending/` com o motivo registrado em `tests/pending/README.md`.
 
 - A suíte de integração precisa de um compilador C; sem ele, `zig build integration`
   falha nos casos executáveis (os de diagnóstico continuam válidos).
-- Não há CI configurado: `zig build check` precisa ser executado localmente.
+- A suíte de integração não roda no Windows em CI (sem `cc` no `PATH`); lá só os
+  testes unitários são executados automaticamente.
 - Não há formatador/linter de `.kyn` nem de Zig configurado no repositório.

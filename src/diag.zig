@@ -62,6 +62,8 @@ pub const Code = enum {
     invalid_control_flow, // E0021
     invalid_operand, // E0022
     missing_main, // E0023
+    non_exhaustive_match, // E0024
+    invalid_pattern, // E0025
     unsupported, // E0099
     // Avisos.
     unused_variable, // W0001
@@ -84,6 +86,8 @@ pub const Code = enum {
             .invalid_control_flow => "E0021",
             .invalid_operand => "E0022",
             .missing_main => "E0023",
+            .non_exhaustive_match => "E0024",
+            .invalid_pattern => "E0025",
             .unsupported => "E0099",
             .unused_variable => "W0001",
         };
