@@ -1,0 +1,18 @@
+// tests/cases/11_logic_and_bits.kyn — lógica booleana e operadores bit a bit.
+fn main() -> i32 {
+    let a: u32 = 12;
+    let b: u32 = 10;
+    println(a & b);
+    println(a | b);
+    println(a ^ b);
+    println(a << 2);
+    println(a >> 1);
+    println(~0 as u8);
+
+    let yes: bool = true;
+    let no: bool = false;
+    println(yes && !no);
+    println(yes || no);
+    println(!yes);
+    return 0;
+}

@@ -1,0 +1,4 @@
+// tests/cases/14_exit_code.kyn — o valor retornado por `main` vira código de saída.
+fn main() -> i32 {
+    return 7;
+}

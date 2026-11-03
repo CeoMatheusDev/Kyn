@@ -1,0 +1,5 @@
+// tests/diagnostics/d13_invalid_operand.kyn — operador aritmético sobre str
+fn main() -> i32 {
+    let texto: str = "a" + "b";
+    return 0;
+}

@@ -1,0 +1,14 @@
+// tests/cases/18_print_types.kyn — print/println para cada tipo imprimível.
+fn main() -> i32 {
+    println(42);
+    println(-7);
+    println(3.5);
+    println(true);
+    println(false);
+    println('K');
+    println("texto");
+    println();
+    print("sem quebra");
+    println("!");
+    return 0;
+}

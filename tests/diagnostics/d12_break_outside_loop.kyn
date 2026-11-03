@@ -1,0 +1,5 @@
+// tests/diagnostics/d12_break_outside_loop.kyn — break fora de laço
+fn main() -> i32 {
+    break;
+    return 0;
+}

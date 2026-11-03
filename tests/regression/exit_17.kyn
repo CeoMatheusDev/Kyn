@@ -1,0 +1,4 @@
+// tests/regression/exit_17.kyn — código de saída 17 propagado por `main`.
+fn main() -> i32 {
+    return 17;
+}

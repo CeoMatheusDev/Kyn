@@ -1,0 +1,32 @@
+struct Ponto3 {
+    coords: [3]f64,
+}
+
+impl Ponto3 {
+    fn novo(x: f64, y: f64, z: f64) -> Ponto3 {
+        return Ponto3 { coords: [x, y, z] };
+    }
+
+    fn soma(self: &Ponto3) -> f64 {
+        var total: f64 = 0.0;
+        for i in 0..self.coords.len {
+            total += self.coords[i];
+        }
+        return total;
+    }
+
+    fn escalar(self: &mut Ponto3, fator: f64) {
+        for i in 0..self.coords.len {
+            self.coords[i] = self.coords[i] * fator;
+        }
+    }
+}
+
+fn main() -> i32 {
+    var p: Ponto3 = Ponto3::novo(1.0, 2.0, 3.0);
+    println(p.soma());
+    p.escalar(2.0);
+    println(p.soma());
+    println(p.coords[1]);
+    return 0;
+}

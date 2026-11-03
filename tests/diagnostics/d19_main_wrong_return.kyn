@@ -1,0 +1,4 @@
+// tests/diagnostics/d19_main_wrong_return.kyn — assinatura de main inválida
+fn main() -> str {
+    return "texto";
+}

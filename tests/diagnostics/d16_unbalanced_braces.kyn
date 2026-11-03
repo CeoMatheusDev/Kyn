@@ -1,0 +1,6 @@
+// tests/diagnostics/d16_unbalanced_braces.kyn — chaves desbalanceadas
+fn main() -> i32 {
+    if true {
+        return 1;
+    return 0;
+}

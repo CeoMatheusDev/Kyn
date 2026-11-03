@@ -1,0 +1,5 @@
+// tests/diagnostics/d11_unknown_attribute.kyn — atributo não reconhecido
+#[inline(always)]
+fn main() -> i32 {
+    return 0;
+}

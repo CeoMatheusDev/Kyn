@@ -1,0 +1,9 @@
+// tests/cases/29_ffi_printf.kyn — chamada variádica da libc dentro de `unsafe`.
+extern fn printf(fmt: *const u8, ...) -> i32;
+
+fn main() -> i32 {
+    unsafe {
+        printf("Hello from Kyn FFI!\n");
+    }
+    return 0;
+}

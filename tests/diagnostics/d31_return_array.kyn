@@ -1,0 +1,8 @@
+fn pares() -> [2]i32 {
+    return [2, 4];
+}
+
+fn main() -> i32 {
+    let xs = pares();
+    return xs[0];
+}

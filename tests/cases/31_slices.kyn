@@ -1,0 +1,28 @@
+fn soma(xs: []i32) -> i32 {
+    var total: i32 = 0;
+    for i in 0..xs.len {
+        total += xs[i];
+    }
+    return total;
+}
+
+fn main() -> i32 {
+    var numeros: [5]i32 = [1, 2, 3, 4, 5];
+    let tudo: []i32 = numeros[..];
+    println(tudo.len);
+    println(soma(tudo));
+
+    let meio: []i32 = numeros[1..4];
+    println(meio.len);
+    println(soma(meio));
+
+    let cauda: []i32 = numeros[3..];
+    println(soma(cauda));
+
+    let literais: []i32 = [7, 8, 9];
+    println(soma(literais));
+
+    tudo[0] = 100;
+    println(numeros[0]);
+    return 0;
+}

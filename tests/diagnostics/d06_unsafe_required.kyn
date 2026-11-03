@@ -1,0 +1,6 @@
+// tests/diagnostics/d06_unsafe_required.kyn — dereferência de ponteiro cru fora de unsafe
+fn main() -> i32 {
+    var value: i32 = 1;
+    let raw: *i32 = &value as *i32;
+    return *raw;
+}

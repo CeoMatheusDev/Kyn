@@ -1,0 +1,4 @@
+// tests/cases/20_void_main.kyn — `fn main` pode retornar void (código 0).
+fn main() -> void {
+    println("void main");
+}

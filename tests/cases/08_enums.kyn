@@ -1,0 +1,24 @@
+// tests/cases/08_enums.kyn — enums e comparação de variantes.
+enum Level {
+    Low,
+    Medium,
+    High,
+}
+
+fn label(level: Level) -> i32 {
+    if level == Level::Low {
+        return 1;
+    }
+    if level == Level::Medium {
+        return 2;
+    }
+    return 3;
+}
+
+fn main() -> i32 {
+    let level: Level = Level::High;
+    println(label(Level::Low));
+    println(label(Level::Medium));
+    println(label(level));
+    return 0;
+}

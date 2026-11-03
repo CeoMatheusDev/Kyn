@@ -1,0 +1,4 @@
+// tests/regression/exit_40.kyn — código de saída 40 propagado por `main`.
+fn main() -> i32 {
+    return 40;
+}

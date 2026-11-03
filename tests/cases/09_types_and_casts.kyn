@@ -1,0 +1,14 @@
+// tests/cases/09_types_and_casts.kyn — tipos primitivos e conversões `as`.
+fn main() -> i32 {
+    let wide: i64 = 300;
+    let narrow: i32 = wide as i32;
+    let ratio: f64 = narrow as f64 / 2.0;
+    let byte: u8 = 200;
+    let promoted: u32 = byte as u32;
+
+    println(narrow);
+    println(ratio);
+    println(promoted);
+    println(255 as u8);
+    return 0;
+}

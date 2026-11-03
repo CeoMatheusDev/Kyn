@@ -1,0 +1,4 @@
+// tests/regression/exit_13.kyn — código de saída 13 propagado por `main`.
+fn main() -> i32 {
+    return 13;
+}

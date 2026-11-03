@@ -1,0 +1,42 @@
+enum Estado {
+    Parado,
+    Andando,
+    Correndo,
+}
+
+fn velocidade(e: Estado) -> i32 {
+    match e {
+        Estado::Parado => {
+            return 0;
+        },
+        Estado::Andando => {
+            return 5;
+        },
+        Estado::Correndo => {
+            return 20;
+        },
+    }
+}
+
+fn main() -> i32 {
+    let estados: [3]Estado = [Estado::Parado, Estado::Andando, Estado::Correndo];
+    var total: i32 = 0;
+    for e in estados {
+        total += velocidade(e);
+    }
+    println(total);
+
+    var i: i32 = 0;
+    while i < 3 {
+        match estados[i] {
+            Estado::Correndo => {
+                println("rapido");
+            },
+            _ => {
+                println("normal");
+            },
+        }
+        i += 1;
+    }
+    return 0;
+}

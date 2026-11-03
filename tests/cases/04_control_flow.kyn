@@ -1,0 +1,31 @@
+// tests/cases/04_control_flow.kyn — if/else, while, break e continue.
+fn classify(value: i32) -> i32 {
+    if value > 100 {
+        return 2;
+    } else if value > 0 {
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
+fn main() -> i32 {
+    println(classify(250));
+    println(classify(5));
+    println(classify(-1));
+
+    var index: i32 = 0;
+    var total: i32 = 0;
+    while true {
+        index += 1;
+        if index % 2 == 0 {
+            continue;
+        }
+        if index > 9 {
+            break;
+        }
+        total += index;
+    }
+    println(total);
+    return 0;
+}

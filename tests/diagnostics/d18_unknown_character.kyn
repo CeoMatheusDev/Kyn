@@ -1,0 +1,5 @@
+// tests/diagnostics/d18_unknown_character.kyn — caractere inválido
+fn main() -> i32 {
+    let x: i32 = 1 $ 2;
+    return x;
+}

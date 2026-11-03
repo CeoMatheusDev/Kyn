@@ -1,0 +1,17 @@
+fn main() -> i32 {
+    var numeros: [4]i32 = [10, 20, 30, 40];
+    println(numeros.len);
+    numeros[1] = 25;
+    println(numeros[1]);
+
+    var total: i32 = 0;
+    for i in 0..numeros.len {
+        total += numeros[i];
+    }
+    println(total);
+
+    let inferidos = [1, 2, 3];
+    println(inferidos.len);
+    println(inferidos[2]);
+    return 0;
+}

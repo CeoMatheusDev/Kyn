@@ -1,0 +1,9 @@
+// tests/cases/26_mutability_basic.kyn — `let` imutável e `let mut` mutável.
+fn main() -> i32 {
+    let x = 10;
+    let mut y = 5;
+    y = 15;
+    println(x);
+    println(y);
+    return 0;
+}

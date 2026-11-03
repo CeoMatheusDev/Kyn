@@ -1,0 +1,9 @@
+fn main() -> i32 {
+    let x: i32 = 1;
+    match x {
+        _ => {
+            println("numero");
+        },
+    }
+    return 0;
+}

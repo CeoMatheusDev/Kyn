@@ -1,0 +1,11 @@
+exit: 0
+stdout: |
+  8
+  14
+  6
+  48
+  6
+  255
+  true
+  true
+  false

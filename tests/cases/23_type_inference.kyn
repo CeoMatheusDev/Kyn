@@ -1,0 +1,8 @@
+// tests/cases/23_type_inference.kyn — inferência a partir do inicializador.
+fn main() -> i32 {
+    let x = 10;
+    let y = 20;
+    let z = x + y;
+    println(z);
+    return 0;
+}

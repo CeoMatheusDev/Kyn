@@ -1,0 +1,4 @@
+// tests/regression/exit_08.kyn — código de saída 8 propagado por `main`.
+fn main() -> i32 {
+    return 8;
+}

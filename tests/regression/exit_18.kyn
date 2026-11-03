@@ -1,0 +1,4 @@
+// tests/regression/exit_18.kyn — código de saída 18 propagado por `main`.
+fn main() -> i32 {
+    return 18;
+}

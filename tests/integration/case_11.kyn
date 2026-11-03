@@ -1,2 +1,0 @@
-// tests/integration/case_11.kyn
-fn main() -> i32 { return 11; }

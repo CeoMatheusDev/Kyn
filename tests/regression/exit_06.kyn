@@ -1,0 +1,4 @@
+// tests/regression/exit_06.kyn — código de saída 6 propagado por `main`.
+fn main() -> i32 {
+    return 6;
+}

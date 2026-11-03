@@ -1,0 +1,6 @@
+// tests/diagnostics/d09_unknown_module.kyn — import de módulo desconhecido
+import modulo::fantasma;
+
+fn main() -> i32 {
+    return 0;
+}

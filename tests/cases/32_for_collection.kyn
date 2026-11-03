@@ -1,0 +1,23 @@
+fn main() -> i32 {
+    let valores: [4]i32 = [2, 4, 6, 8];
+    var total: i32 = 0;
+    for v in valores {
+        total += v;
+    }
+    println(total);
+
+    let nomes: []i32 = [1, 1, 1];
+    var contagem: i32 = 0;
+    for n in nomes {
+        contagem += n;
+    }
+    println(contagem);
+
+    var dobrado: [3]i32 = [1, 2, 3];
+    let mutaveis: []i32 = dobrado[..];
+    for i in 0..mutaveis.len {
+        mutaveis[i] = mutaveis[i] * 2;
+    }
+    println(dobrado[2]);
+    return 0;
+}

@@ -1,0 +1,4 @@
+// tests/regression/exit_45.kyn — código de saída 45 propagado por `main`.
+fn main() -> i32 {
+    return 45;
+}

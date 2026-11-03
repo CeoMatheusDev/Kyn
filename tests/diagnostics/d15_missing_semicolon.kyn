@@ -1,0 +1,5 @@
+// tests/diagnostics/d15_missing_semicolon.kyn — faltou ponto e vírgula
+fn main() -> i32 {
+    let x: i32 = 1
+    return x;
+}

@@ -1,0 +1,4 @@
+// tests/regression/exit_15.kyn — código de saída 15 propagado por `main`.
+fn main() -> i32 {
+    return 15;
+}

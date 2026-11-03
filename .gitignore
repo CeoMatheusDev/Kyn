@@ -3,3 +3,7 @@ zig-cache/
 zig-out/
 kync
 *.o
+.zig-cache/
+zig-out/
+*.kyn.c
+*.kyn.bin

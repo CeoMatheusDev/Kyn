@@ -1,8 +1,0 @@
-// tests/regopt_basic.kyn
-fn main() {
-    let mut sum = 0;
-    for i in 0..1000 {
-        sum += i;
-    }
-    return sum;
-}

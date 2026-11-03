@@ -1,0 +1,10 @@
+// tests/diagnostics/d24_duplicate_field.kyn — campo duplicado em struct
+struct Repetido {
+    x: i32,
+    x: i32,
+}
+
+fn main() -> i32 {
+    let r: Repetido = Repetido { x: 1 };
+    return r.x;
+}

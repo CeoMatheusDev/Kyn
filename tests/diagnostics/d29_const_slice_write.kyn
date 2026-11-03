@@ -1,0 +1,9 @@
+fn primeiro(xs: []const i32) -> i32 {
+    xs[0] = 1;
+    return xs[0];
+}
+
+fn main() -> i32 {
+    let numeros: [2]i32 = [1, 2];
+    return primeiro(numeros[..]);
+}

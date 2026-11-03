@@ -1,0 +1,9 @@
+// tests/diagnostics/d10_unknown_field.kyn — campo inexistente
+struct Ponto {
+    x: i32,
+}
+
+fn main() -> i32 {
+    let p: Ponto = Ponto { x: 1 };
+    return p.y;
+}

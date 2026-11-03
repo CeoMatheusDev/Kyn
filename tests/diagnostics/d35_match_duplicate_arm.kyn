@@ -1,0 +1,17 @@
+enum Cor {
+    Vermelho,
+    Verde,
+}
+
+fn main() -> i32 {
+    let c: Cor = Cor::Verde;
+    match c {
+        Cor::Verde => {
+            println("a");
+        },
+        Verde => {
+            println("b");
+        },
+    }
+    return 0;
+}

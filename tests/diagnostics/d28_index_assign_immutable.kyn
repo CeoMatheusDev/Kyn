@@ -1,0 +1,5 @@
+fn main() -> i32 {
+    let numeros: [3]i32 = [1, 2, 3];
+    numeros[0] = 9;
+    return numeros[0];
+}

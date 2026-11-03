@@ -1,0 +1,15 @@
+// tests/cases/05_range_for.kyn — laço `for i in a..b` (intervalo semiaberto).
+fn main() -> i32 {
+    var total: i32 = 0;
+    for i in 0..10 {
+        total += i;
+    }
+    println(total);
+
+    var squares: i32 = 0;
+    for j in 1..5 {
+        squares += j * j;
+    }
+    println(squares);
+    return 0;
+}

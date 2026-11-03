@@ -1,108 +1,159 @@
 # Kyn
 
-**Kyn** é um projeto experimental de linguagem de programação de sistemas, desenvolvido com foco em controle explícito de recursos, interoperabilidade com C e compilação de baixo nível.
+**Kyn** é uma linguagem de programação de sistemas em desenvolvimento, com controle
+explícito de recursos, ausência de garbage collector como objetivo de projeto e
+interoperabilidade com C.
 
-O repositório reúne um protótipo de compilador escrito em Zig, experimentos de implementação da linguagem Kyn, módulos iniciais de biblioteca padrão e testes/fixtures. O projeto ainda está em desenvolvimento: a implementação disponível não corresponde a uma linguagem estável ou pronta para produção.
+Este repositório contém um **compilador funcional em estágio inicial**: o pipeline
+lexer → parser → AST → análise semântica → geração de C está implementado, integrado
+e coberto por testes automatizados. A linguagem em si continua experimental — sintaxe
+e semântica podem mudar.
 
-> **Estado atual:** protótipo em estágio inicial. Interfaces, sintaxe, semântica e comandos de build ainda podem mudar.
+> **Estado atual:** protótipo com pipeline de ponta a ponta verificável.
+> Não é uma linguagem estável nem pronta para produção.
 
-## Objetivos de projeto
+## O que funciona hoje
 
-- Controle explícito de alocação e ciclo de vida de memória.
-- Ausência de garbage collector como objetivo de projeto.
-- Interoperabilidade com C e possibilidade de uso em sistemas de baixo nível.
-- Separação conceitual entre recursos essenciais (`kyn:core`) e recursos dependentes do sistema operacional (`kyn:std`).
-- Compilador com implementação bootstrap em Zig e, futuramente, componentes reimplementados em Kyn.
+Um programa Kyn como este compila e executa:
 
-Esses itens descrevem objetivos e direção arquitetural; não devem ser interpretados como garantias de recursos já completos.
+```kyn
+struct Vector2 {
+    x: f64,
+    y: f64,
+}
 
-## Estado de implementação
+impl Vector2 {
+    fn new(x: f64, y: f64) -> Vector2 {
+        return Vector2 { x: x, y: y };
+    }
 
-| Área | O que existe no repositório | Estado |
-| --- | --- | --- |
-| Lexer | Lexer inicial em `src/lexer/lexer.zig` | Experimental |
-| Parser e AST | Estruturas e parsing parcial em `src/parser/` e `src/ast/` | Experimental |
-| Análise semântica | Estrutura inicial em `src/sema/` | Experimental |
-| Geração de código | Emissor mínimo em `src/codegen/codegen.zig` | Experimental |
-| Implementação em Kyn | Arquivos iniciais em `src/kyn/` e `src/compiler/` | Esqueleto / incompleto |
-| Biblioteca padrão | Módulos iniciais em `std/` | Experimental |
-| Testes | Testes Zig e arquivos de casos `.kyn` em `src/` e `tests/` | Parcial |
+    fn sum(self: &Vector2) -> f64 {
+        return self.x + self.y;
+    }
+}
 
-Consulte [o estado detalhado](docs/status.md) antes de depender de qualquer funcionalidade.
+fn main() -> i32 {
+    let v: Vector2 = Vector2::new(1.5, 2.5);
+    println(v.sum());
+    return 0;
+}
+```
+
+```console
+$ kyn run exemplo.kyn
+4.000000
+```
+
+O compilador traduz o programa para C99 e delega a compilação final a um compilador C
+(`cc`). Erros de sintaxe, tipo, mutabilidade e uso indevido de `unsafe` são reportados
+com código, posição e trecho da origem:
+
+```console
+$ kyn check exemplo.kyn
+error[E0014]: não é possível atribuir ao campo `x` de um valor imutável
+  --> exemplo.kyn:18:5
+   |
+18 |     v.x = 1.0;
+   |     ^^^
+   = help: declare o binding com `var` (ou `let mut`), ou receba o valor por `&mut`
+```
 
 ## Requisitos
 
-- Zig **0.17.0**, conforme declarado pelos metadados e comentários atuais do projeto.
-- Git para obter o código-fonte.
-
-A versão do compilador Zig deve ser confirmada no ambiente antes de compilar. O repositório ainda não contém um `build.zig` nem um sistema de build unificado.
-
-## Obtendo o código
+- **Zig 0.17.0** (bootstrap do compilador).
+- Um compilador **C99** no `PATH` (`cc`, `gcc` ou `clang`) para `kyn run` e para a
+  suíte de integração.
 
 ```sh
-git clone https://github.com/CeoMatheusDev/Kyn.git
-cd Kyn
+zig version   # deve imprimir 0.17.0
+cc --version
 ```
 
-## Compilação e testes
-
-Não há, no estado atual, um comando único de build ou uma CLI funcional documentada. Para executar isoladamente os testes Zig existentes:
+## Build, testes e uso
 
 ```sh
-zig test src/test_core.zig
-zig test src/test_sema.zig
-zig test src/test_codegen.zig
-zig test src/test_std.zig
-zig test src/test_unsafe.zig
+zig build                 # gera zig-out/bin/kyn
+zig build test            # 27 testes unitários (lexer, parser, semântica, backend)
+zig build integration     # 122 fixtures .kyn compiladas e executadas de ponta a ponta
+zig build check           # unitários + integração
+zig build run -- help     # CLI
 ```
 
-Esses comandos executam apenas os arquivos de teste indicados; não representam uma validação completa do compilador, da biblioteca padrão ou dos arquivos `.kyn`.
+Comandos da CLI:
 
-A entrada `src/main.zig` é atualmente um ponto de entrada mínimo de bootstrap, não um compilador de produção. Os arquivos `.kyn` em `tests/` são fixtures/casos de teste e não devem ser considerados executáveis até existir um runner integrado.
+| Comando | O que faz |
+| --- | --- |
+| `kyn check <arq.kyn>` | lexer + parser + semântica, sem gerar código |
+| `kyn emit <arq.kyn>` | escreve o C gerado em stdout (ou `-o`) |
+| `kyn build <arq.kyn> -o saida.c` | escreve o C gerado em um arquivo |
+| `kyn run <arq.kyn>` | compila o C com `cc` e executa o binário |
+| `kyn tokens <arq.kyn>` | despeja a tokenização (depuração) |
+| `kyn ast <arq.kyn>` | despeja a AST (depuração) |
+| `kyn version` / `kyn help` | versões e ajuda |
+
+Códigos de saída: `0` sucesso · `1` diagnósticos · `2` uso inválido · `3` falha
+interna/de E/S · `4` falha no compilador C. Em `kyn run`, o código de saída do
+programa é propagado.
+
+## Subconjunto de linguagem implementado
+
+| Área | Suportado | Ainda não |
+| --- | --- | --- |
+| Itens | `fn`, `extern fn`, `struct`, `enum`, `impl`, `import`, atributos `#[repr(C)]`/`#[align(N)]` | generics, traits, closures, visibilidade real de `pub` |
+| Tipos | `i8`…`i64`, `isize`, `u8`…`u64`, `usize`, `f32`, `f64`, `bool`, `char`, `str`, `void`, `&T`, `&mut T`, `*T`, `*const T`, `[N]T`, `[]T`, `[]const T`, structs e enums nomeados | `Result<T, E>`, tuplas, arrays multidimensionais |
+| Statements | `let`, `var`, `let mut`, atribuição simples e composta, `if`/`else if`/`else`, `while`, `for i in a..b`, `for x in colecao`, `match enum { … }` exaustivo, `return`, `break`, `continue`, blocos, `unsafe { … }` | `match` como expressão, padrões com ligação, `defer` |
+| Expressões | aritmética, comparação, lógica, bit a bit, shifts, unários, chamadas, métodos, `Tipo::item`, campos, `.len`, indexação `a[i]`, fatias `a[lo..hi]`, literais de struct, enum e array, referências, dereferência, casts `as` | operadores de erro `?`, indexação de `str` |
+| Verificações | tipos, escopo, shadowing, mutabilidade, caminhos de retorno, aridade, `unsafe` obrigatório para ponteiro cru e `extern fn`, atributos, tamanho de array, constância de slice, exaustividade de `match` | borrow checker, lifetimes, ownership/moves, limites de índice em tempo de execução |
+| Bibliotecas | builtins `print`/`println`; FFI com C via `extern fn` | `kyn:core` e `kyn:std` (imports são validados, mas não fornecem símbolos) |
+
+Consulte [docs/status.md](docs/status.md) para o estado detalhado e
+[docs/language_reference.md](docs/language_reference.md) para a referência.
 
 ## Estrutura do repositório
 
 ```text
 .
-├── docs/              # Especificação, gramática, arquitetura e guias
+├── build.zig            # fonte única de verdade para build, testes e integração
 ├── src/
-│   ├── ast/           # Nós da AST
-│   ├── codegen/       # Geração de código experimental
-│   ├── compiler/      # Módulos iniciais escritos em Kyn
-│   ├── ffi/           # Experimentos de interoperabilidade
-│   ├── kyn/           # Protótipos do compilador em Kyn
-│   ├── lexer/          # Lexer bootstrap em Zig
-│   ├── parser/         # Parser bootstrap em Zig
-│   └── sema/           # Análise semântica bootstrap
-├── std/
-│   ├── core/           # Primitivas independentes de SO (em desenvolvimento)
-│   └── os/             # Integrações dependentes de SO (em desenvolvimento)
-└── tests/              # Fixtures e casos de teste da linguagem
+│   ├── main.zig         # CLI
+│   ├── root.zig         # raiz do módulo `kyn` (e dos testes unitários)
+│   ├── driver.zig       # pipeline: lex → parse → sema → backend
+│   ├── diag.zig         # diagnósticos com código, span e snippet
+│   ├── lexer/           # tokenizer
+│   ├── parser/          # parser recursivo-descendente
+│   ├── ast/             # nós da AST
+│   ├── sema/            # tipos, escopos, unsafe, atributos
+│   ├── codegen/         # backend C99
+│   └── runner.zig       # runner da suíte de integração
+├── tests/
+│   ├── cases/           # fixtures que compilam e executam (saída esperada)
+│   ├── diagnostics/     # fixtures que devem falhar com um código específico
+│   ├── regression/      # casos de código de saída (1..50)
+│   └── pending/         # fixtures de recursos ainda não implementados
+├── std/                 # biblioteca padrão planejada (sem API ligada ao compilador)
+├── experiments/         # rascunhos históricos (self-hosting e stdlib), fora do build
+└── docs/                # especificação, gramática, arquitetura e estado
 ```
-
-Os testes Zig ainda localizados diretamente em `src/test_*.zig` serão consolidados em uma estrutura própria quando os caminhos de importação e o fluxo de build forem padronizados.
 
 ## Documentação
 
-- [Visão geral e arquitetura](docs/architecture.md)
-- [Estado de implementação e limitações](docs/status.md)
+- [Arquitetura do compilador](docs/architecture.md)
+- [Estado de implementação](docs/status.md)
 - [Desenvolvimento, build e testes](docs/development.md)
-- [Especificação em evolução](docs/spec.md)
-- [Referência preliminar da linguagem `.kyn`](docs/language_reference.md)
-- [Princípios de design da linguagem](docs/language_design.md)
-- [Gramática lexical inicial](docs/grammar.ebnf)
-- [Gramática sintática preliminar — proposta](docs/syntax.ebnf)
-- [Modelo de memória — proposta](docs/memory_model.md)
-- [Roadmap](ROADMAP.md)
-- [Histórico de alterações](CHANGELOG.md)
-- [Como contribuir](CONTRIBUTING.md)
+- [Referência da linguagem](docs/language_reference.md)
+- [Gramática lexical](docs/grammar.ebnf) e [gramática sintática](docs/syntax.ebnf)
+- [Princípios de design](docs/language_design.md)
+- [Modelo de memória](docs/memory_model.md)
+- [Testes e fixtures](tests/README.md)
+- [Roadmap](ROADMAP.md) · [Changelog](CHANGELOG.md) · [Como contribuir](CONTRIBUTING.md)
 
 ## Contribuindo
 
-Contribuições são bem-vindas. Antes de abrir uma alteração, leia [CONTRIBUTING.md](CONTRIBUTING.md) e descreva claramente o comportamento que foi implementado e como foi verificado.
-
-Não apresente protótipos, stubs ou objetivos do roadmap como funcionalidades concluídas.
+Contribuições são bem-vindas. Antes de abrir uma alteração, leia
+[CONTRIBUTING.md](CONTRIBUTING.md) e descreva o que foi implementado e **como foi
+verificado** (`zig build check` é o mínimo esperado). Não apresente protótipos, stubs
+ou itens do roadmap como funcionalidades concluídas.
 
 ## Licença
 
-O projeto declara licenciamento duplo MIT e Apache-2.0. Consulte os arquivos de licença presentes no repositório e confirme os termos aplicáveis antes de redistribuir.
+Licenciado sob a licença MIT. Consulte [LICENSE](LICENSE).
