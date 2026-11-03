@@ -1,0 +1,5 @@
+// tests/cases/01_hello.kyn — saída básica com `println`.
+fn main() -> i32 {
+    println("Hello, Kyn!");
+    return 0;
+}

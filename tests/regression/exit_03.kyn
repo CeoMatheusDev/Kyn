@@ -1,0 +1,4 @@
+// tests/regression/exit_03.kyn — código de saída 3 propagado por `main`.
+fn main() -> i32 {
+    return 3;
+}

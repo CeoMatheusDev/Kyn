@@ -1,0 +1,4 @@
+// tests/cases/25_zero_exit.kyn — saída limpa com código 0.
+fn main() -> i32 {
+    return 0;
+}

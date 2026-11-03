@@ -1,0 +1,7 @@
+// tests/diagnostics/d25_immutable_mut_borrow.kyn — &mut de binding imutável
+fn main() -> i32 {
+    let x: i32 = 1;
+    let r: &mut i32 = &mut x;
+    *r = 2;
+    return x;
+}

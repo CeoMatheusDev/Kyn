@@ -1,0 +1,12 @@
+// tests/diagnostics/d26_malformed_input.kyn — entrada malformada não pode
+// derrubar o compilador: ele precisa terminar com diagnósticos.
+let x = 10
+
+let y = (1 + 2;
+
+fn foo() {
+    let z = 5;
+
+let s = "unclosed string
+
+let big = 9999999999999999999999999;

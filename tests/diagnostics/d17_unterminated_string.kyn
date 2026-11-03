@@ -1,0 +1,5 @@
+// tests/diagnostics/d17_unterminated_string.kyn — string não terminada
+fn main() -> i32 {
+    let s: str = "texto sem fim
+    return 0;
+}

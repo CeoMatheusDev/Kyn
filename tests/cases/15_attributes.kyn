@@ -1,0 +1,13 @@
+// tests/cases/15_attributes.kyn — #[repr(C)] e #[align(8)] em structs.
+#[repr(C)]
+#[align(8)]
+struct Header {
+    magic: u32,
+    size: u32,
+}
+
+fn main() -> i32 {
+    let header: Header = Header { magic: 1, size: 2 };
+    println(header.magic + header.size);
+    return 0;
+}

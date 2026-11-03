@@ -1,0 +1,5 @@
+// tests/diagnostics/d21_literal_out_of_range.kyn — literal fora do intervalo do tipo
+fn main() -> i32 {
+    let b: u8 = 300;
+    return b as i32;
+}

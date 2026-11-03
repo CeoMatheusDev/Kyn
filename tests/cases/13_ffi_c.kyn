@@ -1,0 +1,11 @@
+// tests/cases/13_ffi_c.kyn — interoperabilidade com C via `extern fn`.
+extern fn puts(text: *const u8) -> i32;
+extern fn printf(fmt: *const u8, ...) -> i32;
+
+fn main() -> i32 {
+    unsafe {
+        puts("direto da libc");
+        printf("printf %d %s\n", 7, "argumentos");
+    }
+    return 0;
+}

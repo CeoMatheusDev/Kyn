@@ -1,0 +1,4 @@
+// tests/diagnostics/d20_self_outside_method.kyn — self fora de método
+fn main() -> i32 {
+    return self.x;
+}

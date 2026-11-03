@@ -1,0 +1,9 @@
+// tests/cases/27_range_sum.kyn — soma em laço `for` de mil iterações.
+fn main() -> i32 {
+    var sum: i32 = 0;
+    for i in 0..1000 {
+        sum += i;
+    }
+    println(sum);
+    return 0;
+}

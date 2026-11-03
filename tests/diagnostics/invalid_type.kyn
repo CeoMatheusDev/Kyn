@@ -1,2 +1,0 @@
-// tests/diagnostics/invalid_type.kyn
-let x: i32 = "texto";

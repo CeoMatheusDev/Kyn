@@ -1,0 +1,5 @@
+// tests/diagnostics/d03_unknown_type.kyn — anotação de tipo desconhecida
+fn main() -> i32 {
+    let x: TipoInexistente = 1;
+    return 0;
+}

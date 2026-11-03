@@ -1,0 +1,7 @@
+// tests/diagnostics/d22_extern_without_unsafe.kyn — chamada extern fora de unsafe
+extern fn puts(text: *const u8) -> i32;
+
+fn main() -> i32 {
+    puts("oi");
+    return 0;
+}

@@ -2,68 +2,103 @@
 
 ## Requisitos
 
-- Zig 0.17.0 é a versão declarada pelos arquivos atuais do projeto.
+- **Zig 0.17.0** — versão declarada em `build.zig.zon` (`minimum_zig_version`).
+- Um compilador **C99** (`cc`, `gcc` ou `clang`) para `kyn run` e para a suíte de
+  integração.
 - Git.
-- Um ambiente compatível com a versão de Zig utilizada.
-
-Confirme a versão instalada:
 
 ```sh
-zig version
+zig version   # 0.17.0
+cc --version
 ```
 
-## Clonar
+## Clonar e compilar
 
 ```sh
 git clone https://github.com/CeoMatheusDev/Kyn.git
 cd Kyn
+zig build              # instala zig-out/bin/kyn
 ```
 
-## Testes Zig disponíveis
+## Alvos do build
 
-Os testes unitários estão atualmente distribuídos em arquivos `src/test_*.zig`. Execute-os individualmente:
+| Comando | O que executa |
+| --- | --- |
+| `zig build` | compila a CLI `kyn` em `zig-out/bin/kyn` |
+| `zig build test` | 26 testes unitários (lexer, parser, AST, semântica, unsafe, codegen, driver, runner) |
+| `zig build integration` | compila e executa as 105 fixtures de `tests/cases`, `tests/diagnostics` e `tests/regression` |
+| `zig build check` | `test` + `integration` |
+| `zig build run -- <args>` | executa a CLI (ex.: `zig build run -- check tests/cases/01_hello.kyn`) |
+
+Opções úteis:
 
 ```sh
-zig test src/test_core.zig
-zig test src/test_sema.zig
-zig test src/test_codegen.zig
-zig test src/test_std.zig
-zig test src/test_unsafe.zig
+zig build integration -Dcc=clang      # usa outro compilador C na suíte
+zig build -Doptimize=ReleaseFast      # modo de otimização da CLI
 ```
 
-A execução de cada comando deve ser registrada separadamente. Não existe ainda um alvo agregado que garanta que todos os testes foram executados.
+A suíte de integração grava o C intermediário e os binários em
+`.zig-cache/integration/` (fora do controle de versão).
+
+## Usando a CLI
+
+```sh
+zig-out/bin/kyn check  programa.kyn      # só frontend
+zig-out/bin/kyn emit   programa.kyn      # C em stdout
+zig-out/bin/kyn build  programa.kyn -o programa.c
+zig-out/bin/kyn run    programa.kyn      # compila com cc e executa
+zig-out/bin/kyn run    programa.kyn --emit-c /tmp/programa.c
+zig-out/bin/kyn tokens programa.kyn      # depuração do lexer
+zig-out/bin/kyn ast    programa.kyn      # depuração do parser
+```
+
+`--warn-unused` ativa `W0001`; `--no-main` remove a exigência de `fn main`.
+
+## Onde tocar para cada mudança
+
+| Mudança | Arquivos | Teste mínimo |
+| --- | --- | --- |
+| Novo token ou operador | `src/lexer/lexer.zig` (+ `Kind.text`) | `zig build test` |
+| Nova sintaxe | `src/parser/parser.zig`, `src/ast/ast.zig` | caso em `tests/cases/` |
+| Nova regra de tipo | `src/sema/sema.zig`, `src/sema/types.zig` | fixture em `tests/diagnostics/` |
+| Novo atributo | `src/sema/unsafe.zig` | fixture em `tests/cases/` |
+| Nova forma de código | `src/codegen/c.zig` | caso em `tests/cases/` com saída esperada |
+| Novo comando de CLI | `src/main.zig` (+ `help_text`) | execução manual documentada no PR |
+| Novo módulo/passo | `src/root.zig`, `src/driver.zig`, `build.zig` | `zig build check` |
 
 ## Fixtures da linguagem
 
-Os arquivos `.kyn` em `tests/` documentam casos de sintaxe, semântica, módulos, FFI, memória e diagnósticos. Como o frontend ainda não está integrado a um runner, não existe um comando oficial para executar toda essa suíte.
-
-Não interprete a quantidade de fixtures como cobertura de testes executados.
-
-## Build
-
-O repositório ainda não possui `build.zig`, configuração de instalação ou definição padronizada de artefatos. O comando de build e a CLI precisam ser definidos em uma etapa própria.
+Cada fixture `.kyn` tem um arquivo `.expect` irmão. O formato está documentado em
+[tests/README.md](../tests/README.md). Fixtures de recursos ainda não implementados
+ficam em `tests/pending/` com o motivo registrado em `tests/pending/README.md`.
 
 ## Fluxo recomendado
 
 1. Crie uma branch de trabalho.
 2. Faça uma alteração pequena e focada.
-3. Adicione ou atualize um teste que cubra o comportamento.
-4. Execute os testes Zig relacionados.
-5. Atualize a documentação se alterar sintaxe, semântica, memória, ABI ou comandos.
-6. Informe no pull request o que foi executado e o que não foi validado.
+3. Adicione ou atualize a fixture/teste que cobre o comportamento.
+4. Execute `zig build check` e cole o resultado no pull request.
+5. Atualize a documentação se mudar sintaxe, semântica, códigos de diagnóstico,
+   memória, ABI ou comandos.
+6. Declare explicitamente o que **não** foi validado.
 
 ## Convenções de implementação
 
-- Evite alocações quando slices da entrada ou buffers reutilizáveis forem suficientes.
-- Documente quem possui cada alocação e quando ela é liberada.
-- Prefira spans (offset inicial/final) a cópias de strings para diagnósticos.
-- Diferencie erros de sintaxe, erros semânticos e falhas internas.
-- Não introduza APIs de biblioteca padrão sem definir contratos e testes.
-- Não marque recursos como concluídos apenas porque existe um arquivo com o nome correspondente.
+- Toda alocação do compilador vem da arena do pipeline (`init.arena`/`init.gpa` na
+  CLI); nenhum componente guarda alocações entre execuções.
+- Prefira `Span` (offsets na origem) a cópias de strings em diagnósticos.
+- Diferencie erro léxico (E0002), sintático (E0001) e semântico (E001x): eles têm
+  origens e recuperações diferentes.
+- O backend **não** analisa tipos: ele confia nos `type_id` preenchidos pela
+  semântica. Se um `type_id` estiver ausente, o bug é da semântica.
+- Recuperação de erro nunca pode deixar de consumir tokens: `Parser.synchronize`
+  garante progresso para evitar laço infinito em entradas malformadas.
+- Não introduza API de biblioteca padrão sem contrato, implementação e teste.
+- Não marque recurso como concluído só porque existe um arquivo com o nome dele.
 
-## Limitações conhecidas
+## Limitações conhecidas do ambiente de desenvolvimento
 
-- Não há build unificado.
-- O pipeline completo do compilador não está conectado.
-- As fixtures `.kyn` não possuem runner integrado.
-- A implementação self-hosted está incompleta.
+- A suíte de integração precisa de um compilador C; sem ele, `zig build integration`
+  falha nos casos executáveis (os de diagnóstico continuam válidos).
+- Não há CI configurado: `zig build check` precisa ser executado localmente.
+- Não há formatador/linter de `.kyn` nem de Zig configurado no repositório.

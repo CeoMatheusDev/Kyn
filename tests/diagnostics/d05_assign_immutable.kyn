@@ -1,0 +1,6 @@
+// tests/diagnostics/d05_assign_immutable.kyn — atribuição a binding imutável
+fn main() -> i32 {
+    let x: i32 = 1;
+    x = 2;
+    return x;
+}

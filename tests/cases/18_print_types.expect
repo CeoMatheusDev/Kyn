@@ -1,0 +1,11 @@
+exit: 0
+stdout: |
+  42
+  -7
+  3.500000
+  true
+  false
+  K
+  texto
+  
+  sem quebra!

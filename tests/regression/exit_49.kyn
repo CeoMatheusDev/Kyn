@@ -1,0 +1,4 @@
+// tests/regression/exit_49.kyn — código de saída 49 propagado por `main`.
+fn main() -> i32 {
+    return 49;
+}

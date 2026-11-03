@@ -1,0 +1,5 @@
+// tests/diagnostics/d01_type_mismatch.kyn — string onde se espera i32
+fn main() -> i32 {
+    let x: i32 = "texto";
+    return x;
+}

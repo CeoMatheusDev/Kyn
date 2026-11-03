@@ -1,0 +1,17 @@
+.{
+    .name = .kyn,
+    .version = "0.3.0-alpha.1",
+    // Identidade do pacote. Gerada pelo toolchain Zig na criação do pacote e
+    // não deve mudar; ao fazer fork, regenere apagando o campo e rodando
+    // `zig build`.
+    .fingerprint = 0xef3473332aa3d8a2, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.17.0",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "LICENSE",
+        "README.md",
+    },
+}

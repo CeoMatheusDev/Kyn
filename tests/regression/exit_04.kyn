@@ -1,0 +1,4 @@
+// tests/regression/exit_04.kyn — código de saída 4 propagado por `main`.
+fn main() -> i32 {
+    return 4;
+}

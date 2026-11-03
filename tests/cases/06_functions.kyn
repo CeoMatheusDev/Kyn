@@ -1,0 +1,22 @@
+// tests/cases/06_functions.kyn — chamadas, recursão e múltiplos parâmetros.
+fn fib(n: i32) -> i32 {
+    if n < 2 {
+        return n;
+    }
+    return fib(n - 1) + fib(n - 2);
+}
+
+fn add(left: i32, right: i32) -> i32 {
+    return left + right;
+}
+
+fn greet() -> void {
+    println("sem valor de retorno");
+}
+
+fn main() -> i32 {
+    println(fib(20));
+    println(add(add(1, 2), 3));
+    greet();
+    return 0;
+}

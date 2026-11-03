@@ -1,0 +1,4 @@
+// tests/diagnostics/d14_missing_main.kyn — módulo sem fn main
+fn auxiliar() -> i32 {
+    return 1;
+}

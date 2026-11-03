@@ -1,0 +1,13 @@
+// tests/cases/12_unsafe_pointers.kyn — referências e ponteiros crus.
+fn main() -> i32 {
+    var value: i32 = 10;
+    let shared: &i32 = &value;
+    println(*shared);
+
+    let raw: *i32 = &value as *i32;
+    unsafe {
+        *raw = 32;
+    }
+    println(value);
+    return 0;
+}

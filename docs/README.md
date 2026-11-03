@@ -12,11 +12,14 @@ Esta pasta concentra a documentação técnica do projeto. Os documentos disting
 | [Especificação](spec.md) | Princípios e decisões de linguagem ainda em evolução |
 | [Referência da linguagem](language_reference.md) | Exemplos de sintaxe `.kyn`, tipos, funções, memória, erros e módulos |
 | [Princípios de design](language_design.md) | Identidade, requisitos e diretrizes arquiteturais da linguagem |
-| [Gramática lexical](grammar.ebnf) | Regras lexicais observadas no lexer bootstrap |
-| [Gramática sintática](syntax.ebnf) | Esboço sintático proposto, ainda não normativo |
+| [Gramática lexical](grammar.ebnf) | Regras lexicais implementadas pelo lexer |
+| [Gramática sintática](syntax.ebnf) | Gramática do subconjunto implementado (normativa para 0.3.0-alpha.1) |
 | [Modelo de memória](memory_model.md) | Diretrizes propostas para memória, ownership e FFI |
+| [Testes e fixtures](../tests/README.md) | Suítes, formato `.expect` e cobertura |
 
 ## Convenções
+
+Atualizado em 2026-11-02 para o compilador 0.3.0-alpha.1.
 
 - **Implementado:** comportamento verificável na implementação atual.
 - **Parcial:** existe código inicial, mas o fluxo não está completo.

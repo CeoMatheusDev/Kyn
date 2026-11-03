@@ -1,0 +1,14 @@
+// tests/cases/03_mutability.kyn — `let`, `var` e `let mut`.
+fn main() -> i32 {
+    let immutable: i32 = 1;
+    var mutable: i32 = 2;
+    mutable = mutable + immutable;
+
+    let mut also_mutable: i32 = 3;
+    also_mutable += 4;
+
+    println(mutable);
+    println(also_mutable);
+    println(immutable);
+    return 0;
+}

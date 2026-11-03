@@ -1,0 +1,4 @@
+// tests/regression/exit_09.kyn — código de saída 9 propagado por `main`.
+fn main() -> i32 {
+    return 9;
+}

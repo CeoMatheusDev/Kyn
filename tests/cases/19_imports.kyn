@@ -1,0 +1,8 @@
+// tests/cases/19_imports.kyn — imports conhecidos são aceitos e registrados.
+import kyn::core;
+import kyn::std::io;
+
+fn main() -> i32 {
+    println("imports aceitos");
+    return 0;
+}

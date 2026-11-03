@@ -1,0 +1,4 @@
+// tests/regression/exit_25.kyn — código de saída 25 propagado por `main`.
+fn main() -> i32 {
+    return 25;
+}

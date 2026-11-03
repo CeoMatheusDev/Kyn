@@ -1,0 +1,4 @@
+// tests/diagnostics/d02_undefined_name.kyn — identificador não declarado
+fn main() -> i32 {
+    return nao_existe;
+}

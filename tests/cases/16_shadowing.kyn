@@ -1,0 +1,15 @@
+// tests/cases/16_shadowing.kyn — escopos aninhados e shadowing.
+fn main() -> i32 {
+    let x: i32 = 1;
+    {
+        let x: i32 = 2;
+        println(x);
+        {
+            let x: i32 = 3;
+            println(x);
+        }
+        println(x);
+    }
+    println(x);
+    return 0;
+}

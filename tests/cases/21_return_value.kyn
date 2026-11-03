@@ -1,0 +1,5 @@
+// tests/cases/21_return_value.kyn — o valor de `main` vira o código de saída.
+fn main() -> i32 {
+    let x: i32 = 42;
+    return x;
+}

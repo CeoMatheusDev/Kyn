@@ -1,0 +1,4 @@
+// tests/regression/exit_01.kyn — código de saída 1 propagado por `main`.
+fn main() -> i32 {
+    return 1;
+}

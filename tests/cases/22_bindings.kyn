@@ -1,0 +1,8 @@
+// tests/cases/22_bindings.kyn — bindings anotados dentro de uma função.
+fn main() -> i32 {
+    let x: i32 = 10;
+    let y: i32 = 20;
+    let z: i32 = x + y;
+    println(z);
+    return 0;
+}

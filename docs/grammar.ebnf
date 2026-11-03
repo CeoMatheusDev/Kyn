@@ -1,17 +1,54 @@
-(* Kyn — gramática lexical inicial.
-   Este arquivo descreve apenas tokens observados no lexer bootstrap.
-   Não é a gramática sintática completa da linguagem. *)
+(* Kyn — gramática lexical.
+   Status: descreve o lexer implementado em src/lexer/lexer.zig.
+   Válida para o compilador 0.3.0-alpha.1. *)
 
 letter      = "a"…"z" | "A"…"Z" | "_" ;
 digit       = "0"…"9" ;
+hex_digit   = digit | "a"…"f" | "A"…"F" ;
 
-identifier  = ( letter ), { letter | digit } ;
-integer     = digit, { digit } ;
+identifier  = letter, { letter | digit } ;
 
-whitespace  = " " | "\t" | "\n" ;
-comment     = "//", { any_char - "\n" } ;
+(* Inteiros: decimal, hexadecimal, octal e binário, com "_" como separador
+   visual. O valor é armazenado como i128; fora desse intervalo o parser
+   reporta E0001. *)
+integer     = digit, { digit | "_" }
+            | "0", ("x" | "X"), hex_digit, { hex_digit | "_" }
+            | "0", ("o" | "O"), ("0"…"7"), { "0"…"7" | "_" }
+            | "0", ("b" | "B"), ("0" | "1"), { "0" | "1" | "_" } ;
 
-(* O lexer atual classifica qualquer caractere não reconhecido pelas
-   regras acima como um token symbol individual. A lista de operadores
-   e delimitadores ainda não está formalizada. *)
-symbol      = any_char - ( letter | digit | whitespace ) ;
+(* Um "." só faz parte do número se vier seguido de dígito; por isso
+   "0..10" é inteiro, "..", inteiro. *)
+(* Pelo menos uma das duas partes opcionais deve estar presente; ".5" não é um
+   literal válido (é o token "." seguido de inteiro). *)
+float       = digit, { digit | "_" },
+              [ ".", digit, { digit | "_" } ],
+              [ ("e" | "E"), [ "+" | "-" ], digit, { digit } ] ;
+
+string      = '"', { string_char | escape }, '"' ;
+char        = "'", ( string_char | escape ), "'" ;
+string_char = ? qualquer byte exceto '"', "\", CR e LF ? ;
+escape      = "\", ( "n" | "t" | "r" | "0" | "\" | "'" | '"'
+                   | "x", hex_digit, hex_digit ) ;
+
+line_comment  = "//", { ? qualquer byte exceto LF ? }, [ LF ] ;
+block_comment = "/*", { ? qualquer byte ? }, "*/" ;   (* aninhável *)
+
+whitespace  = " " | "\t" | "\r" | LF ;
+
+keywords    = "as" | "break" | "continue" | "else" | "enum" | "extern" | "false"
+            | "fn" | "for" | "if" | "impl" | "import" | "in" | "let" | "mut"
+            | "pub" | "return" | "self" | "struct" | "true" | "unsafe" | "var"
+            | "while" ;
+
+(* Operadores e delimitadores, sempre na forma mais longa possível. *)
+operators   = "(" | ")" | "{" | "}" | "[" | "]" | "," | ";" | ":" | "::"
+            | "." | ".." | "->"
+            | "+" | "-" | "*" | "/" | "%"
+            | "&" | "&&" | "|" | "||" | "^" | "~"
+            | "<" | "<=" | ">" | ">=" | "<<" | ">>"
+            | "==" | "!=" | "!"
+            | "=" | "+=" | "-=" | "*=" | "/=" | "%="
+            | "#" | "?" ;
+
+(* Qualquer byte que não se encaixe nas regras acima produz o diagnóstico E0002
+   e é descartado; a tokenização continua. *)

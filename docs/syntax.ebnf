@@ -1,52 +1,94 @@
-(* Kyn — gramática sintática preliminar.
-   Status: proposta ilustrativa, não implementada integralmente.
-   Não substitui a gramática lexical observada em grammar.ebnf. *)
+(* Kyn — gramática sintática do subconjunto implementado.
+   Status: normativa para o compilador 0.3.0-alpha.1 (src/parser/parser.zig).
+   Construções fora desta gramática são rejeitadas com E0001. *)
 
 program          = { import_decl }, { declaration } ;
 
-import_decl      = "import", qualified_name, ";" ;
-qualified_name   = identifier, { ".", identifier } ;
+import_decl      = "import", ( string | qualified_name ), ";" ;
+qualified_name   = identifier, { ( "." | ":" | "::" ), identifier } ;
 
-declaration      = function_decl
-                 | struct_decl
-                 | enum_decl
-                 | impl_decl ;
+declaration      = { attribute }, [ "pub" ],
+                   ( function_decl | struct_decl | enum_decl | impl_decl )
+                 | extern_decl ;
 
-function_decl    = "fn", identifier, "(", [ parameters ], ")",
-                   [ "->", type_expr ], block ;
+attribute        = "#[", identifier, [ "(", arg, { ",", arg }, ")" ], "]" ;
+arg              = identifier | integer | string ;
+
+function_decl    = "fn", identifier, "(", [ parameters ], ")", [ "->", type_expr ], block ;
 parameters       = parameter, { ",", parameter } ;
 parameter        = identifier, ":", type_expr ;
 
+extern_decl      = "extern", "fn", identifier, "(", [ extern_parameters ], ")",
+                   [ "->", type_expr ], ";" ;
+extern_parameters = parameter, { ",", parameter }, [ ",", "..." ] | "..." ;
+
 struct_decl      = "struct", identifier, "{", { field_decl }, "}" ;
-field_decl       = identifier, ":", type_expr, [ "," ] ;
+field_decl       = [ "pub" ], identifier, ":", type_expr, [ "," ] ;
 
 enum_decl        = "enum", identifier, "{", { identifier, [ "," ] }, "}" ;
-impl_decl        = "impl", identifier, "{", { function_decl }, "}" ;
+
+impl_decl        = "impl", identifier, "{", { { attribute }, [ "pub" ], function_decl }, "}" ;
 
 type_expr        = qualified_name
-                 | "[", "]", type_expr
-                 | "*", type_expr
-                 | "&", [ "mut" ], type_expr ;
+                 | "&", [ "mut" ], type_expr        (* referência *)
+                 | "*", [ "const" ], type_expr      (* ponteiro cru *)
+                 | "[", "*", "]", type_expr         (* alias aceito para ponteiro cru *) ;
 
 block            = "{", { statement }, "}" ;
-statement        = let_decl
-                 | var_decl
+
+statement        = binding
+                 | assignment
                  | return_stmt
                  | if_stmt
                  | while_stmt
-                 | expression_stmt
-                 | block ;
+                 | for_stmt
+                 | "break", ";"
+                 | "continue", ";"
+                 | unsafe_block
+                 | block
+                 | expression, ";" ;
 
-let_decl         = "let", identifier, ":", type_expr, "=", expression, ";" ;
-var_decl         = "var", identifier, ":", type_expr, "=", expression, ";" ;
+binding          = ( "let", [ "mut" ] | "var" ), identifier,
+                   [ ":", type_expr ], "=", expression, ";" ;
+assignment       = expression, ( "=" | "+=" | "-=" | "*=" | "/=" | "%=" ),
+                   expression, ";" ;
 return_stmt      = "return", [ expression ], ";" ;
 if_stmt          = "if", expression, block, [ "else", ( block | if_stmt ) ] ;
 while_stmt       = "while", expression, block ;
-expression_stmt  = expression, ";" ;
+for_stmt         = "for", identifier, "in", expression, "..", expression, block ;
+unsafe_block     = "unsafe", block ;
 
-(* Expressões, precedência, literais, generics, padrões, atributos,
-   visibilidade, closures e regras semânticas permanecem em aberto. *)
+(* Expressões. Números maiores indicam ligação mais forte; todos os operadores
+   binários são associativos à esquerda. *)
+expression       = or_expr ;
+or_expr          = and_expr,          { "||", and_expr } ;        (* 1 *)
+and_expr         = bitor_expr,        { "&&", bitor_expr } ;      (* 3 *)
+bitor_expr       = bitxor_expr,       { "|",  bitxor_expr } ;     (* 5 *)
+bitxor_expr      = bitand_expr,       { "^",  bitand_expr } ;     (* 7 *)
+bitand_expr      = equality_expr,     { "&",  equality_expr } ;   (* 9 *)
+equality_expr    = compare_expr,      { ( "==" | "!=" ), compare_expr } ;      (* 11 *)
+compare_expr     = shift_expr,        { ( "<" | "<=" | ">" | ">=" ), shift_expr } ; (* 13 *)
+shift_expr       = additive_expr,     { ( "<<" | ">>" ), additive_expr } ;     (* 15 *)
+additive_expr    = multiplicative_expr, { ( "+" | "-" ), multiplicative_expr } ; (* 17 *)
+multiplicative_expr = unary_expr,     { ( "*" | "/" | "%" ), unary_expr } ;    (* 19 *)
 
-identifier       = letter, { letter | digit } ;
-letter           = "a"…"z" | "A"…"Z" | "_" ;
-digit            = "0"…"9" ;
+unary_expr       = ( "-" | "!" | "~" | "*" | "&" | "&", "mut" ), unary_expr
+                 | postfix_expr ;
+postfix_expr     = primary, { call_args | ".", identifier | "as", type_expr } ;
+call_args        = "(", [ expression, { ",", expression } ], ")" ;
+
+primary          = integer | float | string | char | "true" | "false"
+                 | "self"
+                 | identifier
+                 | qualified_path
+                 | struct_literal
+                 | "(", expression, ")" ;
+qualified_path   = identifier, "::", identifier ;
+struct_literal   = identifier, "{", { identifier, ":", expression, [ "," ] }, "}" ;
+
+(* Destinos válidos de atribuição: identifier, acesso a campo e dereferência. *)
+
+(* Ainda fora da gramática (rejeitados com E0001 ou E0099):
+   generics e parâmetros de tipo, traits/interfaces, "match"/padrões, closures,
+   slices "[]T" e arrays "[N]T", indexação "a[i]", operador "?", "defer",
+   declarações de nível superior que não sejam itens. *)

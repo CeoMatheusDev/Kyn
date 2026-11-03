@@ -1,0 +1,4 @@
+// tests/cases/24_minimal_main.kyn — o menor programa compilável.
+fn main() -> i32 {
+    return 42;
+}

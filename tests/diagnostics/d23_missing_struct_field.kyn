@@ -1,0 +1,10 @@
+// tests/diagnostics/d23_missing_struct_field.kyn — campo não inicializado no literal
+struct Par {
+    a: i32,
+    b: i32,
+}
+
+fn main() -> i32 {
+    let p: Par = Par { a: 1 };
+    return p.a + p.b;
+}

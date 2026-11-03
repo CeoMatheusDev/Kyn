@@ -1,0 +1,25 @@
+// tests/cases/17_struct_refs.kyn — structs passados por referência.
+struct Config {
+    width: u32,
+    height: u32,
+    fullscreen: bool,
+}
+
+fn area(config: &Config) -> u32 {
+    return config.width * config.height;
+}
+
+fn bump(config: &mut Config) -> void {
+    config.width = config.width + 1;
+}
+
+fn main() -> i32 {
+    let config: Config = Config { width: 1920, height: 1080, fullscreen: false };
+    println(area(&config));
+
+    var other: Config = Config { width: 10, height: 2, fullscreen: true };
+    bump(&mut other);
+    println(other.width);
+    println(other.fullscreen);
+    return 0;
+}

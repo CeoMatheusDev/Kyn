@@ -1,0 +1,8 @@
+// tests/cases/28_module_imports.kyn — imports por nome e por caminho.
+import core;
+import std::io;
+
+fn main() -> i32 {
+    println("modulos resolvidos");
+    return 0;
+}

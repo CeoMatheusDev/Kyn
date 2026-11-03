@@ -1,0 +1,7 @@
+// tests/cases/10_strings_and_chars.kyn — literais e escapes.
+fn main() -> i32 {
+    println("tab:\tquebra:\naspa:\" backslash:\\");
+    println('K');
+    println("fim");
+    return 0;
+}
