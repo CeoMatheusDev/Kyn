@@ -307,12 +307,25 @@ pub const Sema = struct {
                 continue;
             }
             const ty = try self.resolveType(param.ty);
-            try params.append(self.alloc, .{ .name = param.name, .type_id = ty, .span = param.span });
+            // Parâmetro `[N]T` decai para `[]T`, como o array-to-pointer do C:
+            // a função recebe ponteiro + comprimento e ainda tem `.len`.
+            const final_ty = if (self.type_table.arrayInfo(ty)) |arr|
+                try self.type_table.add(self.alloc, .{ .slice = .{ .elem = arr.elem, .is_const = false } })
+            else ty;
+            try params.append(self.alloc, .{ .name = param.name, .type_id = final_ty, .span = param.span });
         }
         info.params = params.items;
 
         if (decl.ret) |ret_ty| {
             info.ret = try self.resolveType(ret_ty);
+            if (self.type_table.isArray(info.ret)) {
+                self.reportHelp(
+                    .unsupported,
+                    "funções não podem retornar array: o tamanho viveria na pilha da função",
+                    ret_ty.spanOf(),
+                    "retorne um slice `[]T` ou envolva o array em um `struct`",
+                );
+            }
         }
 
         if (owner) |owner_name| {
@@ -426,6 +439,32 @@ pub const Sema = struct {
             .ptr => |p| {
                 const inner = try self.resolveType(p.inner);
                 return self.type_table.add(self.alloc, .{ .ptr = .{ .elem = inner, .is_const = p.is_const } });
+            },
+            .array => |a| {
+                const inner = try self.resolveType(a.inner);
+                if (self.type_table.isArray(inner)) {
+                    self.reportHelp(
+                        .unsupported,
+                        "arrays multidimensionais não são suportados",
+                        a.span,
+                        "use um array de structs ou um slice de slices",
+                    );
+                    return types.invalid;
+                }
+                return self.type_table.add(self.alloc, .{ .array = .{ .elem = inner, .count = a.count } });
+            },
+            .slice => |sl| {
+                const inner = try self.resolveType(sl.inner);
+                if (self.type_table.isArray(inner)) {
+                    self.reportHelp(
+                        .unsupported,
+                        "slice de array não é suportado",
+                        sl.span,
+                        "use um slice de structs ou um array de tamanho fixo",
+                    );
+                    return types.invalid;
+                }
+                return self.type_table.add(self.alloc, .{ .slice = .{ .elem = inner, .is_const = sl.is_const } });
             },
         }
     }
@@ -569,6 +608,7 @@ pub const Sema = struct {
                 self.loop_depth -= 1;
             },
             .range_for => |*range| try self.checkRangeFor(range),
+            .collection_for => |*loop| try self.checkCollectionFor(loop),
             .break_ => |span| {
                 if (self.loop_depth == 0) {
                     self.reportHelp(.invalid_control_flow, "`break` fora de um laço", span, "use `break` apenas dentro de `while` ou `for`");
@@ -606,6 +646,7 @@ pub const Sema = struct {
                     binding.span,
                 );
             }
+            try self.decayToSlice(&binding.init, declared);
             final_ty = declared;
         } else if (init_ty == types.invalid) {
             final_ty = self.type_table.i32_id;
@@ -640,6 +681,8 @@ pub const Sema = struct {
                     }) catch "retorno inválido",
                     ret.span,
                 );
+            } else {
+                try self.decayToSlice(value, expected);
             }
         } else if (!self.type_table.isVoid(expected)) {
             self.report(
@@ -662,7 +705,15 @@ pub const Sema = struct {
     }
 
     fn checkRangeFor(self: *Sema, range: *ast.RangeFor) Error!void {
-        const start_ty = try self.checkExpr(&range.start, null);
+        // Um limite literal adota o tipo do outro lado: `for i in 0..xs.len`
+        // não pode falhar só porque `0` seria `i32` por padrão.
+        const start_ty: types.Id = blk: {
+            if (self.isLiteral(&range.start) and !self.isLiteral(&range.end)) {
+                const end_ty = try self.checkExpr(&range.end, null);
+                break :blk try self.checkExpr(&range.start, end_ty);
+            }
+            break :blk try self.checkExpr(&range.start, null);
+        };
         const end_ty = try self.checkExpr(&range.end, start_ty);
         if (!self.type_table.isInt(start_ty)) {
             self.report(
@@ -690,7 +741,47 @@ pub const Sema = struct {
         self.loop_depth -= 1;
     }
 
+    /// `for item in colecao { ... }` sobre array ou slice. O elemento é uma
+    /// cópia imutável; para modificar, indexe a coleção dentro do corpo.
+    fn checkCollectionFor(self: *Sema, loop: *ast.CollectionFor) Error!void {
+        const collection_ty = try self.checkExpr(&loop.collection, null);
+        if (!self.type_table.isArray(collection_ty) and !self.type_table.isSlice(collection_ty)) {
+            self.reportHelp(
+                .invalid_operand,
+                std.fmt.allocPrint(self.alloc, "`{s}` não pode ser percorrido com `for`", .{self.typeName(collection_ty)}) catch "coleção inválida",
+                loop.collection.span,
+                "use um array `[N]T`, um slice `[]T` ou a forma `for i in inicio..fim`",
+            );
+            return;
+        }
+        const elem = self.type_table.elemOf(collection_ty) orelse types.invalid;
+        // O backend percorre uma cópia em slice; arrays decaem aqui.
+        if (self.type_table.isArray(collection_ty)) {
+            const slice_ty = try self.type_table.add(self.alloc, .{ .slice = .{ .elem = elem, .is_const = false } });
+            try self.decayToSlice(&loop.collection, slice_ty);
+        }
+        self.loop_depth += 1;
+        try self.pushScope();
+        try self.declareVar(loop.var_name, elem, false, loop.var_span, true);
+        for (loop.body.stmts) |*stmt| try self.checkStmt(stmt);
+        try self.popScope();
+        self.loop_depth -= 1;
+    }
+
     fn checkAssign(self: *Sema, assign: *ast.Assign) Error!void {
+        // Verificação adiantada: em C, arrays não são atribuíveis.
+        if (assign.target.kind == .ident) {
+            if (self.lookupVar(assign.target.kind.ident)) |variable| {
+                if (self.type_table.isArray(variable.type_id)) {
+                    self.reportHelp(
+                        .unsupported,
+                        "arrays não são atribuíveis como um todo",
+                        assign.span,
+                        "atribua elemento a elemento (`xs[0] = ...`) ou trabalhe com um slice",
+                    );
+                }
+            }
+        }
         const target_ty = try self.checkAssignable(assign.target);
         if (target_ty == types.invalid) return;
 
@@ -761,6 +852,40 @@ pub const Sema = struct {
                     );
                 }
                 return self.fieldType(info, field.name, expr.span);
+            },
+            .index => |index| {
+                const object_ty = try self.checkExpr(index.object, null);
+                if (!self.type_table.isArray(object_ty) and !self.type_table.isSlice(object_ty)) {
+                    self.report(
+                        .invalid_operand,
+                        std.fmt.allocPrint(self.alloc, "`{s}` não pode ser indexado", .{self.typeName(object_ty)}) catch "operand inválido",
+                        expr.span,
+                    );
+                    return types.invalid;
+                }
+                const elem = self.type_table.elemOf(object_ty) orelse types.invalid;
+                const index_ty = try self.checkExpr(index.index, self.type_table.usize_id);
+                if (!self.type_table.isInt(index_ty)) {
+                    self.report(.type_mismatch, "índice deve ser um inteiro", index.index.span);
+                }
+                if (self.type_table.sliceInfo(object_ty)) |slice| {
+                    if (slice.is_const) {
+                        self.reportHelp(
+                            .assign_immutable,
+                            "não é possível escrever em elemento de `[]const`",
+                            expr.span,
+                            "receba o slice como `[]T` para poder modificar",
+                        );
+                    }
+                } else if (!self.placeThroughType(object_ty, index.object.*)) {
+                    self.reportHelp(
+                        .assign_immutable,
+                        "não é possível atribuir a elemento de um valor imutável",
+                        expr.span,
+                        "declare o binding com `var` (ou `let mut`)",
+                    );
+                }
+                return elem;
             },
             .deref => |operand| {
                 const operand_ty = try self.checkExpr(operand, null);
@@ -910,6 +1035,12 @@ pub const Sema = struct {
             .call => |call| return self.checkCall(call, expr.span, expected),
             .field => |field| {
                 const object_ty = try self.checkExpr(field.object, null);
+                // `.len` de array/slice não é um campo de struct.
+                if (std.mem.eql(u8, field.name, "len")) {
+                    if (self.type_table.isArray(object_ty) or self.type_table.isSlice(object_ty)) {
+                        return self.type_table.usize_id;
+                    }
+                }
                 // Método usado como valor não é suportado; apenas chamadas.
                 const struct_ty = self.autoDeref(object_ty);
                 const info = self.structByType(struct_ty) orelse {
@@ -958,6 +1089,15 @@ pub const Sema = struct {
                 if (!isPlace(ref_of.operand.*)) {
                     self.report(.invalid_operand, "não é possível obter referência de um valor temporário", expr.span);
                 }
+                if (self.type_table.isArray(operand_ty)) {
+                    self.reportHelp(
+                        .unsupported,
+                        "não é possível obter referência de um array",
+                        expr.span,
+                        "use uma fatia `xs[..]` para passar a coleção adiante",
+                    );
+                    return types.invalid;
+                }
                 return self.type_table.add(self.alloc, .{ .ref_ = .{ .elem = operand_ty, .mutable = ref_of.mutable } });
             },
             .deref => |operand| {
@@ -977,7 +1117,137 @@ pub const Sema = struct {
                 }
                 return elem;
             },
+            .array_lit => |items| return self.checkArrayLiteral(items, expr.span, expected),
+            .index => |index| {
+                const object_ty = try self.checkExpr(index.object, null);
+                if (!self.type_table.isArray(object_ty) and !self.type_table.isSlice(object_ty)) {
+                    self.reportHelp(
+                        .invalid_operand,
+                        std.fmt.allocPrint(self.alloc, "`{s}` não pode ser indexado", .{self.typeName(object_ty)}) catch "operand inválido",
+                        expr.span,
+                        "indexação é suportada em `[N]T` e `[]T`",
+                    );
+                    return types.invalid;
+                }
+                const index_ty = try self.checkExpr(index.index, self.type_table.usize_id);
+                if (!self.type_table.isInt(index_ty)) {
+                    self.report(
+                        .type_mismatch,
+                        std.fmt.allocPrint(self.alloc, "índice deve ser inteiro, encontrado `{s}`", .{self.typeName(index_ty)}) catch "índice inválido",
+                        index.index.span,
+                    );
+                }
+                return self.type_table.elemOf(object_ty) orelse types.invalid;
+            },
+            .slice_range => |range| return self.checkSliceRange(range, expr.span),
+            .to_slice => |operand| {
+                // Inserido pela própria semântica; o operando já está tipado.
+                _ = operand;
+                return expr.type_id;
+            },
         }
+    }
+
+    /// `[a, b, c]` — o tipo do elemento vem do contexto quando existe; caso
+    /// contrário, do primeiro elemento (os demais precisam ser coercíveis).
+    fn checkArrayLiteral(self: *Sema, items: []const *ast.Expr, span: diag.Span, expected: ?types.Id) Error!types.Id {
+        var expected_elem: types.Id = types.invalid;
+        if (expected) |want| {
+            if (self.type_table.arrayInfo(want)) |arr| {
+                expected_elem = arr.elem;
+                if (arr.count != items.len) {
+                    self.report(
+                        .type_mismatch,
+                        std.fmt.allocPrint(self.alloc, "o literal tem {d} elemento(s), mas o tipo declara [{d}]", .{
+                            items.len,
+                            arr.count,
+                        }) catch "tamanho de array incompatível",
+                        span,
+                    );
+                }
+            } else if (self.type_table.sliceInfo(want)) |slice| {
+                expected_elem = slice.elem;
+            }
+        }
+        if (items.len == 0) {
+            self.reportHelp(
+                .unsupported,
+                "literal de array vazio `[]` não é suportado",
+                span,
+                "declare pelo menos um elemento",
+            );
+            return types.invalid;
+        }
+
+        var elem_ty = expected_elem;
+        for (items, 0..) |item, i| {
+            const got = try self.checkExpr(item, if (elem_ty == types.invalid) null else elem_ty);
+            if (elem_ty == types.invalid) {
+                elem_ty = got;
+                continue;
+            }
+            if (!self.coercible(got, elem_ty, item)) {
+                self.report(
+                    .type_mismatch,
+                    std.fmt.allocPrint(self.alloc, "elemento {d}: esperado `{s}`, encontrado `{s}`", .{
+                        i + 1,
+                        self.typeName(elem_ty),
+                        self.typeName(got),
+                    }) catch "elemento incompatível",
+                    item.span,
+                );
+            }
+        }
+        if (elem_ty == types.invalid) elem_ty = self.type_table.i32_id;
+        return self.type_table.add(self.alloc, .{ .array = .{ .elem = elem_ty, .count = @intCast(items.len) } });
+    }
+
+    /// `objeto[lo..hi]` — produz um slice sobre o mesmo armazenamento. Os
+    /// limites **não** são verificados em tempo de execução.
+    fn checkSliceRange(self: *Sema, range: anytype, span: diag.Span) Error!types.Id {
+        const object_ty = try self.checkExpr(range.object, null);
+        const is_array = self.type_table.isArray(object_ty);
+        if (!is_array and !self.type_table.isSlice(object_ty)) {
+            self.reportHelp(
+                .invalid_operand,
+                std.fmt.allocPrint(self.alloc, "`{s}` não pode ser fatiado", .{self.typeName(object_ty)}) catch "operand inválido",
+                span,
+                "fatias são suportadas em `[N]T` e `[]T`",
+            );
+            return types.invalid;
+        }
+        if (range.start) |start| {
+            const ty = try self.checkExpr(start, self.type_table.usize_id);
+            if (!self.type_table.isInt(ty)) {
+                self.report(.type_mismatch, "início da fatia deve ser inteiro", start.span);
+            }
+        }
+        if (range.end) |end| {
+            const ty = try self.checkExpr(end, self.type_table.usize_id);
+            if (!self.type_table.isInt(ty)) {
+                self.report(.type_mismatch, "fim da fatia deve ser inteiro", end.span);
+            }
+        }
+        const elem = self.type_table.elemOf(object_ty) orelse types.invalid;
+        // A constância dos elementos segue o lugar de origem: fatiar um array
+        // imutável não pode criar um caminho de escrita.
+        const is_const = if (self.type_table.sliceInfo(object_ty)) |slice|
+            slice.is_const
+        else
+            !self.placeIsMutable(range.object.*);
+        return self.type_table.add(self.alloc, .{ .slice = .{ .elem = elem, .is_const = is_const } });
+    }
+
+    /// Converte um array em slice quando o destino espera `[]T`. A conversão
+    /// fica explícita na AST (nó `to_slice`) para o backend emitir o literal
+    /// composto de C correspondente.
+    fn decayToSlice(self: *Sema, expr: *ast.Expr, target: types.Id) !void {
+        if (!self.type_table.isArray(expr.type_id)) return;
+        if (self.type_table.sliceInfo(target) == null) return;
+        const copy = try self.alloc.create(ast.Expr);
+        copy.* = expr.*;
+        expr.kind = .{ .to_slice = copy };
+        expr.type_id = target;
     }
 
     fn checkBinary(self: *Sema, binary: anytype, span: diag.Span) Error!types.Id {
@@ -1421,6 +1691,8 @@ pub const Sema = struct {
                     }) catch "mismatch de tipos",
                     call.args[i].span,
                 );
+            } else {
+                try self.decayToSlice(call.args[i], param.type_id);
             }
         }
         for (call.args[expected_count..]) |extra| {
@@ -1492,6 +1764,18 @@ pub const Sema = struct {
             // Literal de string em parâmetro `*const u8`/`*u8` (FFI com C).
             if (self.type_table.isStr(from) and self.isCStringPtr(to)) return true;
         }
+        // `[N]T` onde se espera `[]T` (decadência explícita via `to_slice`).
+        if (self.type_table.arrayInfo(from)) |source| {
+            if (self.type_table.sliceInfo(to)) |target| {
+                if (self.compatible(source.elem, target.elem)) return true;
+            }
+        }
+        // `[]T` onde se espera `[]const T`.
+        if (self.type_table.sliceInfo(from)) |source| {
+            if (self.type_table.sliceInfo(to)) |target| {
+                if (target.is_const and !source.is_const and self.compatible(source.elem, target.elem)) return true;
+            }
+        }
         return false;
     }
 
@@ -1520,7 +1804,7 @@ fn intFits(value: i128, ty: types.Id, table: types.Table) bool {
 fn isPlace(expr: ast.Expr) bool {
     return switch (expr.kind) {
         .ident, .self_, .field => true,
-        .deref => true,
+        .deref, .index => true,
         else => false,
     };
 }

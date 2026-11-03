@@ -73,8 +73,8 @@ cc --version
 
 ```sh
 zig build                 # gera zig-out/bin/kyn
-zig build test            # 26 testes unitários (lexer, parser, semântica, backend)
-zig build integration     # 105 fixtures .kyn compiladas e executadas de ponta a ponta
+zig build test            # 27 testes unitários (lexer, parser, semântica, backend)
+zig build integration     # 115 fixtures .kyn compiladas e executadas de ponta a ponta
 zig build check           # unitários + integração
 zig build run -- help     # CLI
 ```
@@ -100,10 +100,10 @@ programa é propagado.
 | Área | Suportado | Ainda não |
 | --- | --- | --- |
 | Itens | `fn`, `extern fn`, `struct`, `enum`, `impl`, `import`, atributos `#[repr(C)]`/`#[align(N)]` | generics, traits, `match`, closures, visibilidade real de `pub` |
-| Tipos | `i8`…`i64`, `isize`, `u8`…`u64`, `usize`, `f32`, `f64`, `bool`, `char`, `str`, `void`, `&T`, `&mut T`, `*T`, `*const T`, structs e enums nomeados | slices `[]T`, arrays `[N]T`, `Result<T, E>`, tuplas |
-| Statements | `let`, `var`, `let mut`, atribuição simples e composta, `if`/`else if`/`else`, `while`, `for i in a..b`, `return`, `break`, `continue`, blocos, `unsafe { … }` | `for` sobre coleções, `match`, `defer` |
-| Expressões | aritmética, comparação, lógica, bit a bit, shifts, unários, chamadas, métodos, `Tipo::item`, campos, literais de struct e enum, referências, dereferência, casts `as` | indexação, fatiamento, operadores de erro `?` |
-| Verificações | tipos, escopo, shadowing, mutabilidade, caminhos de retorno, aridade, `unsafe` obrigatório para ponteiro cru e `extern fn`, atributos | borrow checker, lifetimes, ownership/moves |
+| Tipos | `i8`…`i64`, `isize`, `u8`…`u64`, `usize`, `f32`, `f64`, `bool`, `char`, `str`, `void`, `&T`, `&mut T`, `*T`, `*const T`, `[N]T`, `[]T`, `[]const T`, structs e enums nomeados | `Result<T, E>`, tuplas, arrays multidimensionais |
+| Statements | `let`, `var`, `let mut`, atribuição simples e composta, `if`/`else if`/`else`, `while`, `for i in a..b`, `for x in colecao`, `return`, `break`, `continue`, blocos, `unsafe { … }` | `match`, `defer` |
+| Expressões | aritmética, comparação, lógica, bit a bit, shifts, unários, chamadas, métodos, `Tipo::item`, campos, `.len`, indexação `a[i]`, fatias `a[lo..hi]`, literais de struct, enum e array, referências, dereferência, casts `as` | operadores de erro `?`, indexação de `str` |
+| Verificações | tipos, escopo, shadowing, mutabilidade, caminhos de retorno, aridade, `unsafe` obrigatório para ponteiro cru e `extern fn`, atributos, tamanho de array, constância de slice | borrow checker, lifetimes, ownership/moves, limites de índice em tempo de execução |
 | Bibliotecas | builtins `print`/`println`; FFI com C via `extern fn` | `kyn:core` e `kyn:std` (imports são validados, mas não fornecem símbolos) |
 
 Consulte [docs/status.md](docs/status.md) para o estado detalhado e

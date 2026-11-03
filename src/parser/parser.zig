@@ -419,16 +419,41 @@ pub const Parser = struct {
             return node;
         }
         if (self.at(.lbracket)) {
-            // `[]T` e `[*]T` são aceitos como ponteiro cru (alias documentado).
             const tok = self.peek();
             self.pos += 1;
-            if (self.eat(.star) == null) {
-                return self.failHelp(tok.span, "tipos de slice/`[]T` ainda não são suportados", .{}, "use `*T` para ponteiro cru");
+            // `[*]T` continua sendo aceito como alias de ponteiro cru.
+            if (self.eat(.star) != null) {
+                _ = try self.expect(.rbracket);
+                const inner = try self.parseType();
+                const node = try self.alloc.create(ast.TypeExpr);
+                node.* = .{ .ptr = .{ .inner = inner, .is_const = false, .span = .{ .start = tok.span.start, .end = inner.spanOf().end } } };
+                return node;
             }
+            // `[N]T` — array de tamanho fixo.
+            if (self.at(.int_lit)) {
+                const count_tok = self.peek();
+                self.pos += 1;
+                const value = parseIntLiteral(count_tok.text) orelse
+                    return self.fail(count_tok.span, "tamanho de array `{s}` é inválido", .{count_tok.text});
+                if (value < 1) {
+                    return self.failHelp(count_tok.span, "array precisa ter tamanho maior que zero", .{}, "use `[]T` para uma coleção de tamanho dinâmico");
+                }
+                _ = try self.expect(.rbracket);
+                const inner = try self.parseType();
+                const node = try self.alloc.create(ast.TypeExpr);
+                node.* = .{ .array = .{ .inner = inner, .count = @intCast(value), .span = .{ .start = tok.span.start, .end = inner.spanOf().end } } };
+                return node;
+            }
+            // `[]T` ou `[]const T` — slice.
             _ = try self.expect(.rbracket);
+            var is_const = false;
+            if (self.at(.ident) and std.mem.eql(u8, self.peek().text, "const")) {
+                self.pos += 1;
+                is_const = true;
+            }
             const inner = try self.parseType();
             const node = try self.alloc.create(ast.TypeExpr);
-            node.* = .{ .ptr = .{ .inner = inner, .is_const = false, .span = .{ .start = tok.span.start, .end = inner.spanOf().end } } };
+            node.* = .{ .slice = .{ .inner = inner, .is_const = is_const, .span = .{ .start = tok.span.start, .end = inner.spanOf().end } } };
             return node;
         }
 
@@ -481,7 +506,11 @@ pub const Parser = struct {
             return;
         }
         if (self.at(.kw_for)) {
-            stmts.append(self.alloc, .{ .range_for = try self.parseRangeFor() }) catch return error.ParseFailed;
+            if (self.forUsesRange()) {
+                stmts.append(self.alloc, .{ .range_for = try self.parseRangeFor() }) catch return error.ParseFailed;
+            } else {
+                stmts.append(self.alloc, .{ .collection_for = try self.parseCollectionFor() }) catch return error.ParseFailed;
+            }
             return;
         }
         if (self.at(.kw_break)) {
@@ -641,6 +670,41 @@ pub const Parser = struct {
         };
     }
 
+    fn parseCollectionFor(self: *Parser) Error!ast.CollectionFor {
+        const tok = self.peek();
+        self.pos += 1;
+        const name_tok = try self.expectIdent();
+        _ = try self.expect(.kw_in);
+        const collection = try self.parseExpr(0);
+        const body = try self.parseBlock();
+        return .{
+            .var_name = name_tok.text,
+            .var_span = name_tok.span,
+            .collection = collection.*,
+            .body = body,
+            .span = .{ .start = tok.span.start, .end = body.span.end },
+        };
+    }
+
+    /// Distingue `for i in a..b` de `for x in colecao` sem backtrack: varre os
+    /// tokens até o `{` do corpo procurando um `..` fora de delimitadores.
+    fn forUsesRange(self: *Parser) bool {
+        var i: usize = self.pos;
+        var depth: usize = 0;
+        while (i < self.tokens.len) : (i += 1) {
+            switch (self.tokens[i].kind) {
+                .lparen, .lbracket => depth += 1,
+                .rparen, .rbracket => {
+                    if (depth > 0) depth -= 1;
+                },
+                .dotdot => if (depth == 0) return true,
+                .lbrace, .eof => return false,
+                else => {},
+            }
+        }
+        return false;
+    }
+
     // ------------------------------------------------------------ expressões
 
     /// Precedência por "binding power": quanto maior o número, mais forte o
@@ -690,6 +754,35 @@ pub const Parser = struct {
                     .start = lhs.span.start,
                     .end = name_tok.span.end,
                 });
+                lhs = node;
+                continue;
+            }
+            if (self.at(.lbracket)) {
+                const open_tok = self.peek();
+                self.pos += 1;
+                // `[..fim]` e `[..]` começam direto no operador de intervalo.
+                var start: ?*ast.Expr = null;
+                if (!self.at(.dotdot)) start = try self.parseExpr(0);
+                if (self.eat(.dotdot) != null) {
+                    var end: ?*ast.Expr = null;
+                    if (!self.at(.rbracket)) end = try self.parseExpr(0);
+                    const close_tok = try self.expect(.rbracket);
+                    const node = try ast.Expr.make(
+                        self.alloc,
+                        .{ .slice_range = .{ .object = lhs, .start = start, .end = end } },
+                        .{ .start = lhs.span.start, .end = close_tok.span.end },
+                    );
+                    lhs = node;
+                    continue;
+                }
+                const index_expr = start orelse
+                    return self.fail(open_tok.span, "esperava um índice dentro de `[]`", .{});
+                const close_tok = try self.expect(.rbracket);
+                const node = try ast.Expr.make(
+                    self.alloc,
+                    .{ .index = .{ .object = lhs, .index = index_expr } },
+                    .{ .start = lhs.span.start, .end = close_tok.span.end },
+                );
                 lhs = node;
                 continue;
             }
@@ -790,6 +883,20 @@ pub const Parser = struct {
     fn parsePrimary(self: *Parser) Error!*ast.Expr {
         const tok = self.peek();
         switch (tok.kind) {
+            .lbracket => {
+                self.pos += 1;
+                var items: std.ArrayList(*ast.Expr) = .empty;
+                while (!self.at(.rbracket) and !self.at(.eof)) {
+                    const item = try self.parseExpr(0);
+                    items.append(self.alloc, item) catch return error.ParseFailed;
+                    if (self.eat(.comma) == null) break;
+                }
+                const end_tok = try self.expect(.rbracket);
+                return ast.Expr.make(self.alloc, .{ .array_lit = items.items }, .{
+                    .start = tok.span.start,
+                    .end = end_tok.span.end,
+                });
+            },
             .int_lit => {
                 self.pos += 1;
                 const value = parseIntLiteral(tok.text) orelse {

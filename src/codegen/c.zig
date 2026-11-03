@@ -28,6 +28,8 @@ pub const Codegen = struct {
     alloc: std.mem.Allocator,
     sema: *sema.Sema,
     out: std.ArrayList(u8) = .empty,
+    /// Gera nomes únicos para as variáveis auxiliares de `for item in colecao`.
+    for_counter: usize = 0,
 
     pub fn init(alloc: std.mem.Allocator, analyzer: *sema.Sema) Codegen {
         return .{ .alloc = alloc, .sema = analyzer };
@@ -35,6 +37,7 @@ pub const Codegen = struct {
 
     pub fn emit(self: *Codegen, program: ast.Program) Error![]const u8 {
         try self.emitHeader();
+        try self.emitSliceTypes();
         try self.emitEnums();
         try self.emitStructs();
         try self.emitExternDecls(program);
@@ -94,6 +97,26 @@ pub const Codegen = struct {
         );
     }
 
+    /// Um `typedef` por tipo de slice usado no programa. Os tipos são
+    /// internados pela semântica, então percorrer a tabela emite exatamente o
+    /// conjunto necessário, na ordem de uso.
+    fn emitSliceTypes(self: *Codegen) Error!void {
+        var any = false;
+        for (self.sema.type_table.items.items) |ty| {
+            const slice = switch (ty) {
+                .slice => |s| s,
+                else => continue,
+            };
+            const ptr_id = try self.sema.type_table.add(self.alloc, .{ .ptr = .{ .elem = slice.elem, .is_const = slice.is_const } });
+            try self.write("typedef struct {{ {s} data; size_t len; }} {s};\n", .{
+                try self.cType(ptr_id),
+                try self.sliceTypeName(slice.elem, slice.is_const),
+            });
+            any = true;
+        }
+        if (any) try self.writeRaw("\n");
+    }
+
     fn emitEnums(self: *Codegen) Error!void {
         for (self.sema.enum_order.items) |info| {
             try self.write("typedef enum {{\n", .{});
@@ -119,7 +142,16 @@ pub const Codegen = struct {
                 try self.writeRaw("    char kyn_placeholder;\n");
             }
             for (info.fields) |field| {
-                try self.write("    {s} kyn_{s};\n", .{ try self.cType(field.type_id), field.name });
+                // Em C, arrays usam sintaxe de declarador: `tipo nome[N];`.
+                if (self.sema.type_table.arrayInfo(field.type_id)) |arr| {
+                    try self.write("    {s} kyn_{s}[{d}];\n", .{
+                        try self.cType(arr.elem),
+                        field.name,
+                        arr.count,
+                    });
+                } else {
+                    try self.write("    {s} kyn_{s};\n", .{ try self.cType(field.type_id), field.name });
+                }
             }
             try self.write("}};\n\n", .{});
         }
@@ -243,7 +275,15 @@ pub const Codegen = struct {
             .binding => |binding| {
                 const type_id = binding.init.type_id;
                 try self.indent(level);
-                try self.write("{s} kyn_{s} = ", .{ try self.cType(type_id), binding.name });
+                if (self.sema.type_table.arrayInfo(type_id)) |arr| {
+                    try self.write("{s} kyn_{s}[{d}] = ", .{
+                        try self.cType(arr.elem),
+                        binding.name,
+                        arr.count,
+                    });
+                } else {
+                    try self.write("{s} kyn_{s} = ", .{ try self.cType(type_id), binding.name });
+                }
                 try self.emitExpr(binding.init);
                 try self.writeRaw(";\n");
             },
@@ -276,6 +316,31 @@ pub const Codegen = struct {
                 } else {
                     try self.writeRaw("return;\n");
                 }
+            },
+            .collection_for => |loop| {
+                // A semântica já converteu arrays em slice; aqui a coleção é
+                // avaliada uma única vez em uma variável auxiliar.
+                const slice_ty = loop.collection.type_id;
+                const elem_ty = self.sema.type_table.elemOf(slice_ty) orelse self.sema.type_table.i32_id;
+                self.for_counter += 1;
+                const temp = try std.fmt.allocPrint(self.alloc, "kyn_col{d}", .{self.for_counter});
+                const idx = try std.fmt.allocPrint(self.alloc, "kyn_i{d}", .{self.for_counter});
+                try self.indent(level);
+                try self.write("{s} {s} = ", .{ try self.cType(slice_ty), temp });
+                try self.emitExpr(loop.collection);
+                try self.writeRaw(";\n");
+                try self.indent(level);
+                try self.write("for (size_t {s} = 0; {s} < {s}.len; {s} += 1) {{\n", .{ idx, idx, temp, idx });
+                try self.indent(level + 4);
+                try self.write("{s} kyn_{s} = {s}.data[{s}];\n", .{
+                    try self.cType(elem_ty),
+                    loop.var_name,
+                    temp,
+                    idx,
+                });
+                for (loop.body.stmts) |inner| try self.emitStmt(inner, level + 4);
+                try self.indent(level);
+                try self.writeRaw("}\n");
             },
             .cond => |cond| try self.emitIf(cond, level),
             .loop => |loop| {
@@ -418,6 +483,19 @@ pub const Codegen = struct {
             .call => |call| try self.emitCall(call),
             .field => |field| {
                 const object_ty = field.object.type_id;
+                // `.len` de array é uma constante; de slice, é o campo `len`.
+                if (std.mem.eql(u8, field.name, "len")) {
+                    if (self.sema.type_table.arrayInfo(object_ty)) |arr| {
+                        try self.write("((size_t){d})", .{arr.count});
+                        return;
+                    }
+                    if (self.sema.type_table.isSlice(object_ty)) {
+                        try self.writeRaw("((");
+                        try self.emitExpr(field.object.*);
+                        try self.writeRaw(").len)");
+                        return;
+                    }
+                }
                 const through_ptr = self.sema.type_table.refElem(object_ty) != null or
                     self.sema.type_table.isRawPtr(object_ty);
                 try self.writeRaw("((");
@@ -453,7 +531,138 @@ pub const Codegen = struct {
                 try self.emitExpr(operand.*);
                 try self.writeRaw(")");
             },
+            // Lista de inicialização: só aparece onde C aceita `{ ... }`
+            // (binding de array, campo de struct ou literal composto).
+            .array_lit => |items| {
+                try self.writeRaw("{");
+                for (items, 0..) |item, i| {
+                    if (i > 0) try self.writeRaw(", ");
+                    try self.emitExpr(item.*);
+                }
+                try self.writeRaw("}");
+            },
+            .index => |index| {
+                const object_ty = index.object.type_id;
+                try self.writeRaw("((");
+                try self.emitExpr(index.object.*);
+                if (self.sema.type_table.isSlice(object_ty)) {
+                    try self.writeRaw(").data[");
+                } else {
+                    try self.writeRaw(")[");
+                }
+                try self.emitExpr(index.index.*);
+                try self.writeRaw("])");
+            },
+            .slice_range => |range| try self.emitSliceRange(range, expr.type_id),
+            .to_slice => |operand| {
+                const slice = self.sema.type_table.sliceInfo(expr.type_id) orelse
+                    return error.CodegenFailed;
+                const count = self.sema.type_table.arrayInfo(operand.type_id).?.count;
+                const ptr_id = try self.sema.type_table.add(self.alloc, .{ .ptr = .{ .elem = slice.elem, .is_const = slice.is_const } });
+                try self.write("(({s}){{ ", .{try self.sliceTypeName(slice.elem, slice.is_const)});
+                if (operand.kind == .array_lit) {
+                    // Literal composto com tempo de vida do bloco atual.
+                    try self.write("({s}[])", .{try self.cType(slice.elem)});
+                    try self.emitExpr(operand.*);
+                } else {
+                    try self.write("({s})(", .{try self.cType(ptr_id)});
+                    try self.emitExpr(operand.*);
+                    try self.writeRaw(")");
+                }
+                try self.write(", (size_t){d} }})", .{count});
+            },
         }
+    }
+
+    /// `objeto[lo..hi]`, `objeto[lo..]`, `objeto[..hi]` e `objeto[..]`.
+    /// Os limites **não** são verificados em tempo de execução.
+    fn emitSliceRange(self: *Codegen, range: anytype, result_ty: types.Id) Error!void {
+        const slice = self.sema.type_table.sliceInfo(result_ty) orelse return error.CodegenFailed;
+        const name = try self.sliceTypeName(slice.elem, slice.is_const);
+        const object_ty = range.object.type_id;
+        const is_slice = self.sema.type_table.isSlice(object_ty);
+
+        // `s[..]` sobre slice é o próprio valor.
+        if (is_slice and range.start == null and range.end == null) {
+            try self.writeRaw("((");
+            try self.emitExpr(range.object.*);
+            try self.writeRaw("))");
+            return;
+        }
+
+        try self.write("(({s}){{ ", .{name});
+        if (is_slice) {
+            try self.writeRaw("((");
+            try self.emitExpr(range.object.*);
+            try self.writeRaw(").data");
+        } else {
+            const ptr_id = try self.sema.type_table.add(self.alloc, .{ .ptr = .{ .elem = slice.elem, .is_const = slice.is_const } });
+            try self.write("({s})(", .{try self.cType(ptr_id)});
+            try self.emitExpr(range.object.*);
+            try self.writeRaw(")");
+        }
+        if (range.start) |start| {
+            try self.writeRaw(" + (size_t)(");
+            try self.emitExpr(start.*);
+            try self.writeRaw(")");
+        }
+        try self.writeRaw(", (size_t)(");
+        if (range.end) |end| {
+            try self.emitExpr(end.*);
+            if (range.start != null) {
+                try self.writeRaw(") - (size_t)(");
+                try self.emitExpr(range.start.?.*);
+            }
+        } else if (range.start) |start| {
+            if (is_slice) {
+                try self.writeRaw("((");
+                try self.emitExpr(range.object.*);
+                try self.writeRaw(").len) - (size_t)(");
+                try self.emitExpr(start.*);
+            } else {
+                const count = self.sema.type_table.arrayInfo(object_ty).?.count;
+                try self.write("{d}) - (size_t)(", .{count});
+                try self.emitExpr(start.*);
+            }
+        } else {
+            if (is_slice) {
+                try self.writeRaw("((");
+                try self.emitExpr(range.object.*);
+                try self.writeRaw(").len");
+            } else {
+                try self.write("{d}", .{self.sema.type_table.arrayInfo(object_ty).?.count});
+            }
+        }
+        try self.writeRaw(") })");
+    }
+
+    /// Nome do `typedef` de slice: `KynSlice_I32`, `KynSliceC_Ponto`, ...
+    fn sliceTypeName(self: *Codegen, elem: types.Id, is_const: bool) Error![]const u8 {
+        return try std.fmt.allocPrint(self.alloc, "KynSlice{s}{s}", .{
+            if (is_const) "C_" else "_",
+            try self.sliceSuffix(elem),
+        });
+    }
+
+    fn sliceSuffix(self: *Codegen, elem: types.Id) Error![]const u8 {
+        const table = self.sema.type_table;
+        return switch (table.get(elem)) {
+            .void => "Void",
+            .bool => "Bool",
+            .char => "Char",
+            .str => "Str",
+            .int => |info| blk: {
+                const base: []const u8 = if (info.signed) "I" else "U";
+                if (info.addr_width) break :blk try std.fmt.allocPrint(self.alloc, "{s}size", .{base});
+                break :blk try std.fmt.allocPrint(self.alloc, "{s}{d}", .{ base, info.bits });
+            },
+            .float => |bits| if (bits == 32) "F32" else "F64",
+            .named => |named| try std.fmt.allocPrint(self.alloc, "{s}", .{named.name}),
+            .ptr => "Ptr",
+            .ref_ => "Ref",
+            .array => unreachable, // rejeitado pela semântica
+            .slice => unreachable, // rejeitado pela semântica
+        };
     }
 
     fn emitCall(self: *Codegen, call: anytype) Error!void {
@@ -650,6 +859,11 @@ pub const Codegen = struct {
                 });
             },
             .ref_ => |ref| try std.fmt.allocPrint(self.alloc, "{s} *", .{try self.cType(ref.elem)}),
+            .slice => |slice| self.sliceTypeName(slice.elem, slice.is_const),
+            // Arrays usam sintaxe de declarador em C e nunca aparecem como
+            // tipo "solto": parâmetros decaem para slice na semântica e
+            // retornos de array são rejeitados.
+            .array => return error.CodegenFailed,
             .named => |named| try std.fmt.allocPrint(self.alloc, "Kyn{s}", .{named.name}),
         };
     }

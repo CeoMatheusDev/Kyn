@@ -28,6 +28,10 @@ pub const Type = union(enum) {
     float: u8,
     ptr: struct { elem: Id, is_const: bool },
     ref_: struct { elem: Id, mutable: bool },
+    /// `[N]T` — tamanho conhecido em tempo de compilação.
+    array: struct { elem: Id, count: u64 },
+    /// `[]T` / `[]const T` — visão com ponteiro e comprimento.
+    slice: struct { elem: Id, is_const: bool },
     named: struct { name: []const u8, kind: NamedKind },
 };
 
@@ -116,6 +120,20 @@ pub const Table = struct {
                 };
                 return ar.mutable == br.mutable and self.eql(ar.elem, br.elem);
             },
+            .array => |aa| {
+                const ba = switch (b) {
+                    .array => |v| v,
+                    else => return false,
+                };
+                return aa.count == ba.count and self.eql(aa.elem, ba.elem);
+            },
+            .slice => |as| {
+                const bs = switch (b) {
+                    .slice => |v| v,
+                    else => return false,
+                };
+                return as.is_const == bs.is_const and self.eql(as.elem, bs.elem);
+            },
             .named => |an| {
                 const bn = switch (b) {
                     .named => |v| v,
@@ -184,6 +202,39 @@ pub const Table = struct {
         return self.get(id) == .ptr;
     }
 
+    pub fn isArray(self: Table, id: Id) bool {
+        return self.get(id) == .array;
+    }
+
+    pub fn isSlice(self: Table, id: Id) bool {
+        return self.get(id) == .slice;
+    }
+
+    pub fn arrayInfo(self: Table, id: Id) ?struct { elem: Id, count: u64 } {
+        return switch (self.get(id)) {
+            .array => |a| .{ .elem = a.elem, .count = a.count },
+            else => null,
+        };
+    }
+
+    pub fn sliceInfo(self: Table, id: Id) ?struct { elem: Id, is_const: bool } {
+        return switch (self.get(id)) {
+            .slice => |s| .{ .elem = s.elem, .is_const = s.is_const },
+            else => null,
+        };
+    }
+
+    /// Elemento de array, slice, ponteiro cru ou referência.
+    pub fn elemOf(self: Table, id: Id) ?Id {
+        return switch (self.get(id)) {
+            .array => |a| a.elem,
+            .slice => |s| s.elem,
+            .ptr => |p| p.elem,
+            .ref_ => |r| r.elem,
+            else => null,
+        };
+    }
+
     /// Nome legível para diagnósticos. O resultado é alocado em `alloc`.
     pub fn describe(self: Table, alloc: std.mem.Allocator, id: Id) ![]const u8 {
         if (id == invalid) return "<não inferido>";
@@ -204,6 +255,14 @@ pub const Table = struct {
             .ref_ => |r| try std.fmt.allocPrint(alloc, "{s}{s}", .{
                 if (r.mutable) "&mut " else "&",
                 try self.describe(alloc, r.elem),
+            }),
+            .array => |a| try std.fmt.allocPrint(alloc, "[{d}]{s}", .{
+                a.count,
+                try self.describe(alloc, a.elem),
+            }),
+            .slice => |s| try std.fmt.allocPrint(alloc, "[]{s}{s}", .{
+                if (s.is_const) "const " else "",
+                try self.describe(alloc, s.elem),
             }),
             .named => |n| n.name,
         };
@@ -244,6 +303,32 @@ test "composite types compare structurally" {
     const ptr_const = try table.add(a, .{ .ptr = .{ .elem = table.u8_id, .is_const = true } });
     const ptr_mut = try table.add(a, .{ .ptr = .{ .elem = table.u8_id, .is_const = false } });
     try std.testing.expect(!table.eql(ptr_const, ptr_mut));
+}
+
+test "array and slice types are distinct and stable" {
+    const alloc = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var table = try Table.init(a);
+
+    const arr3 = try table.add(a, .{ .array = .{ .elem = table.i32_id, .count = 3 } });
+    const arr3_again = try table.add(a, .{ .array = .{ .elem = table.i32_id, .count = 3 } });
+    const arr4 = try table.add(a, .{ .array = .{ .elem = table.i32_id, .count = 4 } });
+    try std.testing.expectEqual(arr3, arr3_again);
+    try std.testing.expect(!table.eql(arr3, arr4));
+
+    const mut_slice = try table.add(a, .{ .slice = .{ .elem = table.i32_id, .is_const = false } });
+    const const_slice = try table.add(a, .{ .slice = .{ .elem = table.i32_id, .is_const = true } });
+    try std.testing.expect(!table.eql(mut_slice, const_slice));
+    try std.testing.expect(!table.eql(arr3, mut_slice));
+
+    try std.testing.expectEqualStrings("[3]i32", try table.describe(a, arr3));
+    try std.testing.expectEqualStrings("[]i32", try table.describe(a, mut_slice));
+    try std.testing.expectEqualStrings("[]const i32", try table.describe(a, const_slice));
+    try std.testing.expectEqual(table.i32_id, table.elemOf(arr3).?);
+    try std.testing.expectEqual(table.i32_id, table.elemOf(mut_slice).?);
+    try std.testing.expectEqual(null, table.elemOf(table.i32_id));
 }
 
 test "describe renders readable names" {

@@ -2,8 +2,8 @@
 
 Sequência de trabalho proposta. Um item só é marcado como concluído quando o código
 existe, há teste executável e a documentação descreve o comportamento observado.
-Itens marcados com ✅ foram verificados em 2026-11-02 com `zig build check`
-(26 testes unitários + 105 casos de integração, 0 falhas).
+Itens marcados com ✅ foram verificados com `zig build check` (27 testes unitários +
+115 casos de integração, 0 falhas, em 2026-11-03).
 
 ## Fase 1 — Bootstrap em Zig
 
@@ -32,7 +32,9 @@ Itens marcados com ✅ foram verificados em 2026-11-02 com `zig build check`
 - ⬜ Separar e validar as APIs de `kyn:core` e `kyn:std` (hoje `import` só valida o
   nome do módulo).
 - ✅ Criar runner de testes para fixtures `.kyn` (`src/runner.zig`).
-- ⬜ Slices `[]T`, arrays `[N]T` e indexação.
+- ✅ Slices `[]T`/`[]const T`, arrays `[N]T`, indexação, fatiamento, `.len` e
+  `for item in colecao` (0.4.0-alpha.1). Sem verificação de limites em tempo de
+  execução e sem ownership de slices — ambos dependem de runtime e borrow checker.
 - ⬜ Generics, traits e `match`.
 - ⬜ Semântica de `str` com comprimento (hoje é `const char *` terminado em NUL).
 

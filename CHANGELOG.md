@@ -6,6 +6,58 @@ Versionamento: SemVer 2.0.0. Abaixo de 1.0.0 tudo é pré-lançamento e pode que
 A partir desta versão o número do compilador passa a refletir o que o código
 realmente faz. Veja a nota em [Histórico anterior](#histórico-anterior-não-verificado).
 
+## [0.4.0-alpha.1] — 2026-11-03
+
+Arrays, slices e indexação — o primeiro passo para coleções reais.
+
+### Adicionado
+
+- **Arrays `[N]T`**: literais `[1, 2, 3]` (com tipo inferido pelo contexto ou pelo
+  primeiro elemento), campos de struct, indexação, `.len` constante e `for i in
+  0..xs.len`.
+- **Slices `[]T` e `[]const T`**: struct `{ data, len }` no C, um `typedef` por tipo
+  de elemento, indexação, `.len` em tempo de execução e passagem por parâmetro.
+- **Fatiamento** `xs[lo..hi]`, `xs[lo..]`, `xs[..hi]` e `xs[..]` sobre arrays e
+  slices, com a constância dos elementos herdada do lugar de origem.
+- **`for item in colecao`** sobre arrays e slices (o elemento é uma cópia imutável;
+  o parser distingue essa forma de `for i in a..b` sem backtrack).
+- **Decadência array → slice**: parâmetros `[N]T` viram `[]T`, e `[N]T` é convertido
+  automaticamente onde se espera `[]T` (binding, argumento, retorno). A conversão
+  fica explícita na AST como nó `to_slice`, inserido pela semântica.
+- **Conversão `[]T` → `[]const T`** implícita.
+- 4 casos executáveis (`30_arrays`, `31_slices`, `32_for_collection`,
+  `33_array_struct`) e 6 casos de diagnóstico (`d27`…`d32`): indexação de valor não
+  indexável (E0022), escrita em array imutável e em `[]const` (E0014), tamanho de
+  array incompatível (E0013), retorno de array e atribuição de array como um todo
+  (E0099).
+- Teste unitário de tipos de array/slice (internação, distinção `[3]i32` × `[4]i32`,
+  `[]T` × `[]const T`, `describe`, `elemOf`).
+
+### Modificado
+
+- `for i in a..xs.len` deixa de falhar: um limite literal adota o tipo do outro lado
+  (antes `0` era `i32` e `.len` é `usize`, gerando E0013).
+- `docs/syntax.ebnf` passa a cobrir arrays, slices, indexação, fatias e `for` sobre
+  coleções, com as regras semânticas associadas.
+- `docs/status.md`, `README.md`, `docs/architecture.md`,
+  `docs/language_reference.md` e `tests/README.md` atualizados; motivos das fixtures
+  de `tests/pending/` revisados (`[]u8` já compila — o que falta nelas é outra coisa).
+
+### Limitações novas e explícitas
+
+- **Índices e fatias não são verificados em tempo de execução**: fora dos limites é
+  comportamento indefinido, como em C. Não há runtime onde inserir a checagem.
+- Slices não têm ownership: `let s: []i32 = [1, 2, 3];` cria um literal composto com
+  tempo de vida do bloco atual.
+- Arrays multidimensionais, retorno de array e atribuição de array como um todo são
+  rejeitados com E0099, com mensagem apontando a alternativa.
+- `str` continua sem comprimento e não é indexável.
+
+### Números desta revisão
+
+`zig build test` → 27 testes; `zig build integration` → 115 casos (33 executáveis +
+32 de diagnóstico + 50 de regressão), 0 falhas.
+
 ## [0.3.0-alpha.1] — 2026-11-02
 
 Primeira versão com pipeline de compilação integrado e verificável.

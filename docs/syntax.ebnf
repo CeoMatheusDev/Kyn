@@ -1,5 +1,5 @@
 (* Kyn — gramática sintática do subconjunto implementado.
-   Status: normativa para o compilador 0.3.0-alpha.1 (src/parser/parser.zig).
+   Status: normativa para o compilador 0.4.0-alpha.1 (src/parser/parser.zig).
    Construções fora desta gramática são rejeitadas com E0001. *)
 
 program          = { import_decl }, { declaration } ;
@@ -55,7 +55,8 @@ assignment       = expression, ( "=" | "+=" | "-=" | "*=" | "/=" | "%=" ),
 return_stmt      = "return", [ expression ], ";" ;
 if_stmt          = "if", expression, block, [ "else", ( block | if_stmt ) ] ;
 while_stmt       = "while", expression, block ;
-for_stmt         = "for", identifier, "in", expression, "..", expression, block ;
+for_stmt         = "for", identifier, "in", expression, "..", expression, block
+                 | "for", identifier, "in", expression, block ;   (* array ou slice *)
 unsafe_block     = "unsafe", block ;
 
 (* Expressões. Números maiores indicam ligação mais forte; todos os operadores
@@ -74,21 +75,36 @@ multiplicative_expr = unary_expr,     { ( "*" | "/" | "%" ), unary_expr } ;    (
 
 unary_expr       = ( "-" | "!" | "~" | "*" | "&" | "&", "mut" ), unary_expr
                  | postfix_expr ;
-postfix_expr     = primary, { call_args | ".", identifier | "as", type_expr } ;
+postfix_expr     = primary, { call_args | field_access | index_access | "as", type_expr } ;
 call_args        = "(", [ expression, { ",", expression } ], ")" ;
+field_access     = ".", identifier ;               (* inclui `.len` de array/slice *)
+index_access     = "[", expression, "]"            (* elemento *)
+                 | "[", [ expression ], "..", [ expression ], "]" ;  (* fatia *)
 
 primary          = integer | float | string | char | "true" | "false"
                  | "self"
                  | identifier
                  | qualified_path
                  | struct_literal
+                 | array_literal
                  | "(", expression, ")" ;
+array_literal    = "[", [ expression, { ",", expression } ], "]" ;
 qualified_path   = identifier, "::", identifier ;
 struct_literal   = identifier, "{", { identifier, ":", expression, [ "," ] }, "}" ;
 
-(* Destinos válidos de atribuição: identifier, acesso a campo e dereferência. *)
+(* Destinos válidos de atribuição: identifier, acesso a campo, indexação e
+   dereferência. *)
+
+(* Regras semânticas associadas a arrays e slices:
+   - um parâmetro `[N]T` decai para `[]T` (como o array-to-pointer do C);
+   - `[N]T` onde se espera `[]T` é convertido automaticamente;
+   - `[]T` é aceitável onde se espera `[]const T`;
+   - funções não podem retornar `[N]T` (E0099);
+   - arrays não são atribuíveis como um todo (E0099);
+   - `for x in colecao` percorre uma cópia imutável do elemento;
+   - índices e fatias NÃO são verificados em tempo de execução. *)
 
 (* Ainda fora da gramática (rejeitados com E0001 ou E0099):
    generics e parâmetros de tipo, traits/interfaces, "match"/padrões, closures,
-   slices "[]T" e arrays "[N]T", indexação "a[i]", operador "?", "defer",
+   arrays multidimensionais, operador "?", "defer", indexação de `str`,
    declarações de nível superior que não sejam itens. *)

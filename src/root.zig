@@ -13,7 +13,7 @@ pub const unsafe = @import("sema/unsafe.zig");
 pub const codegen = @import("codegen/c.zig");
 pub const driver = @import("driver.zig");
 
-pub const version = "0.3.0-alpha.1";
+pub const version = "0.4.0-alpha.1";
 
 test {
     // O runner de integração tem `main`, mas seus testes unitários (parser do

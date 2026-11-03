@@ -1,16 +1,17 @@
 # Estado de implementação
 
-Revisão de 2 de novembro de 2026, com base no que foi executado neste repositório
-(Zig 0.17.0, `cc` = gcc em Linux x86_64). Nada aqui é certificação de qualidade; é o
-registro do que os comandos do projeto produziram.
+Revisão de 3 de novembro de 2026 (compilador 0.4.0-alpha.1), com base no que foi
+executado neste repositório (Zig 0.17.0, `cc` = gcc em Linux x86_64). Nada aqui é
+certificação de qualidade; é o registro do que os comandos do projeto produziram.
 
 ## Resumo
 
 O Kyn deixou de ser um conjunto de esqueletos: existe um **pipeline de compilação
 integrado e verificável** (fonte `.kyn` → C99 → binário) com CLI, build reproduzível,
-testes unitários e suíte de integração. A **linguagem** continua sendo um subconjunto
-experimental: não há generics, traits, slices, arrays, borrow checker nem biblioteca
-padrão funcional.
+testes unitários e suíte de integração. Nesta revisão entraram **arrays `[N]T`,
+slices `[]T`, indexação, fatias e `for` sobre coleções**. A **linguagem** continua
+sendo um subconjunto experimental: não há generics, traits, verificação de limites em
+tempo de execução, borrow checker nem biblioteca padrão funcional.
 
 ## Evidências por componente
 
@@ -21,22 +22,22 @@ padrão funcional.
 | Lexer | `src/lexer/lexer.zig` | Implementado | 7 testes unitários; tokens com span; recuperação após erro |
 | Parser | `src/parser/parser.zig` | Implementado | 1 teste unitário de literais + todos os casos de `tests/cases` |
 | AST | `src/ast/ast.zig` | Implementado | 1 teste unitário; nós anotados com `type_id` pela semântica |
-| Análise semântica | `src/sema/sema.zig`, `types.zig`, `unsafe.zig` | Implementado (subconjunto) | 8 testes unitários + 26 fixtures de diagnóstico |
-| Backend | `src/codegen/c.zig` | Implementado (C99) | 1 teste unitário + 79 fixtures compiladas com `cc` e executadas |
+| Análise semântica | `src/sema/sema.zig`, `types.zig`, `unsafe.zig` | Implementado (subconjunto) | 9 testes unitários + 32 fixtures de diagnóstico |
+| Backend | `src/codegen/c.zig` | Implementado (C99) | 1 teste unitário + 83 fixtures compiladas com `cc` e executadas |
 | Diagnósticos | `src/diag.zig` | Implementado | 2 testes unitários; formato `error[E00xx]` com linha, coluna e `^^^` |
 | Pipeline | `src/driver.zig` | Implementado | 3 testes unitários de ponta a ponta |
-| Suíte de integração | `src/runner.zig` | Implementado | `zig build integration` → 105 casos, 0 falhas |
+| Suíte de integração | `src/runner.zig` | Implementado | `zig build integration` → 115 casos, 0 falhas |
 | Biblioteca padrão | `std/` | Não implementado | imports são validados, mas nenhum símbolo é fornecido |
 | Self-hosting | `experiments/self-host-sketch/` | Rascunho | arquivos `.kyn` que o compilador atual não aceita |
 
-Distribuição dos 26 testes unitários: `lexer` 7 · `sema` 8 (tipos 3, semântica 2,
-unsafe 3) · `driver` 3 · `diag` 2 · `runner` 2 · `ast` 1 · `parser` 1 · `codegen` 1.
+Distribuição dos 27 testes unitários: `sema` 9 (tipos 4, semântica 2, unsafe 3) ·
+`lexer` 7 · `driver` 3 · `diag` 2 · `runner` 2 · `ast` 1 · `parser` 1 · `codegen` 1.
 
 Resultados medidos nesta revisão:
 
 ```console
-$ zig build test        # All 26 tests passed.
-$ zig build integration # integração OK: 105 caso(s), 0 falha(s)
+$ zig build test        # All 27 tests passed.
+$ zig build integration # integração OK: 115 caso(s), 0 falha(s)
 ```
 
 ## Subconjunto implementado
@@ -47,17 +48,24 @@ lista de módulos conhecidos), atributos `#[repr(C)]` e `#[align(N)]`, `pub` (ac
 ignorado).
 
 **Tipos:** `i8`…`i64`, `isize`, `u8`…`u64`, `usize`, `f32`, `f64`, `bool`, `char`,
-`str`, `void`, `&T`, `&mut T`, `*T`, `*const T`, structs e enums nomeados.
-`[]T`/`[*]T` são aceitos apenas como alias de ponteiro cru.
+`str`, `void`, `&T`, `&mut T`, `*T`, `*const T`, `[N]T` (array de tamanho fixo),
+`[]T`/`[]const T` (slice), structs e enums nomeados. `[*]T` continua sendo aceito como
+alias de ponteiro cru.
 
 **Statements:** `let`, `var`, `let mut`, atribuição (`=`, `+=`, `-=`, `*=`, `/=`, `%=`),
-`if`/`else if`/`else`, `while`, `for i in a..b`, `return`, `break`, `continue`, blocos
-aninhados, `unsafe { … }`.
+`if`/`else if`/`else`, `while`, `for i in a..b`, `for x in colecao`, `return`, `break`,
+`continue`, blocos aninhados, `unsafe { … }`.
 
 **Expressões:** precedência completa (`||`, `&&`, `|`, `^`, `&`, `==`/`!=`,
 comparações, `<<`/`>>`, `+`/`-`, `*`/`/`/`%`), unários (`-`, `!`, `~`, `*`, `&`,
-`&mut`), chamadas, métodos, `Tipo::item`, acesso a campo, literais de struct e enum,
-casts `as`, parênteses.
+`&mut`), chamadas, métodos, `Tipo::item`, acesso a campo, `.len` de array/slice,
+indexação `a[i]`, fatias `a[lo..hi]`/`a[lo..]`/`a[..hi]`/`a[..]`, literais de struct,
+enum e array (`[1, 2, 3]`), casts `as`, parênteses.
+
+**Regras de arrays e slices:** parâmetro `[N]T` decai para `[]T`; `[N]T` é convertido
+automaticamente onde se espera `[]T`; `[]T` é aceitável onde se espera `[]const T`;
+funções não podem retornar `[N]T` (E0099); arrays não são atribuíveis como um todo
+(E0099); `for x in colecao` percorre uma cópia imutável do elemento.
 
 **Verificações semânticas (código → significado):**
 
@@ -97,6 +105,16 @@ casts `as`, parênteses.
 - **Números de ponto flutuante imprimem com `%f`** (6 casas decimais).
 - **Inteiros usam aritmética do C**: overflow de inteiros assinados não é verificado
   em tempo de execução.
+- **Índices e fatias não são verificados em tempo de execução.** `xs[i]` e
+  `xs[lo..hi]` compilam para acesso direto em C: fora dos limites é comportamento
+  indefinido, exatamente como em C. Não há runtime onde inserir a verificação.
+- **Slices não têm ownership.** `let s: []i32 = [1, 2, 3];` cria um array composto
+  com tempo de vida do bloco atual; devolver essa fatia de uma função apontaria para
+  memória liberada. Sem borrow checker, isso é responsabilidade de quem escreve.
+- **Arrays não são multidimensionais** (`[3][2]i32` é E0099) e não podem ser
+  retornados por funções nem atribuídos como um todo.
+- **`str` não é indexável** e não tem comprimento: continua sendo `const char *`
+  terminado em NUL.
 - **Conversões implícitas** existem apenas para literais (inteiro/float no contexto e
   literal de string em parâmetro `*const u8`). Todo o resto exige `as`.
 - **`pub` é aceito e ignorado**; não há controle de visibilidade entre módulos.

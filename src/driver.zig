@@ -14,7 +14,7 @@ const sema = @import("sema/sema.zig");
 const codegen = @import("codegen/c.zig");
 const diag = @import("diag.zig");
 
-pub const version = "0.3.0-alpha.1";
+pub const version = "0.4.0-alpha.1";
 pub const language_version = "0.3";
 
 pub const Options = struct {
@@ -156,6 +156,7 @@ fn dumpStmt(out: *std.ArrayList(u8), alloc: std.mem.Allocator, stmt: ast.Stmt, l
         .cond => try diag.appendf(out, alloc, "{s}if\n", .{prefix.items}),
         .loop => try diag.appendf(out, alloc, "{s}while\n", .{prefix.items}),
         .range_for => |r| try diag.appendf(out, alloc, "{s}for {s} in ..\n", .{ prefix.items, r.var_name }),
+        .collection_for => |c| try diag.appendf(out, alloc, "{s}for {s} in coleção\n", .{ prefix.items, c.var_name }),
         .break_ => try diag.appendf(out, alloc, "{s}break\n", .{prefix.items}),
         .continue_ => try diag.appendf(out, alloc, "{s}continue\n", .{prefix.items}),
         .block => |b| try diag.appendf(out, alloc, "{s}block ({d} statements)\n", .{ prefix.items, b.stmts.len }),
@@ -182,6 +183,10 @@ fn dumpExpr(alloc: std.mem.Allocator, expr: ast.Expr) ![]const u8 {
         .cast => try std.fmt.allocPrint(alloc, "cast", .{}),
         .ref_of => try std.fmt.allocPrint(alloc, "ref_of", .{}),
         .deref => try std.fmt.allocPrint(alloc, "deref", .{}),
+        .array_lit => |items| try std.fmt.allocPrint(alloc, "array_lit ({d})", .{items.len}),
+        .index => try std.fmt.allocPrint(alloc, "index", .{}),
+        .slice_range => try std.fmt.allocPrint(alloc, "slice_range", .{}),
+        .to_slice => try std.fmt.allocPrint(alloc, "to_slice", .{}),
     };
 }
 

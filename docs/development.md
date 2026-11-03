@@ -25,8 +25,8 @@ zig build              # instala zig-out/bin/kyn
 | Comando | O que executa |
 | --- | --- |
 | `zig build` | compila a CLI `kyn` em `zig-out/bin/kyn` |
-| `zig build test` | 26 testes unitários (lexer, parser, AST, semântica, unsafe, codegen, driver, runner) |
-| `zig build integration` | compila e executa as 105 fixtures de `tests/cases`, `tests/diagnostics` e `tests/regression` |
+| `zig build test` | 27 testes unitários (lexer, parser, AST, semântica, unsafe, codegen, driver, runner) |
+| `zig build integration` | compila e executa as 115 fixtures de `tests/cases`, `tests/diagnostics` e `tests/regression` |
 | `zig build check` | `test` + `integration` |
 | `zig build run -- <args>` | executa a CLI (ex.: `zig build run -- check tests/cases/01_hello.kyn`) |
 

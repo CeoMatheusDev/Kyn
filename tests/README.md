@@ -4,16 +4,16 @@ Três suítes automatizadas, todas executadas por `zig build check`:
 
 | Comando | O que roda |
 | --- | --- |
-| `zig build test` | 26 testes unitários Zig (lexer, parser, AST, semântica, unsafe, codegen, driver, runner) |
-| `zig build integration` | 105 fixtures `.kyn` de ponta a ponta |
+| `zig build test` | 27 testes unitários Zig (lexer, parser, AST, semântica, unsafe, codegen, driver, runner) |
+| `zig build integration` | 115 fixtures `.kyn` de ponta a ponta |
 | `zig build check` | as duas anteriores |
 
 ## Layout
 
 ```text
 tests/
-├── cases/         29 casos que compilam, executam e têm saída verificada
-├── diagnostics/   26 casos que devem falhar com um código de diagnóstico específico
+├── cases/         33 casos que compilam, executam e têm saída verificada
+├── diagnostics/   32 casos que devem falhar com um código de diagnóstico específico
 ├── regression/    50 casos de código de saída (exit 1..50)
 └── pending/       fixtures de recursos ainda não implementados (fora do build)
 ```
@@ -63,17 +63,22 @@ zig build integration -Dcc=clang
 ## Cobertura atual
 
 **`tests/cases/`** — saída básica, aritmética e precedência, mutabilidade,
-`if`/`while`/`break`/`continue`, `for i in a..b`, recursão, structs com métodos e
-funções associadas, enums, casts, strings e escapes, operadores lógicos e bit a bit,
-referências e ponteiros crus com `unsafe`, FFI com `puts`/`printf`, código de saída,
-atributos `#[repr(C)]`/`#[align(8)]`, shadowing, structs por referência (`&`/`&mut`),
-`print`/`println` por tipo, imports e `fn main -> void`.
+`if`/`while`/`break`/`continue`, `for i in a..b`, `for x in colecao`, recursão, structs
+com métodos e funções associadas, enums, casts, strings e escapes, operadores lógicos e
+bit a bit, referências e ponteiros crus com `unsafe`, FFI com `puts`/`printf`, código de
+saída, atributos `#[repr(C)]`/`#[align(8)]`, shadowing, structs por referência
+(`&`/`&mut`), `print`/`println` por tipo, imports, `fn main -> void`, arrays `[N]T` com
+indexação e `.len`, slices `[]T` com fatiamento (`[..]`, `[lo..hi]`, `[lo..]`) e passagem
+por parâmetro, e arrays como campo de struct.
 
 **`tests/diagnostics/`** — um caso por código: E0001 (sintaxe), E0002 (string não
 terminada, caractere inválido, entrada malformada), E0010, E0011, E0012, E0013
-(incluindo literal fora do intervalo), E0014 (incluindo `&mut` de binding imutável),
-E0015 (ponteiro cru e `extern fn` fora de `unsafe`), E0016 (caminho sem retorno e
-assinatura de `main`), E0017, E0018, E0019, E0020, E0021, E0022 e E0023.
+(incluindo literal fora do intervalo e tamanho de array incompatível), E0014 (incluindo
+`&mut` de binding imutável, escrita em elemento de array imutável e escrita em
+`[]const`), E0015 (ponteiro cru e `extern fn` fora de `unsafe`), E0016 (caminho sem
+retorno e assinatura de `main`), E0017, E0018, E0019, E0020, E0021, E0022 (incluindo
+indexação de valor não indexável), E0023 e E0099 (retorno de array, atribuição de array
+como um todo).
 
 **`tests/regression/`** — `exit_01.kyn` … `exit_50.kyn`, cada um devolvendo o próprio
 número como código de saída.

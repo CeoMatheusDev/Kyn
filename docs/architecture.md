@@ -102,6 +102,11 @@ Consome a AST anotada; **não** repete análise de tipos. Mapeamentos principais
 | `str` | `const char *` |
 | `*u8`, `*const u8` | `char *`, `const char *` (compatível com cabeçalhos do sistema) |
 | `&T`, `&mut T`, `*T` | `T *` |
+| `[N]T` | `T nome[N]` (sintaxe de declarador) |
+| `[]T`, `[]const T` | `typedef struct { T *data; size_t len; } KynSlice_I32;` (um por tipo de elemento) |
+| `xs[i]` | `((xs)[i])` em array, `((xs).data[i])` em slice |
+| `xs[lo..hi]` | literal composto `(KynSlice_T){ ptr + lo, hi - lo }` |
+| `xs.len` | constante `N` em array, `((xs).len)` em slice |
 | `struct Ponto` | `struct KynPonto` |
 | `enum Cor { Vermelho }` | `enum { KynCor_Vermelho }` |
 | método `Ponto::soma(self)` | `KynPonto_soma(const KynPonto *kyn_self)` |
@@ -111,6 +116,11 @@ Consome a AST anotada; **não** repete análise de tipos. Mapeamentos principais
 Nomes de tipos ganham o prefixo `Kyn` e símbolos de função ganham `kyn_`, evitando
 colisão com palavras reservadas do C. `extern fn` preserva o nome C original para
 linkar contra a libc.
+
+Arrays e slices seguem o modelo do C: parâmetros `[N]T` decaem para `[]T` na análise
+semântica (nó `to_slice` na AST, inserido pela semântica e nunca pelo parser), e o
+backend emite um literal composto. **Não há verificação de limites**: `xs[i]` e
+`xs[lo..hi]` viram acesso direto, como em C.
 
 ### `src/main.zig` — CLI
 

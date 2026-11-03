@@ -118,6 +118,7 @@ pub const Stmt = union(enum) {
     cond: If,
     loop: While,
     range_for: RangeFor,
+    collection_for: CollectionFor,
     break_: Span,
     continue_: Span,
     block: Block,
@@ -163,6 +164,15 @@ pub const Else = union(enum) {
 
 pub const While = struct {
     cond: Expr,
+    body: Block,
+    span: Span,
+};
+
+/// `for item in colecao { ... }` — percorre array ou slice.
+pub const CollectionFor = struct {
+    var_name: []const u8,
+    var_span: Span,
+    collection: Expr,
     body: Block,
     span: Span,
 };
@@ -249,6 +259,15 @@ pub const ExprKind = union(enum) {
     enum_lit: struct { name: []const u8, variant: []const u8 },
     ref_of: struct { operand: *Expr, mutable: bool },
     deref: *Expr,
+    /// `[a, b, c]` — literal de array.
+    array_lit: []const *Expr,
+    /// `objeto[indice]` em array ou slice.
+    index: struct { object: *Expr, index: *Expr },
+    /// `objeto[lo..hi]` — fatia. `null` significa "do início"/"até o fim".
+    slice_range: struct { object: *Expr, start: ?*Expr, end: ?*Expr },
+    /// Conversão array -> slice. **Inserida pela análise semântica**, nunca
+    /// pelo parser: o backend a traduz em um literal composto de C.
+    to_slice: *Expr,
 };
 
 pub const Expr = struct {
@@ -269,7 +288,10 @@ pub const TypeExpr = union(enum) {
     named: struct { name: []const u8, span: Span },
     ref_: struct { inner: *TypeExpr, mutable: bool, span: Span },
     ptr: struct { inner: *TypeExpr, is_const: bool, span: Span },
-
+    /// `[N]T`.
+    array: struct { inner: *TypeExpr, count: u64, span: Span },
+    /// `[]T` (elementos mutáveis) ou `[]const T`.
+    slice: struct { inner: *TypeExpr, is_const: bool, span: Span },
 
     pub fn spanOf(self: *const TypeExpr) Span {
         return switch (self.*) {
@@ -277,6 +299,8 @@ pub const TypeExpr = union(enum) {
             .named => |n| n.span,
             .ref_ => |r| r.span,
             .ptr => |p| p.span,
+            .array => |a| a.span,
+            .slice => |s| s.span,
         };
     }
 
@@ -287,6 +311,8 @@ pub const TypeExpr = union(enum) {
             .named => |n| n.name,
             .ref_ => |r| if (r.mutable) "&mut ..." else "&...",
             .ptr => |p| if (p.is_const) "*const ..." else "*...",
+            .array => "[N]...",
+            .slice => |s| if (s.is_const) "[]const ..." else "[]...",
         };
     }
 };
