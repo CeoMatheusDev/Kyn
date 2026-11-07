@@ -2,13 +2,14 @@
 
 **Mantido por:** agente de continuidade (Arena)
 **Branch ativa:** `arena/7663d1de-kyn` (a partir de `449f78b1dbdd9dc63de176c7e0dfb41b4a7291be` de `main`)
-**Integração:** PRs #7 (`5217796`), #8 (`837d4ed`) e #9 (`449f78b`) mesclados em
-`main` (2026-11-07). O ciclo atual (módulos/`import`) foi integrado pelo PR #10 —
-ver §6 para os SHAs e runs verificados.
+**Integração:** PRs #7 (`5217796`), #8 (`837d4ed`), #9 (`449f78b`) e #10
+(`1c149dd`, módulos/`import`) mesclados em `main` (2026-11-07); CI em `main`
+verde (run `42415945385`) e suíte local retestada após o merge.
 **Versão do projeto:** `0.3.2-alpha.1`
-**Última validação:** 2026-11-07 — local (Zig 0.17.0 + GNU `as`/`ld`, Linux
-x86-64): `zig build`, `zig build test` (115 testes), `zig build e2e` (70/70) e
-`zig fmt --check`; IR validado por `llvm-as` no CI
+**Última validação:** 2026-11-07 — local pós-merge em `main` (Zig 0.17.0 + GNU
+`as`/`ld`, Linux x86-64): `zig build`, `zig build test` (115 testes),
+`zig build e2e` (70/70) e `zig fmt --check`; IR de 62 módulos aceito por
+`llvm-as` no CI (run `42415945385`)
 **Estado do working tree:** verificar com `git status` antes de agir
 
 ---
@@ -99,7 +100,14 @@ pacotes.
   total quando há `llvm-as`/`clang`).
 - CLI exercitada: `check` em `tests/e2e/modules/import_nested/main.kyn`
   (código 0), `emit --llvm/--asm` em programas multi-arquivo, diagnóstico com
-  `arquivo:linha:coluna` do módulo importado, arquivo raiz ausente (código 3).
+  `arquivo:linha:coluna` do módulo importado, arquivo raiz ausente (código 3),
+  `--version` reportando `kync 0.3.2-alpha.1 (zig 0.17.0)`.
+- **CI real (GitHub Actions):** run `42415765698` (PR #10) e `42415945385`
+  (`main` pós-merge) verdes, com `zig fmt --check`, `zig build test` (115),
+  `zig build e2e` (70) e `build validate-ir-strict` (o `llvm-as` do runner
+  aceitou os 62 módulos).
+- Suíte local reproduzida em `main` logo após o merge (`git checkout main &&
+  git pull`): testes, 70/70 e2e, `fmt --check` e `kync --version` conferidos.
 
 ## 3. Decisões técnicas registradas
 
@@ -215,6 +223,8 @@ configurável → início do self-hosting em Kyn.
 | Anterior | Análise do repositório; declarado bloqueio de toolchain (Zig 0.17.0 "indisponível") | Não (nenhum build/teste) |
 | Ciclo 1 (2026-11-07) | Toolchain obtida via PyPI; `build.zig`+`.zon`; lexer/AST/parser/semântica reescritos com spans e diagnósticos; backends LLVM IR e x86-64; CLI `kync`; driver; 96 testes unitários; suíte e2e com 64 casos; documentação reconciliada; testes antigos consolidados. Integrado via PR #7 (`5217796`). | Sim: `zig build`, `zig build test`, `zig build e2e`, `zig fmt --check`; retestado após o merge |
 | Ciclo 2 (2026-11-07) | CI no GitHub Actions (venv Python + wheel PyPI da toolchain; LLVM instalado no runner); `tools/validate-ir.sh` validando o IR de 59 fixtures com `llvm-as`, em modo estrito; passos `zig build validate-ir` e `validate-ir-strict`; versão `0.3.1-alpha.1`; docs atualizadas com a evidência do run. Integrado via PR #8 (`837d4ed`). | Sim: runs `42413779278`, `42414049577` e `42414408475` (main) verdes: fmt + 96 testes + 64 e2e + IR estrito; suíte local reproduzida do zero antes e depois do merge |
+| Ciclo 3 (2026-11-07) | Registro da integração do CI no estado do projeto (`DEVELOPMENT_STATE.md`, badge no README, entradas do CHANGELOG). Integrado via PR #9 (`449f78b`). | Sim: run `42414846887` (main) verde |
+| Ciclo 4 (2026-11-07) | `import` e compilação multi-arquivo: lexer de strings + `import`; parser com `import` no topo; `driver.compilePath` com DFS pré-ordem, dedupe por caminho normalizado, `.import_cycle`/`.import_not_found`; `Diagnostic.file`/`addInFile` e mensagens citando o arquivo; CLI multi-arquivo; 21 testes novos (115 no total); 3 fixtures e2e multi-arquivo executadas + 3 negativas com mensagem esperada; `validate-ir` cobre 62 módulos; versão `0.3.2-alpha.1` (agora derivada de `build.zig.zon`). Integrado via PR #10 (`1c149dd`). | Sim: local (108 testes do compilador, 70/70 e2e, `fmt --check`) e CI runs `42415765698` (PR) e `42415945385` (main), ambos verdes com IR estrito; suíte local retestada em `main` após o merge |
 
 ---
 
