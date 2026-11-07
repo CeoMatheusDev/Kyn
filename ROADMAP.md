@@ -24,6 +24,9 @@ implementação integrada e testes reproduzíveis.
       deduplicados, `print(...)` embutido no backend nativo (syscall `write`) e
       no IR do LLVM (libc `write`), com stdout conferido na suíte e2e
       (`// expect-stdout:`).
+- [x] Saída de valores: `print_i32(...)` embutido, com conversão decimal própria
+      em cada backend (`divl` unsigned no nativo, `urem`/`udiv` no IR),
+      cobrindo zero, negativos e os limites de `i32`; stdout conferido no e2e.
 - [ ] Completar o parser e a AST para a linguagem-alvo. Subconjunto atual:
       `fn`, `let`/`var`, atribuição, `return`, `if`/`else`, `while`, blocos,
       expressões com precedência, `import`, `struct` e `str`. Faltam struct e

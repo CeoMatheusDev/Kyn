@@ -1,0 +1,15 @@
+// Formatação decimal: zero, positivos e negativos na mesma execução.
+// expect-exit: 0
+// expect-stdout: 0
+// expect-stdout: 7
+// expect-stdout: 42
+// expect-stdout: 1000
+// expect-stdout: -7
+fn main() -> i32 {
+    print_i32(0);
+    print_i32(7);
+    print_i32(42);
+    print_i32(1000);
+    print_i32(0 - 7);
+    return 0;
+}

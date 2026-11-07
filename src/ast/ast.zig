@@ -200,8 +200,10 @@ pub const Expr = struct {
     };
 
     /// Funções embutidas reconhecidas pela semântica, sem declaração na fonte.
+    /// O nome de cada campo é o próprio identificador aceito na fonte.
     pub const Builtin = enum {
         print,
+        print_i32,
     };
 
     pub const Call = struct {

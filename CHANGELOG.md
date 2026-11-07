@@ -10,6 +10,34 @@ Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
 > e testes, está em [docs/status.md](docs/status.md). O versionamento será
 > reconciliado antes de qualquer release pública.
 
+## [v0.3.5-alpha.1] — 2026-11-07
+
+Saída de valores: builtin `print_i32(n: i32)` com formatação decimal própria.
+
+- **AST/Semântica:** `ast.Expr.Builtin` ganhou `print_i32` e a checagem de
+  chamadas embutidas passou a ser genérica (aridade 1 + tipo esperado por
+  builtin, nome reservado derivado do enum) — `print` e `print_i32` seguem a
+  mesma regra, e o resultado `void` continua não sendo armazenável em
+  `let`/`var`.
+- **Backend x86-64:** rotina `kyn_print_i32` emitida **uma única vez** por
+  programa, em `.text`, com `divl` unsigned e buffer de 12 bytes na pilha
+  (sem libc e sem estado global); `print_i32` apenas passa o valor em `%edi` e
+  chama a rotina, que escreve os dígitos e a quebra de linha por syscall
+  `write`. `-2147483648` sai correto (após `negl`, INT_MIN vira `0x80000000` e
+  a divisão unsigned produz os 10 dígitos).
+- **Backend LLVM IR:** função interna `@kyn_print_i32` emitida uma única vez por
+  módulo (`alloca [12 x i8]`, laço com `phi`, `urem`/`udiv`, `select` para o
+  módulo, `zext` para `i64`) e duas chamadas a `write` da libc.
+- **Testes:** 174 testes do compilador (12 novos: parser, semântica dos dois
+  builtins, rotina decimal nos dois backends e ausência quando não usada) e
+  7 da std; 4 fixtures e2e novas com `print_i32`/misto e 2 negativas —
+  **92/92 casos**, com stdout conferido linha a linha (inclui INT_MIN).
+- **Docs:** `docs/syntax.ebnf` (produção `builtin_call`), `docs/architecture.md`
+  (rotina decimal nos dois backends), `docs/status.md`, `docs/development.md`,
+  `docs/language_reference.md`, `README.md`, `ROADMAP.md` e
+  `DEVELOPMENT_STATE.md` atualizados.
+- **Versão:** `0.3.5-alpha.1` (derivada de `build.zig.zon`).
+
 ## [v0.3.4-alpha.1] — 2026-11-07
 
 Saída de texto: `str` como fatia estática e `print(...)` embutido.
@@ -48,8 +76,9 @@ Saída de texto: `str` como fatia estática e `print(...)` embutido.
   `docs/development.md`, `docs/language_reference.md`, `README.md`,
   `ROADMAP.md` e `DEVELOPMENT_STATE.md` atualizados.
 - **Versão:** `0.3.4-alpha.1` (derivada de `build.zig.zon`).
-- **Integração:** PR #15; CI verde (run `42420648098`) com `zig fmt --check`,
-  testes, e2e (com stdout conferido) e `validate-ir-strict` sobre 71 módulos.
+- **Integração:** PR #15 mesclado em `main` como `89ca6ce`; CI verde nos runs
+  `42420648098` (PR) e `42421025867` (`main`), com `zig fmt --check`, testes,
+  e2e (stdout conferido) e `validate-ir-strict` sobre 71 módulos.
 
 ## [v0.3.3-alpha.1] — 2026-11-07
 

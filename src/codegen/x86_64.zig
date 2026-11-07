@@ -57,9 +57,64 @@ pub fn emit(
         try out.append(arena, '\n');
     }
 
+    // Rotina de formatação decimal, emitida uma única vez por programa quando
+    // `print_i32` aparece. Fica em `.text` (código), antes dos dados: `divl` é
+    // unsigned, então após `negl` INT_MIN vira 0x80000000 e o laço produz
+    // 2147483648 dígitos, com '-' na frente — resultado correto para
+    // -2147483648. Sem libc e sem estado global.
+    if (state.used_print_i32) {
+        try out.print(arena, ".text\n", .{});
+        try out.appendSlice(arena,
+            \\.type kyn_print_i32, @function
+            \\kyn_print_i32:
+            \\    pushq %rbp
+            \\    movq %rsp, %rbp
+            \\    subq $32, %rsp
+            \\    movl %edi, %eax
+            \\    xorl %r8d, %r8d
+            \\    testl %eax, %eax
+            \\    jns .Lpi_abs
+            \\    movl $1, %r8d
+            \\    negl %eax
+            \\.Lpi_abs:
+            \\    leaq -12(%rbp), %rsi
+            \\    movl $0, %ecx
+            \\    movl $10, %r9d
+            \\.Lpi_loop:
+            \\    xorl %edx, %edx
+            \\    divl %r9d
+            \\    addl $48, %edx
+            \\    decq %rsi
+            \\    movb %dl, (%rsi)
+            \\    incl %ecx
+            \\    testl %eax, %eax
+            \\    jne .Lpi_loop
+            \\    testl %r8d, %r8d
+            \\    je .Lpi_write
+            \\    decq %rsi
+            \\    movb $45, (%rsi)
+            \\    incl %ecx
+            \\.Lpi_write:
+            \\    movl $1, %eax
+            \\    movl $1, %edi
+            \\    movq %rcx, %rdx
+            \\    syscall
+            \\    leaq .Lnl(%rip), %rsi
+            \\    movq $1, %rdx
+            \\    movl $1, %eax
+            \\    movl $1, %edi
+            \\    syscall
+            \\    movq %rbp, %rsp
+            \\    popq %rbp
+            \\    ret
+            \\.size kyn_print_i32, .-kyn_print_i32
+            \\
+        );
+    }
+
     // Rodapé: constantes de string (deduplicadas) e a quebra de linha de
     // `print`. Só são emitidas quando o programa usa esse recurso.
-    if (state.strs.texts.items.len > 0 or state.used_print) {
+    if (state.strs.texts.items.len > 0 or state.used_print or state.used_print_i32) {
         try out.print(arena, ".section .rodata\n", .{});
         for (state.strs.texts.items, 0..) |text, index| {
             try out.print(arena, ".Lstr{d}:\n", .{index});
@@ -76,7 +131,7 @@ pub fn emit(
                 try out.print(arena, "\n", .{});
             }
         }
-        if (state.used_print) {
+        if (state.used_print or state.used_print_i32) {
             try out.print(arena, ".Lnl:\n    .byte 10\n", .{});
         }
     }
@@ -418,6 +473,16 @@ const FnEmitter = struct {
         self.state.used_print = true;
     }
 
+    /// `print_i32(n)`: avalia o argumento em `%eax`, passa em `%edi` (SysV) e
+    /// chama a rotina compartilhada `kyn_print_i32`.
+    fn emitPrintI32(self: *FnEmitter, call: ast.Expr.Call) Error!void {
+        if (call.args.len != 1) return error.MiscompiledAst;
+        try self.emitExpr(call.args[0]);
+        try self.print("    movl %eax, %edi\n", .{});
+        try self.print("    call kyn_print_i32\n", .{});
+        self.state.used_print_i32 = true;
+    }
+
     fn emitBinaryOp(self: *FnEmitter, binary: ast.Expr.Binary) Error!void {
         try self.emitExpr(binary.lhs);
         try self.print("    pushq %rax\n", .{});
@@ -488,6 +553,7 @@ const FnEmitter = struct {
     fn emitCall(self: *FnEmitter, call: ast.Expr.Call) Error!void {
         if (call.builtin) |builtin| switch (builtin) {
             .print => return self.emitPrint(call),
+            .print_i32 => return self.emitPrintI32(call),
         };
 
         if (call.args.len > arg_registers.len) return error.UnsupportedNode;
@@ -746,4 +812,55 @@ test "x86_64: string vazia mantém o rótulo válido e escreve zero bytes" {
 
     try support.expectContains(asm_text, ".Lstr0:\n    .zero 1");
     try support.expectContains(asm_text, "movq $0, %rdx");
+}
+
+test "x86_64: print_i32 chama a rotina decimal em .text" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    print_i32(42);
+        \\    return 0;
+        \\}
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+
+    try support.expectContains(asm_text, "movl %eax, %edi");
+    try support.expectContains(asm_text, "call kyn_print_i32");
+    try support.expectContains(asm_text, ".type kyn_print_i32, @function");
+    // Conversão: divisão unsigned por 10 e sinal com '-'.
+    try support.expectContains(asm_text, "divl %r9d");
+    try support.expectContains(asm_text, "movb $45, (%rsi)");
+    try support.expectContains(asm_text, ".Lnl:\n    .byte 10");
+    // O código fica em .text, antes dos dados: nunca dentro de .rodata.
+    const helper_at = std.mem.indexOf(u8, asm_text, ".type kyn_print_i32").?;
+    const rodata_at = std.mem.indexOf(u8, asm_text, ".section .rodata").?;
+    try testing.expect(helper_at < rodata_at);
+}
+
+test "x86_64: rotina decimal é emitida uma única vez" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    print_i32(1);
+        \\    print_i32(2);
+        \\    print_i32(3);
+        \\    return 0;
+        \\}
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+
+    try testing.expectEqual(@as(usize, 1), std.mem.count(u8, asm_text, ".type kyn_print_i32"));
+    try testing.expectEqual(@as(usize, 3), std.mem.count(u8, asm_text, "call kyn_print_i32"));
+}
+
+test "x86_64: programa sem print_i32 não emite a rotina decimal" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    print("ok");
+        \\    return 1;
+        \\}
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+    try testing.expect(std.mem.indexOf(u8, asm_text, "kyn_print_i32") == null);
 }

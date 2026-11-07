@@ -1092,3 +1092,18 @@ test "parser: string não terminada na expressão gera diagnóstico" {
     try testing.expectEqual(diagnostics.Kind.syntax, parsed.diags.items.items[0].kind);
     try testing.expect(std.mem.indexOf(u8, parsed.diags.items.items[0].message, "não terminado") != null);
 }
+
+test "parser: chamada a print_i32 com expressão aritmética" {
+    var parsed = try Parsed.parse(
+        \\fn main() -> i32 {
+        \\    print_i32(6 * 7);
+        \\    return 0;
+        \\}
+    );
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 0), parsed.diags.count());
+
+    const call = parsed.program.?.functions[0].body[0].kind.expr_stmt.kind.call;
+    try testing.expectEqualStrings("print_i32", call.callee);
+    try testing.expectEqual(ast.Expr.BinaryOp.mul, call.args[0].kind.binary.op);
+}

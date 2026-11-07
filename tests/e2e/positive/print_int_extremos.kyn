@@ -1,0 +1,14 @@
+// Limites de i32: INT_MAX, INT_MIN (onde `negl` estoura mas `divl` unsigned
+// preserva os dígitos) e um valor de 9 dígitos.
+// expect-exit: 3
+// expect-stdout: 2147483647
+// expect-stdout: -2147483648
+// expect-stdout: 214748364
+fn main() -> i32 {
+    let max: i32 = 2147483647;
+    print_i32(max);
+    let min: i32 = 0 - 2147483647 - 1;
+    print_i32(min);
+    print_i32(214748364);
+    return 3;
+}
