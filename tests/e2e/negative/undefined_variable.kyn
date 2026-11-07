@@ -1,0 +1,4 @@
+// Erro semântico esperado: variável não declarada.
+fn main() -> i32 {
+    return missing;
+}

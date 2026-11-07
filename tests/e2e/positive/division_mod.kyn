@@ -1,0 +1,7 @@
+// expect-exit: 17
+// (17 / 5) * 5 + (17 % 5) = 15 + 2 = 17
+fn main() -> i32 {
+    let q: i32 = 17 / 5;
+    let r: i32 = 17 % 5;
+    return q * 5 + r;
+}

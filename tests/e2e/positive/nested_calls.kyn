@@ -1,0 +1,13 @@
+// expect-exit: 21
+// Chamadas aninhadas e parâmetros múltiplos.
+fn add(a: i32, b: i32) -> i32 {
+    return a + b;
+}
+
+fn double(x: i32) -> i32 {
+    return add(x, x);
+}
+
+fn main() -> i32 {
+    return add(double(5), double(5)) + 1;
+}

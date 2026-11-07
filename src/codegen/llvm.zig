@@ -1,0 +1,551 @@
+//! Backend LLVM IR (texto).
+//!
+//! Emite IR textual para o subconjunto atual: funções `i32`/`void`, variáveis
+//! (`i32`/`bool`), aritmética, comparações, `&&`/`||` com curto-circuito,
+//! `if`/`else`, `while` e chamadas diretas de função.
+//!
+//! Este emissor não é validado por um montador LLVM no ambiente de
+//! desenvolvimento (não há `llc`/`clang` disponíveis); os testes verificam a
+//! estrutura do texto emitido. Para validação executável de ponta a ponta, veja
+//! o backend `x86_64_asm`, que é montado e ligado com `as`/`ld`.
+
+const std = @import("std");
+const ast = @import("../ast/ast.zig");
+const sema = @import("../sema/sema.zig");
+const codegen = @import("codegen.zig");
+
+pub const Error = codegen.Error;
+
+pub fn emit(
+    arena: std.mem.Allocator,
+    program: *const ast.Program,
+    checked: *const sema.Checked,
+) Error![]const u8 {
+    var out: std.ArrayList(u8) = .empty;
+    try out.print(arena, "; LLVM IR gerado pelo kync (bootstrap)\n", .{});
+    try out.print(arena, "target triple = \"x86_64-unknown-linux-gnu\"\n\n", .{});
+
+    for (program.functions, 0..) |func, i| {
+        var emitter = FnEmitter.init(arena, func, checked, checked.functions[i]);
+        try emitter.emitFunction();
+        try emitter.serialize(&out);
+        try out.append(arena, '\n');
+    }
+
+    return out.toOwnedSlice(arena);
+}
+
+fn llvmType(typ: sema.Type) codegen.Error![]const u8 {
+    return switch (typ) {
+        .i32 => "i32",
+        .bool => "i1",
+        .void => "void",
+        .unknown => error.UnsupportedType,
+    };
+}
+
+fn typeAlign(typ: sema.Type) codegen.Error!u32 {
+    return switch (typ) {
+        .i32 => 4,
+        .bool => 1,
+        .void => error.UnsupportedType,
+        .unknown => error.UnsupportedType,
+    };
+}
+
+const Operand = struct {
+    text: []const u8,
+    typ: sema.Type,
+};
+
+const Block = struct {
+    label: []const u8,
+    body: std.ArrayList(u8) = .empty,
+    terminated: bool = false,
+};
+
+const FnEmitter = struct {
+    arena: std.mem.Allocator,
+    func: *const ast.Function,
+    checked: *const sema.Checked,
+    info: sema.FunctionInfo,
+
+    blocks: std.ArrayList(Block) = .empty,
+    current: usize = 0,
+    tmp_count: u32 = 0,
+    label_count: u32 = 0,
+
+    fn init(
+        arena: std.mem.Allocator,
+        func: *const ast.Function,
+        checked: *const sema.Checked,
+        info: sema.FunctionInfo,
+    ) FnEmitter {
+        return .{ .arena = arena, .func = func, .checked = checked, .info = info };
+    }
+
+    fn block(self: *FnEmitter) *Block {
+        return &self.blocks.items[self.current];
+    }
+
+    fn startBlock(self: *FnEmitter, label: []const u8) !void {
+        try self.blocks.append(self.arena, .{ .label = label });
+        self.current = self.blocks.items.len - 1;
+    }
+
+    fn emit(self: *FnEmitter, comptime fmt: []const u8, args: anytype) !void {
+        const b = self.block();
+        if (b.terminated) return;
+        try b.body.print(self.arena, fmt, args);
+    }
+
+    fn br(self: *FnEmitter, label: []const u8) !void {
+        if (self.block().terminated) return;
+        try self.emit("  br label %{s}\n", .{label});
+        self.block().terminated = true;
+    }
+
+    fn condBr(self: *FnEmitter, cond: []const u8, then_label: []const u8, else_label: []const u8) !void {
+        if (self.block().terminated) return;
+        try self.emit("  br i1 {s}, label %{s}, label %{s}\n", .{ cond, then_label, else_label });
+        self.block().terminated = true;
+    }
+
+    fn retVoid(self: *FnEmitter) !void {
+        if (self.block().terminated) return;
+        try self.emit("  ret void\n", .{});
+        self.block().terminated = true;
+    }
+
+    fn newTemp(self: *FnEmitter) ![]const u8 {
+        const name = try std.fmt.allocPrint(self.arena, "%t{d}", .{self.tmp_count});
+        self.tmp_count += 1;
+        return name;
+    }
+
+    fn newLabel(self: *FnEmitter, prefix: []const u8) ![]const u8 {
+        const name = try std.fmt.allocPrint(self.arena, "{s}{d}", .{ prefix, self.label_count });
+        self.label_count += 1;
+        return name;
+    }
+
+    fn varName(self: *FnEmitter, slot: u32) ![]const u8 {
+        return std.fmt.allocPrint(self.arena, "%v{d}", .{slot});
+    }
+
+    fn symbolAt(self: *FnEmitter, index: u32) *const sema.Symbol {
+        return &self.checked.symbols[index];
+    }
+
+    fn emitFunction(self: *FnEmitter) !void {
+        try self.startBlock("entry");
+
+        // Alocação de todos os slots de uma vez, no bloco de entrada.
+        const sym_start: usize = self.info.symbol_start;
+        const sym_end: usize = sym_start + self.info.symbol_count;
+        for (self.checked.symbols[sym_start..sym_end]) |sym| {
+            const ty = try llvmType(sym.typ);
+            const align_value = try typeAlign(sym.typ);
+            const name = try self.varName(sym.slot);
+            try self.emit("  {s} = alloca {s}, align {d}\n", .{ name, ty, align_value });
+        }
+
+        // Parâmetros são copiados para os seus slots.
+        for (self.func.params, 0..) |_, i| {
+            const sym = &self.checked.symbols[sym_start + i];
+            const ty = try llvmType(sym.typ);
+            const align_value = try typeAlign(sym.typ);
+            const name = try self.varName(sym.slot);
+            try self.emit("  store {s} %arg{d}, ptr {s}, align {d}\n", .{ ty, i, name, align_value });
+        }
+
+        try self.emitStatements(self.func.body);
+
+        if (!self.block().terminated) {
+            if (self.info.return_type == .void) {
+                try self.retVoid();
+            } else {
+                // A semântica garante `return` em todos os caminhos; este
+                // terminador é apenas uma salvaguarda estrutural do IR.
+                try self.emit("  unreachable\n", .{});
+                self.block().terminated = true;
+            }
+        }
+
+        // Todo bloco básico precisa terminar com `ret`, `br` ou `unreachable`.
+        // Blocos que só são alcançados por desvios condicionais (por exemplo o
+        // `if_end` quando ambos os ramos retornam) são fechados aqui.
+        for (self.blocks.items) |*b| {
+            if (b.terminated) continue;
+            try b.body.appendSlice(self.arena, "  unreachable\n");
+            b.terminated = true;
+        }
+    }
+
+    fn serialize(self: *FnEmitter, out: *std.ArrayList(u8)) !void {
+        var signature: std.ArrayList(u8) = .empty;
+        for (self.func.params, 0..) |_, i| {
+            const param_type = try llvmType(self.info.params[i]);
+            if (i != 0) try signature.appendSlice(self.arena, ", ");
+            try signature.print(self.arena, "{s} %arg{d}", .{ param_type, i });
+        }
+
+        const ret_type = try llvmType(self.info.return_type);
+        try out.print(self.arena, "define {s} @{s}({s}) {{\n", .{ ret_type, self.func.name, signature.items });
+
+        for (self.blocks.items) |*b| {
+            try out.print(self.arena, "{s}:\n", .{b.label});
+            try appendIndented(out, self.arena, b.body.items);
+        }
+        try out.appendSlice(self.arena, "}\n");
+    }
+
+    fn emitStatements(self: *FnEmitter, stmts: []*ast.Stmt) Error!void {
+        for (stmts) |stmt| {
+            if (self.block().terminated) return;
+            try self.emitStatement(stmt);
+        }
+    }
+
+    fn emitStatement(self: *FnEmitter, stmt: *ast.Stmt) Error!void {
+        switch (stmt.kind) {
+            .let_decl => |decl| {
+                const symbol = self.symbolAt(stmt.decl_symbol orelse return error.MiscompiledAst);
+                const value = try self.emitExpr(decl.init);
+                if (value.typ == .void) return error.UnsupportedNode;
+                const ty = try llvmType(symbol.typ);
+                const align_value = try typeAlign(symbol.typ);
+                const name = try self.varName(symbol.slot);
+                try self.emit("  store {s} {s}, ptr {s}, align {d}\n", .{ ty, value.text, name, align_value });
+            },
+
+            .assign => |assign| {
+                const symbol = self.symbolAt(assign.resolved orelse return error.MiscompiledAst);
+                const value = try self.emitExpr(assign.value);
+                if (value.typ == .void) return error.UnsupportedNode;
+                const ty = try llvmType(symbol.typ);
+                const align_value = try typeAlign(symbol.typ);
+                const name = try self.varName(symbol.slot);
+                try self.emit("  store {s} {s}, ptr {s}, align {d}\n", .{ ty, value.text, name, align_value });
+            },
+
+            .return_stmt => |maybe_expr| {
+                if (self.info.return_type == .void) {
+                    try self.retVoid();
+                } else {
+                    const expr = maybe_expr orelse return error.MiscompiledAst;
+                    const value = try self.emitExpr(expr);
+                    const ty = try llvmType(self.info.return_type);
+                    try self.emit("  ret {s} {s}\n", .{ ty, value.text });
+                    self.block().terminated = true;
+                }
+            },
+
+            .expr_stmt => |expr| {
+                _ = try self.emitExpr(expr);
+            },
+
+            .if_stmt => |if_stmt| {
+                const cond = try self.emitExpr(if_stmt.cond);
+                const then_label = try self.newLabel("if_then");
+                const else_label = try self.newLabel("if_else");
+                const end_label = try self.newLabel("if_end");
+                try self.condBr(cond.text, then_label, else_label);
+
+                try self.startBlock(then_label);
+                try self.emitStatements(if_stmt.then_body);
+                try self.br(end_label);
+
+                try self.startBlock(else_label);
+                if (if_stmt.else_body) |else_branch| {
+                    switch (else_branch) {
+                        .block => |stmts| try self.emitStatements(stmts),
+                        .if_stmt => |nested| try self.emitStatement(nested),
+                    }
+                }
+                try self.br(end_label);
+
+                try self.startBlock(end_label);
+            },
+
+            .while_stmt => |while_stmt| {
+                const cond_label = try self.newLabel("while_cond");
+                const body_label = try self.newLabel("while_body");
+                const end_label = try self.newLabel("while_end");
+
+                try self.br(cond_label);
+                try self.startBlock(cond_label);
+                const cond = try self.emitExpr(while_stmt.cond);
+                try self.condBr(cond.text, body_label, end_label);
+
+                try self.startBlock(body_label);
+                try self.emitStatements(while_stmt.body);
+                try self.br(cond_label);
+
+                try self.startBlock(end_label);
+            },
+
+            .block => |stmts| try self.emitStatements(stmts),
+        }
+    }
+
+    fn emitExpr(self: *FnEmitter, expr: *ast.Expr) Error!Operand {
+        switch (expr.kind) {
+            .int_literal => |lit| {
+                const text = try std.fmt.allocPrint(self.arena, "{d}", .{lit.value});
+                return .{ .text = text, .typ = .i32 };
+            },
+
+            .bool_literal => |value| {
+                return .{ .text = if (value) "true" else "false", .typ = .bool };
+            },
+
+            .identifier => {
+                const symbol = self.symbolAt(expr.resolved orelse return error.MiscompiledAst);
+                const ty = try llvmType(symbol.typ);
+                const align_value = try typeAlign(symbol.typ);
+                const name = try self.varName(symbol.slot);
+                const result = try self.newTemp();
+                try self.emit("  {s} = load {s}, ptr {s}, align {d}\n", .{ result, ty, name, align_value });
+                return .{ .text = result, .typ = symbol.typ };
+            },
+
+            .unary => |unary| return self.emitUnary(expr, unary),
+
+            .binary => |binary| return self.emitBinary(binary),
+
+            .call => |call| return self.emitCall(call),
+        }
+    }
+
+    fn emitUnary(self: *FnEmitter, expr: *ast.Expr, unary: ast.Expr.Unary) Error!Operand {
+        const operand = try self.emitExpr(unary.operand);
+        if (operand.typ == .void) return error.UnsupportedNode;
+        const result = try self.newTemp();
+        switch (unary.op) {
+            .neg => try self.emit("  {s} = sub i32 0, {s}\n", .{ result, operand.text }),
+            .not => try self.emit("  {s} = xor i1 {s}, true\n", .{ result, operand.text }),
+        }
+        _ = expr;
+        return .{
+            .text = result,
+            .typ = if (unary.op == .neg) .i32 else .bool,
+        };
+    }
+
+    fn emitBinary(self: *FnEmitter, binary: ast.Expr.Binary) Error!Operand {
+        if (binary.op.isLogical()) return self.emitLogical(binary);
+
+        const lhs = try self.emitExpr(binary.lhs);
+        const rhs = try self.emitExpr(binary.rhs);
+        if (lhs.typ == .void or rhs.typ == .void) return error.UnsupportedNode;
+        if (lhs.typ != rhs.typ) return error.UnsupportedNode;
+
+        const ty = try llvmType(lhs.typ);
+        const result = try self.newTemp();
+
+        switch (binary.op) {
+            .add => try self.emit("  {s} = add {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
+            .sub => try self.emit("  {s} = sub {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
+            .mul => try self.emit("  {s} = mul {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
+            .div => try self.emit("  {s} = sdiv {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
+            .mod => try self.emit("  {s} = srem {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
+            .lt => try self.emit("  {s} = icmp slt {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
+            .le => try self.emit("  {s} = icmp sle {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
+            .gt => try self.emit("  {s} = icmp sgt {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
+            .ge => try self.emit("  {s} = icmp sge {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
+            .eq => try self.emit("  {s} = icmp eq {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
+            .ne => try self.emit("  {s} = icmp ne {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
+            .and_op, .or_op => unreachable,
+        }
+
+        return .{
+            .text = result,
+            .typ = if (binary.op.isArithmetic()) .i32 else .bool,
+        };
+    }
+
+    /// `&&` e `||` com curto-circuito, usando blocos e `phi`.
+    fn emitLogical(self: *FnEmitter, binary: ast.Expr.Binary) Error!Operand {
+        const lhs = try self.emitExpr(binary.lhs);
+        const is_and = binary.op == .and_op;
+
+        const rhs_label = try self.newLabel(if (is_and) "and_rhs" else "or_rhs");
+        const end_label = try self.newLabel(if (is_and) "and_end" else "or_end");
+        const lhs_label = self.block().label;
+
+        if (is_and) {
+            try self.condBr(lhs.text, rhs_label, end_label);
+        } else {
+            try self.condBr(lhs.text, end_label, rhs_label);
+        }
+
+        try self.startBlock(rhs_label);
+        const rhs = try self.emitExpr(binary.rhs);
+        const rhs_source = self.block().label;
+        try self.br(end_label);
+
+        try self.startBlock(end_label);
+        const result = try self.newTemp();
+        const short_value = if (is_and) "false" else "true";
+        try self.emit("  {s} = phi i1 [ {s}, %{s} ], [ {s}, %{s} ]\n", .{
+            result, short_value, lhs_label, rhs.text, rhs_source,
+        });
+        return .{ .text = result, .typ = .bool };
+    }
+
+    fn emitCall(self: *FnEmitter, call: ast.Expr.Call) Error!Operand {
+        const fn_index = call.callee_fn orelse return error.MiscompiledAst;
+        const callee = self.checked.functions[fn_index];
+
+        var args: std.ArrayList(u8) = .empty;
+        for (call.args, 0..) |arg, i| {
+            const value = try self.emitExpr(arg);
+            if (value.typ == .void) return error.UnsupportedNode;
+            const ty = try llvmType(value.typ);
+            if (i != 0) try args.appendSlice(self.arena, ", ");
+            try args.print(self.arena, "{s} {s}", .{ ty, value.text });
+        }
+
+        const ret_type = try llvmType(callee.return_type);
+        if (callee.return_type == .void) {
+            try self.emit("  call void @{s}({s})\n", .{ call.callee, args.items });
+            return .{ .text = "", .typ = .void };
+        }
+
+        const result = try self.newTemp();
+        try self.emit("  {s} = call {s} @{s}({s})\n", .{ result, ret_type, call.callee, args.items });
+        return .{ .text = result, .typ = callee.return_type };
+    }
+};
+
+fn appendIndented(out: *std.ArrayList(u8), arena: std.mem.Allocator, text: []const u8) !void {
+    var it = std.mem.splitScalar(u8, text, '\n');
+    while (it.next()) |line| {
+        if (line.len == 0) continue;
+        try out.print(arena, "  {s}\n", .{line});
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Testes estruturais do IR emitido
+// ---------------------------------------------------------------------------
+
+const testing = std.testing;
+const support = @import("test_support.zig");
+
+fn emitFixture(f: *support.Fixture) ![]const u8 {
+    return emit(f.allocator(), f.program, &f.checked);
+}
+
+test "llvm: função main trivial" {
+    var f = try support.Fixture.build("fn main() -> i32 { return 7; }");
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+    try support.expectContains(ir, "define i32 @main() {");
+    try support.expectContains(ir, "ret i32 7");
+    try support.expectContains(ir, "entry:");
+    try support.expectAllBlocksTerminated(ir);
+}
+
+test "llvm: aritmética é emitida com a instrução correta" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    let a: i32 = 2 + 3;
+        \\    let b: i32 = a * 4;
+        \\    let c: i32 = b - 1;
+        \\    let d: i32 = c / 3;
+        \\    return d % 5;
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+    try support.expectContains(ir, "add i32");
+    try support.expectContains(ir, "mul i32");
+    try support.expectContains(ir, "sub i32");
+    try support.expectContains(ir, "sdiv i32");
+    try support.expectContains(ir, "srem i32");
+    try support.expectAllBlocksTerminated(ir);
+}
+
+test "llvm: comparação produz i1 e bool usa alinhamento 1" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    let ok: bool = 1 < 2;
+        \\    if ok { return 1; } else { return 0; }
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+    try support.expectContains(ir, "icmp slt i32");
+    try support.expectContains(ir, "alloca i1, align 1");
+    try support.expectContains(ir, "br i1");
+    try support.expectAllBlocksTerminated(ir);
+}
+
+test "llvm: and/or usam blocos e phi" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    let both: bool = 1 < 2 && 2 < 3 || false;
+        \\    if both { return 1; }
+        \\    return 0;
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+    try support.expectContains(ir, "phi i1");
+    try support.expectContains(ir, "and_rhs");
+    try support.expectContains(ir, "or_rhs");
+    try support.expectAllBlocksTerminated(ir);
+}
+
+test "llvm: while gera laço com rótulos próprios" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    var i: i32 = 0;
+        \\    while i < 3 { i = i + 1; }
+        \\    return i;
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+    try support.expectContains(ir, "while_cond0:");
+    try support.expectContains(ir, "while_body1:");
+    try support.expectContains(ir, "while_end2:");
+    try support.expectAllBlocksTerminated(ir);
+}
+
+test "llvm: chamada de função usa a assinatura resolvida" {
+    var f = try support.Fixture.build(
+        \\fn add(a: i32, b: i32) -> i32 { return a + b; }
+        \\fn main() -> i32 { return add(1, 2); }
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+    try support.expectContains(ir, "define i32 @add(i32 %arg0, i32 %arg1) {");
+    try support.expectContains(ir, "call i32 @add(i32 1, i32 2)");
+    try support.expectContains(ir, "store i32 %arg1, ptr %v1, align 4");
+    try support.expectAllBlocksTerminated(ir);
+}
+
+test "llvm: função void retorna com ret void" {
+    var f = try support.Fixture.build("fn main() -> void { return; }");
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+    try support.expectContains(ir, "define void @main() {");
+    try support.expectContains(ir, "ret void");
+    try support.expectAllBlocksTerminated(ir);
+}
+
+test "llvm: código após return não é emitido" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    return 1;
+        \\    return 2;
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+    try testing.expect(std.mem.indexOf(u8, ir, "ret i32 2") == null);
+    try support.expectAllBlocksTerminated(ir);
+}

@@ -5,6 +5,11 @@
 
 Este documento reúne exemplos e decisões preliminares para a experiência de programação em Kyn. A sintaxe abaixo ainda não é suportada integralmente pelo compilador atual. Alguns nomes de módulos, funções e tipos são ilustrativos e não representam APIs existentes na biblioteca padrão.
 
+> **O que já compila:** consulte [status.md](status.md) para o subconjunto
+> implementado e [syntax.ebnf](syntax.ebnf) para a gramática exata aceita pelo
+> parser. Os exemplos deste documento são visão de design e não devem ser
+> usados como teste de compilabilidade.
+
 ## 1. Arquivo e estrutura mínima
 
 Um programa-fonte utiliza a extensão `.kyn`. A forma pretendida de um programa simples é:

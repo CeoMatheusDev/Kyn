@@ -1,0 +1,11 @@
+// expect-exit: 3
+// && e || com curto-circuito e comparações booleanas.
+fn main() -> i32 {
+    let a: bool = 1 < 2 && 2 < 3;
+    let b: bool = false || 3 > 2;
+    let c: bool = !(1 == 2);
+    if a && b && c {
+        return 3;
+    }
+    return 9;
+}

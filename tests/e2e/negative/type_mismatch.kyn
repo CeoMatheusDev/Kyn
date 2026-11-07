@@ -1,0 +1,5 @@
+// Erro semântico esperado: anotação incompatível com o inicializador.
+fn main() -> i32 {
+    let flag: bool = 1 + 1;
+    return 0;
+}

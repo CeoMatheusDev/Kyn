@@ -1,0 +1,18 @@
+// expect-exit: 55
+// Fibonacci iterativo: exige laço, atribuições e várias variáveis locais.
+fn fib(n: i32) -> i32 {
+    var a: i32 = 0;
+    var b: i32 = 1;
+    var i: i32 = 0;
+    while i < n {
+        let next: i32 = a + b;
+        a = b;
+        b = next;
+        i = i + 1;
+    }
+    return a;
+}
+
+fn main() -> i32 {
+    return fib(10);
+}

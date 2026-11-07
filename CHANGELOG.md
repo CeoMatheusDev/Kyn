@@ -2,6 +2,49 @@
 
 Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
 
+> **Aviso de rastreabilidade:** as entradas abaixo de `v0.3.0-alpha.1`
+> registram marcos pretendidos em ciclos anteriores do projeto e **não**
+> constituem evidência de implementação. Várias descrevem recursos que o código
+> não possui (por exemplo self-hosting, release "industrial estável",
+> `Result<T, E>` e organização de módulos). O estado real, verificado por build
+> e testes, está em [docs/status.md](docs/status.md). O versionamento será
+> reconciliado antes de qualquer release pública.
+
+## [v0.3.0-alpha.1] — 2026-11-07
+
+Ciclo de integração do frontend com validação executável.
+
+- **Build:** adicionados `build.zig` e `build.zig.zon` (Zig 0.17.0 como versão
+  mínima). `zig build`, `zig build test` e `zig build e2e` funcionam.
+- **Toolchain:** desbloqueio da validação com Zig 0.17.0 real (binário oficial
+  obtido via pacote PyPI `ziglang` 0.17.0.post0).
+- **Lexer:** contrato de tokens reescrito com `Tag` tipada, palavras-chave,
+  operadores de dois caracteres e `Span` (offset, linha, coluna 1-based);
+  comentários e espaços descartados; caractere inválido vira token diagnosticado.
+- **AST:** novo modelo com funções, parâmetros, `let`/`var`, atribuição,
+  `return`, `if`/`else`, `while`, blocos e expressões; anotações de resolução
+  feitas pela semântica.
+- **Parser:** constrói o programa completo, com precedência/associatividade
+  documentadas em `docs/syntax.ebnf`; erros com span e mensagem.
+- **Semântica:** escopos aninhados, resolução de nomes, tipos `i32`/`bool`/
+  `void`, mutabilidade, verificação de chamadas, validação de `main`,
+  verificação estrutural de retorno e atribuição de slots de pilha.
+- **Diagnósticos:** módulo próprio com categoria estável, mensagem, linha e
+  marcador `^`.
+- **Backends:** interface em `src/codegen/codegen.zig` com dois emissores
+  derivados da AST — LLVM IR textual e assembly x86-64 System V sem libc.
+- **CLI `kync`:** `check` e `emit` (`--llvm`, `--asm`, `-o`, `--lib`) com
+  códigos de saída 0/1/2/3 e ajuda/versão.
+- **Testes:** 96 testes unitários (89 do compilador + 7 da std experimental);
+  64 casos de ponta a ponta (9 fixtures
+  comportamentais executadas, 50 fixtures `tests/integration/case_N.kyn`
+  conferidas pelo código de saída e 5 fixtures negativas). Testes antigos em
+  `src/test_*.zig` foram consolidados em `src/tests.zig` e `std/tests.zig`
+  (o antigo `src/test_core.zig` importava um arquivo inexistente).
+- **Documentação:** `README.md`, `docs/status.md`, `docs/architecture.md`,
+  `docs/development.md`, `docs/grammar.ebnf`, `docs/syntax.ebnf` e `ROADMAP.md`
+  reconciliados com o comportamento observado.
+
 ## [v2.3.0] — 2026-11-01
 - Marco 3.10: Lançamento da Release Industrial Estável. Congelamento final do compilador self-hosted `kync`, documentação completa, empacotamento do binário final.
 
