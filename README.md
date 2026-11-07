@@ -1,41 +1,56 @@
 # Kyn
 
-**Kyn** é um projeto experimental de linguagem de programação de sistemas, desenvolvido com foco em controle explícito de recursos, interoperabilidade com C e compilação de baixo nível.
+**Kyn** é um projeto experimental de linguagem de programação de sistemas,
+desenvolvido com foco em controle explícito de recursos, interoperabilidade com
+C e compilação de baixo nível.
 
-O repositório reúne um protótipo de compilador escrito em Zig, experimentos de implementação da linguagem Kyn, módulos iniciais de biblioteca padrão e testes/fixtures. O projeto ainda está em desenvolvimento: a implementação disponível não corresponde a uma linguagem estável ou pronta para produção.
+O repositório reúne um protótipo de compilador escrito em Zig, experimentos de
+implementação da linguagem Kyn, módulos iniciais de biblioteca padrão e
+testes/fixtures. O projeto ainda está em desenvolvimento: a implementação
+disponível não corresponde a uma linguagem estável ou pronta para produção.
 
-> **Estado atual:** protótipo em estágio inicial. Interfaces, sintaxe, semântica e comandos de build ainda podem mudar.
+> **Estado atual:** protótipo em estágio inicial, com frontend integrado e
+> backend nativo x86-64 validado por execução. Interfaces, sintaxe, semântica e
+> comandos de build ainda podem mudar.
 
 ## Objetivos de projeto
 
 - Controle explícito de alocação e ciclo de vida de memória.
 - Ausência de garbage collector como objetivo de projeto.
 - Interoperabilidade com C e possibilidade de uso em sistemas de baixo nível.
-- Separação conceitual entre recursos essenciais (`kyn:core`) e recursos dependentes do sistema operacional (`kyn:std`).
-- Compilador com implementação bootstrap em Zig e, futuramente, componentes reimplementados em Kyn.
+- Separação conceitual entre recursos essenciais (`kyn:core`) e recursos
+  dependentes do sistema operacional (`kyn:std`).
+- Compilador com implementação bootstrap em Zig e, futuramente, componentes
+  reimplementados em Kyn.
 
-Esses itens descrevem objetivos e direção arquitetural; não devem ser interpretados como garantias de recursos já completos.
+Esses itens descrevem objetivos e direção arquitetural; não devem ser
+interpretados como garantias de recursos completos.
 
 ## Estado de implementação
 
-| Área | O que existe no repositório | Estado |
+| Área | O que existe | Estado |
 | --- | --- | --- |
-| Lexer | Lexer inicial em `src/lexer/lexer.zig` | Experimental |
-| Parser e AST | Estruturas e parsing parcial em `src/parser/` e `src/ast/` | Experimental |
-| Análise semântica | Estrutura inicial em `src/sema/` | Experimental |
-| Geração de código | Emissor mínimo em `src/codegen/codegen.zig` | Experimental |
-| Implementação em Kyn | Arquivos iniciais em `src/kyn/` e `src/compiler/` | Esqueleto / incompleto |
-| Biblioteca padrão | Módulos iniciais em `std/` | Experimental |
-| Testes | Testes Zig e arquivos de casos `.kyn` em `src/` e `tests/` | Parcial |
+| Build | `build.zig` + `build.zig.zon` (Zig 0.17.0) | Funcional, validado |
+| CLI | `kync check` / `kync emit` (`--llvm`, `--asm`, `-o`, `--lib`) | Funcional para o subconjunto atual |
+| Lexer | `src/lexer/lexer.zig` com tokens tipados e spans | Funcional, testado |
+| Parser e AST | `src/parser/`, `src/ast/` para o subconjunto documentado | Funcional, testado |
+| Análise semântica | `src/sema/` com escopos, tipos e mutabilidade | Funcional para `i32`/`bool`/`void` |
+| Backend LLVM IR | `src/codegen/llvm.zig` derivado da AST | Experimental, sem validação por ferramenta LLVM |
+| Backend x86-64 | `src/codegen/x86_64.zig` (asm + `as`/`ld`) | Validado por execução |
+| Implementação em Kyn | `src/kyn/`, `src/compiler/` | Esqueleto / placeholders |
+| Biblioteca padrão | `std/` | Experimental |
+| Testes | Unitários (`zig build test`) e e2e (`zig build e2e`) | 96 testes unitários; 64 casos e2e |
 
-Consulte [o estado detalhado](docs/status.md) antes de depender de qualquer funcionalidade.
+Consulte [o estado detalhado](docs/status.md) e o
+[subconjunto aceito hoje](docs/syntax.ebnf) antes de depender de qualquer
+funcionalidade.
 
 ## Requisitos
 
-- Zig **0.17.0**, conforme declarado pelos metadados e comentários atuais do projeto.
-- Git para obter o código-fonte.
-
-A versão do compilador Zig deve ser confirmada no ambiente antes de compilar. O repositório ainda não contém um `build.zig` nem um sistema de build unificado.
+- Zig **0.17.0** (verificado por `build.zig.zon`).
+- Git.
+- Opcional, para a suíte e2e nativa: `bash`, GNU `as` e GNU `ld` em Linux
+  x86-64.
 
 ## Obtendo o código
 
@@ -46,52 +61,74 @@ cd Kyn
 
 ## Compilação e testes
 
-Não há, no estado atual, um comando único de build ou uma CLI funcional documentada. Para executar isoladamente os testes Zig existentes:
-
 ```sh
-zig test src/test_core.zig
-zig test src/test_sema.zig
-zig test src/test_codegen.zig
-zig test src/test_std.zig
-zig test src/test_unsafe.zig
+zig build          # gera zig-out/bin/kync
+zig build test     # testes unitários (compilador + std experimental)
+zig build e2e      # fixture -> assembly -> as/ld -> executa -> confere código
 ```
 
-Esses comandos executam apenas os arquivos de teste indicados; não representam uma validação completa do compilador, da biblioteca padrão ou dos arquivos `.kyn`.
+Exemplo de uso:
 
-A entrada `src/main.zig` é atualmente um ponto de entrada mínimo de bootstrap, não um compilador de produção. Os arquivos `.kyn` em `tests/` são fixtures/casos de teste e não devem ser considerados executáveis até existir um runner integrado.
+```sh
+cat > hello.kyn <<'KYN'
+fn main() -> i32 {
+    let resposta: i32 = 6 * 7;
+    return resposta % 256;
+}
+KYN
+
+zig-out/bin/kync check hello.kyn
+zig-out/bin/kync emit --llvm hello.kyn -o hello.ll
+zig-out/bin/kync emit --asm  hello.kyn -o hello.s
+as hello.s -o hello.o && ld hello.o -o hello && ./hello; echo "saída: $?"
+```
+
+`kync` retorna `0` em sucesso, `1` para erros de compilação, `2` para uso
+inválido e `3` para falhas de E/S. Detalhes em
+[docs/development.md](docs/development.md).
+
+Os arquivos `.kyn` em `tests/` cobrem tanto o subconjunto suportado
+(`tests/integration/`, `tests/e2e/`) quanto casos de linguagem ainda **não**
+implementados (por exemplo `impl`, `Result<T, E>`, `unsafe`). Não interprete a
+quantidade de fixtures como cobertura de recursos.
 
 ## Estrutura do repositório
 
 ```text
 .
-├── docs/              # Especificação, gramática, arquitetura e guias
+├── build.zig            # build, testes e e2e
+├── build.zig.zon
+├── docs/                # arquitetura, status, gramáticas e visão de linguagem
 ├── src/
-│   ├── ast/           # Nós da AST
-│   ├── codegen/       # Geração de código experimental
-│   ├── compiler/      # Módulos iniciais escritos em Kyn
-│   ├── ffi/           # Experimentos de interoperabilidade
-│   ├── kyn/           # Protótipos do compilador em Kyn
-│   ├── lexer/          # Lexer bootstrap em Zig
-│   ├── parser/         # Parser bootstrap em Zig
-│   └── sema/           # Análise semântica bootstrap
+│   ├── ast/             # nós da AST
+│   ├── codegen/         # interface de backend, LLVM IR e x86-64
+│   ├── compiler/        # módulos iniciais escritos em Kyn (placeholders)
+│   ├── ffi/             # experimentos de interoperabilidade
+│   ├── kyn/             # protótipos do compilador em Kyn (placeholders)
+│   ├── lexer/           # lexer bootstrap
+│   ├── parser/          # parser bootstrap
+│   ├── sema/            # análise semântica e política de unsafe
+│   ├── driver.zig       # pipeline integrado
+│   ├── diagnostics.zig  # diagnósticos e renderização
+│   ├── span.zig         # localização na fonte
+│   └── main.zig         # CLI kync
 ├── std/
-│   ├── core/           # Primitivas independentes de SO (em desenvolvimento)
-│   └── os/             # Integrações dependentes de SO (em desenvolvimento)
-└── tests/              # Fixtures e casos de teste da linguagem
+│   ├── core/            # primitivas independentes de SO (experimental)
+│   └── os/              # integrações dependentes de SO (experimental)
+├── tests/               # fixtures da linguagem (integração, e2e, fuzz...)
+└── tools/e2e.sh         # validação de ponta a ponta nativa
 ```
-
-Os testes Zig ainda localizados diretamente em `src/test_*.zig` serão consolidados em uma estrutura própria quando os caminhos de importação e o fluxo de build forem padronizados.
 
 ## Documentação
 
 - [Visão geral e arquitetura](docs/architecture.md)
 - [Estado de implementação e limitações](docs/status.md)
-- [Desenvolvimento, build e testes](docs/development.md)
+- [Desenvolvimento, build, CLI e testes](docs/development.md)
 - [Especificação em evolução](docs/spec.md)
 - [Referência preliminar da linguagem `.kyn`](docs/language_reference.md)
 - [Princípios de design da linguagem](docs/language_design.md)
-- [Gramática lexical inicial](docs/grammar.ebnf)
-- [Gramática sintática preliminar — proposta](docs/syntax.ebnf)
+- [Gramática lexical implementada](docs/grammar.ebnf)
+- [Gramática sintática do subconjunto aceito](docs/syntax.ebnf)
 - [Modelo de memória — proposta](docs/memory_model.md)
 - [Roadmap](ROADMAP.md)
 - [Histórico de alterações](CHANGELOG.md)
@@ -99,10 +136,15 @@ Os testes Zig ainda localizados diretamente em `src/test_*.zig` serão consolida
 
 ## Contribuindo
 
-Contribuições são bem-vindas. Antes de abrir uma alteração, leia [CONTRIBUTING.md](CONTRIBUTING.md) e descreva claramente o comportamento que foi implementado e como foi verificado.
+Contribuições são bem-vindas. Antes de abrir uma alteração, leia
+[CONTRIBUTING.md](CONTRIBUTING.md) e descreva claramente o comportamento
+implementado e como foi verificado (`zig build test`, `zig build e2e`).
 
-Não apresente protótipos, stubs ou objetivos do roadmap como funcionalidades concluídas.
+Não apresente protótipos, stubs ou objetivos do roadmap como funcionalidades
+concluídas.
 
 ## Licença
 
-O projeto declara licenciamento duplo MIT e Apache-2.0. Consulte os arquivos de licença presentes no repositório e confirme os termos aplicáveis antes de redistribuir.
+O projeto declara licenciamento duplo MIT e Apache-2.0. Consulte os arquivos de
+licença presentes no repositório e confirme os termos aplicáveis antes de
+redistribuir.

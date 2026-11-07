@@ -1,17 +1,37 @@
-(* Kyn — gramática lexical inicial.
-   Este arquivo descreve apenas tokens observados no lexer bootstrap.
-   Não é a gramática sintática completa da linguagem. *)
+(* Kyn — gramática lexical implementada.
+   Reflete src/lexer/lexer.zig: tokens, palavras-chave e operadores.
+   Espaços em branco e comentários de linha são descartados pelo lexer. *)
 
-letter      = "a"…"z" | "A"…"Z" | "_" ;
-digit       = "0"…"9" ;
+program    = { token } ;
 
-identifier  = ( letter ), { letter | digit } ;
-integer     = digit, { digit } ;
+token      = identifier
+           | integer
+           | keyword
+           | operator
+           | punctuation ;
 
-whitespace  = " " | "\t" | "\n" ;
-comment     = "//", { any_char - "\n" } ;
+identifier = ( letter | "_" ), { letter | digit | "_" } ;
+integer    = digit, { digit } ;   (* valor convertido para i64 pelo parser *)
 
-(* O lexer atual classifica qualquer caractere não reconhecido pelas
-   regras acima como um token symbol individual. A lista de operadores
-   e delimitadores ainda não está formalizada. *)
-symbol      = any_char - ( letter | digit | whitespace ) ;
+keyword    = "fn" | "let" | "var" | "return"
+           | "if" | "else" | "while"
+           | "true" | "false" ;
+
+operator   = "->"
+           | "==" | "!=" | "<" | "<=" | ">" | ">="
+           | "=" | "+" | "-" | "*" | "/" | "%" | "!"
+           | "&&" | "||" ;
+
+punctuation = "(" | ")" | "{" | "}" | ":" | ";" | "," ;
+
+whitespace = " " | "\t" | "\r" | "\n" ;          (* descartado *)
+comment    = "//", { any_char - "\n" } ;         (* descartado *)
+
+(* Um caractere fora das regras acima produz o token "invalid", que o parser
+   converte em diagnóstico com a posição exata. '&' e '|' isolados são
+   inválidos: apenas '&&' e '||' existem. *)
+
+letter     = "a"…"z" | "A"…"Z" ;
+digit      = "0"…"9" ;
+
+(* A entrada é tratada como bytes ASCII. Bytes não-ASCII são "invalid". *)

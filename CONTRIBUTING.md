@@ -29,7 +29,7 @@ Cada PR deve:
 
 ## Testes
 
-Execute os testes Zig relevantes. Os comandos atualmente disponíveis estão descritos em [docs/development.md](docs/development.md). Os fixtures `.kyn` ainda não possuem um runner integrado.
+Execute `zig build test` para os testes unitários. Para mudanças em lexer, parser, semântica ou backends, rode também `zig build e2e`, que compila fixtures `.kyn` do subconjunto suportado, monta com `as`, liga com `ld` e confere o código de saída de cada programa. Casos ainda não implementados (por exemplo `impl`, `Result<T, E>`, `unsafe`) permanecem como documentação e não devem ser apresentados como suportados.
 
 ## Commits
 

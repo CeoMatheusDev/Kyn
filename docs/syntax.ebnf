@@ -1,52 +1,67 @@
-(* Kyn — gramática sintática preliminar.
-   Status: proposta ilustrativa, não implementada integralmente.
-   Não substitui a gramática lexical observada em grammar.ebnf. *)
+(* Kyn — gramática sintática do subconjunto implementado.
+   Este arquivo descreve exatamente o que o parser em src/parser/parser.zig
+   aceita hoje. Construções da visão de linguagem (import, struct, enum, impl,
+   generics, slices, ponteiros, unsafe, atributos) ainda NÃO fazem parte deste
+   subconjunto; ver docs/language_reference.md e docs/status.md. *)
 
-program          = { import_decl }, { declaration } ;
-
-import_decl      = "import", qualified_name, ";" ;
-qualified_name   = identifier, { ".", identifier } ;
-
-declaration      = function_decl
-                 | struct_decl
-                 | enum_decl
-                 | impl_decl ;
+program          = { function_decl }, EOF ;
 
 function_decl    = "fn", identifier, "(", [ parameters ], ")",
                    [ "->", type_expr ], block ;
+
 parameters       = parameter, { ",", parameter } ;
 parameter        = identifier, ":", type_expr ;
 
-struct_decl      = "struct", identifier, "{", { field_decl }, "}" ;
-field_decl       = identifier, ":", type_expr, [ "," ] ;
-
-enum_decl        = "enum", identifier, "{", { identifier, [ "," ] }, "}" ;
-impl_decl        = "impl", identifier, "{", { function_decl }, "}" ;
-
-type_expr        = qualified_name
-                 | "[", "]", type_expr
-                 | "*", type_expr
-                 | "&", [ "mut" ], type_expr ;
+(* Somente i32, bool e void são aceitos pela semântica nesta etapa. *)
+type_expr        = identifier ;
 
 block            = "{", { statement }, "}" ;
+
 statement        = let_decl
                  | var_decl
+                 | assignment
                  | return_stmt
                  | if_stmt
                  | while_stmt
-                 | expression_stmt
-                 | block ;
+                 | block
+                 | expression_stmt ;
 
-let_decl         = "let", identifier, ":", type_expr, "=", expression, ";" ;
-var_decl         = "var", identifier, ":", type_expr, "=", expression, ";" ;
+(* O inicializador é obrigatório nesta etapa: `let x: i32;` produz
+   diagnóstico 'unsupported'. *)
+let_decl         = "let", identifier, [ ":", type_expr ], "=", expression, ";" ;
+var_decl         = "var", identifier, [ ":", type_expr ], "=", expression, ";" ;
+
+assignment       = identifier, "=", expression, ";" ;
 return_stmt      = "return", [ expression ], ";" ;
 if_stmt          = "if", expression, block, [ "else", ( block | if_stmt ) ] ;
 while_stmt       = "while", expression, block ;
 expression_stmt  = expression, ";" ;
 
-(* Expressões, precedência, literais, generics, padrões, atributos,
-   visibilidade, closures e regras semânticas permanecem em aberto. *)
+(* Precedência, do menor para o maior:
+   1  ||            (bool, curto-circuito)
+   2  &&            (bool, curto-circuito)
+   3  == !=         (mesmo tipo, produz bool)
+   4  < <= > >=     (i32, produz bool)
+   5  + -           (i32, associativo à esquerda)
+   6  * / %         (i32, associativo à esquerda)
+   7  unários - !   (prefixo)
+   8  primárias *)
 
-identifier       = letter, { letter | digit } ;
-letter           = "a"…"z" | "A"…"Z" | "_" ;
-digit            = "0"…"9" ;
+expression       = logical_or ;
+logical_or       = logical_and, { "||", logical_and } ;
+logical_and      = equality, { "&&", equality } ;
+equality         = comparison, { ( "==" | "!=" ), comparison } ;
+comparison       = additive, { ( "<" | "<=" | ">" | ">=" ), additive } ;
+additive         = multiplicative, { ( "+" | "-" ), multiplicative } ;
+multiplicative   = unary, { ( "*" | "/" | "%" ), unary } ;
+unary            = ( "-" | "!" ), unary | primary ;
+
+primary          = integer
+                 | "true" | "false"
+                 | identifier, [ "(", [ arguments ], ")" ]
+                 | "(", expression, ")" ;
+
+arguments        = expression, { ",", expression } ;
+
+(* Limites do backend nativo atual (documentados como pendência de projeto):
+   até 6 parâmetros/argumentos por função; sem chamadas externas. *)
