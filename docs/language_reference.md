@@ -123,6 +123,25 @@ fn main() -> i32 {
 }
 ```
 
+`str` também **atravessa chamadas por valor**: cada parâmetro, argumento e
+retorno `str` leva dois registradores (ponteiro e tamanho), e o limite de seis
+registradores por chamada conta cada `str` como dois.
+
+```kyn
+fn eco(s: str) -> str {
+    return s;
+}
+
+fn titulo() -> str {
+    return "kyn";
+}
+
+fn main() -> i32 {
+    print(eco(titulo()));  // escreve "kyn"
+    return 0;
+}
+```
+
 `print` é uma função embutida (`print(expr)` exige exatamente um `str`, devolve
 `void`, escreve o texto e a quebra de linha); o nome é reservado para funções
 declaradas na fonte. `print_i32(expr)` segue a mesma regra com um argumento
@@ -139,10 +158,11 @@ fn main() -> i32 {
 }
 ```
 
-Limites atuais, todos diagnosticados: `str` em
-parâmetro/retorno/argumento, campo de struct de tipo `str`, `str` em aritmética,
-condição ou `==`/`!=` (comparar exigiria comparar bytes), concatenação e
-formatação, e literal de string como expressão solta.
+Limites atuais, todos diagnosticados: campo de struct de tipo `str`, `str` em
+aritmética, condição ou `==`/`!=` (comparar exigiria comparar bytes),
+concatenação, formatação, `main` com retorno `str`, mais de seis registradores
+em parâmetros/argumentos (cada `str` conta dois) e expressão `str` sem uso
+(`print(...)` ou atribuição).
 
 Ainda não são contratos estáveis: tamanhos e alinhamento dos demais tipos,
 overflow em tempo de execução, conversões implícitas, representação de `char` e

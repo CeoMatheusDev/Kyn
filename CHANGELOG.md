@@ -10,6 +10,46 @@ Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
 > e testes, está em [docs/status.md](docs/status.md). O versionamento será
 > reconciliado antes de qualquer release pública.
 
+## [v0.3.6-alpha.1] — 2026-11-07
+
+`str` por valor: texto atravessa chamadas de função em parâmetros e retornos.
+
+- **Semântica:** `str` deixou de ser restrito a variáveis locais —
+  `Type.isValue()` inclui `.str`, então parâmetros e retornos `str` são aceitos
+  como qualquer escalar. O antigo `max_params` (agora `max_arg_registers`) foi
+  trocado por uma contagem em
+  **palavras de registrador** (`Type.registerWords()`: 1 por escalar, 2 por
+  `str`), aplicada na declaração e em cada chamada, com diagnósticos que citam
+  o total e a regra (`'str' ocupa dois`). Continuam diagnosticados: campo de
+  struct de tipo `str`, `str` em aritmética/condição/`==`/`!=`, `main`
+  retornando `str` e expressão `str` sem uso (mensagem agora genérica, não só
+  para literal).
+- **Backend x86-64:** ABI própria documentada — cada parâmetro/argumento `str`
+  ocupa dois registradores consecutivos (ponteiro, tamanho) na ordem SysV
+  (`(%rdi,%rsi)`, `(%rdx,%rcx)`, `(%r8,%r9)`), e o retorno vem em `%rax`
+  (ponteiro) + `%rdx` (tamanho). O prólogo grava os dois registradores nos dois
+  slots do símbolo; chamadas com mais de um argumento empilham uma palavra por
+  registrador e desempilham na ordem inversa, e o caso de um único argumento
+  vai direto para o registrador (sem tocar na pilha). `emitStrValue` centraliza
+  literal/identificador/chamada que devolve `str`, reutilizado por `print`,
+  atribuição e `return`.
+- **Backend LLVM IR:** assinaturas expandem cada `str` em `ptr %argN` +
+  `i64 %argN+1`; o retorno é o agregado `{ ptr, i64 }` montado com
+  `insertvalue` e lido com `extractvalue` (`StrOperand`/`strOperand` decide
+  entre literal, `load` e `extractvalue`). `emitCall` recusa `str` de retorno em
+  vez de emitir `call` truncado.
+- **Testes:** 186 testes do compilador (12 novos) + 7 da std — **193 no total**;
+  os 2 negativos antigos que exigiam "`str` em parâmetro/retorno não suportado"
+  foram substituídos por testes do novo contrato. 3 fixtures e2e novas com
+  stdout conferido (`str_passagem`, `str_retorno`, `str_retorno_ramo`), 1 módulo
+  importado com `str` (`import_str`) e 2 negativas novas
+  (`str_registradores`, `str_retorno_main`, substituindo `str_param_unsupported`)
+  — **97/97 casos**; `validate-ir` passa a cobrir **79 módulos**.
+- **Docs:** `docs/architecture.md` (convenção de chamada e restrições
+  remanescentes), `docs/syntax.ebnf`, `docs/language_reference.md`,
+  `docs/status.md`, `README.md` e `DEVELOPMENT_STATE.md`.
+- **Versão:** `0.3.6-alpha.1` (derivada de `build.zig.zon`).
+
 ## [v0.3.5-alpha.1] — 2026-11-07
 
 Saída de valores: builtin `print_i32(n: i32)` com formatação decimal própria.

@@ -48,9 +48,17 @@ pub const Type = enum {
         return null;
     }
 
-    /// Tipos que podem existir como valor de expressão/variável.
+    /// Tipos que podem existir como valor de expressão/variável. `str` é
+    /// fatia (dois slots), não escalar, mas tem valor: pode ser inicializar,
+    /// copiar, retornar e ser argumento.
     pub fn isValue(self: Type) bool {
-        return self == .i32 or self == .bool;
+        return self == .i32 or self == .bool or self == .str;
+    }
+
+    /// Palavras de registrador consumidas pela convenção de chamada: `str`
+    /// ocupa dois registradores consecutivos (ponteiro e tamanho).
+    pub fn registerWords(self: Type) usize {
+        return if (self == .str) 2 else 1;
     }
 };
 
@@ -115,8 +123,10 @@ pub const Checked = struct {
     }
 };
 
-/// Limite de parâmetros/argumentos por chamada no backend x86-64 (SysV).
-pub const max_params: usize = 6;
+/// Limite de **registradores** de argumento por chamada no backend x86-64
+/// (SysV). Não é um limite de parâmetros: cada `str` consome dois
+/// (`Type.registerWords`), então três `str` preenchem a tabela.
+pub const max_arg_registers: usize = 6;
 
 pub const Options = struct {
     /// Exige que o programa defina `fn main() -> i32` ou `fn main() -> void`.
@@ -318,19 +328,12 @@ pub const Checker = struct {
             }
         }
 
-        if (func.params.len > max_params) {
-            try self.diags.add(
-                .unsupported,
-                func.name_span,
-                "função '{s}' declara {d} parâmetros; o backend atual suporta no máximo {d}",
-                .{ func.name, func.params.len, max_params },
-            );
-        }
-
         const params = try self.arena.alloc(Type, func.params.len);
         // Índice provisório: as assinaturas são anexadas na ordem da fonte.
+        var register_words: usize = 0;
         for (func.params, 0..) |param, i| {
             params[i] = try self.resolveTypeName(param.type_name);
+            register_words += params[i].registerWords();
             if (params[i] == .aggregate) {
                 try self.diags.add(
                     .unsupported,
@@ -338,14 +341,18 @@ pub const Checker = struct {
                     "parâmetro '{s}' de '{s}': passagem de struct por valor ainda não é suportada",
                     .{ param.name, func.name },
                 );
-            } else if (params[i] == .str) {
-                try self.diags.add(
-                    .unsupported,
-                    param.type_name.span,
-                    "parâmetro '{s}' de '{s}': passagem de 'str' por valor ainda não é suportada",
-                    .{ param.name, func.name },
-                );
             }
+        }
+
+        // O limite do backend nativo é em registradores, não em parâmetros:
+        // cada `str` consome dois.
+        if (register_words > max_arg_registers) {
+            try self.diags.add(
+                .unsupported,
+                func.name_span,
+                "função '{s}' ocupa {d} registradores em parâmetros; o backend atual suporta no máximo {d} ('str' ocupa dois)",
+                .{ func.name, register_words, max_arg_registers },
+            );
         }
 
         const return_type: Type = if (func.return_type) |tn|
@@ -357,13 +364,6 @@ pub const Checker = struct {
                 .unsupported,
                 func.return_type.?.span,
                 "função '{s}': retorno de struct por valor ainda não é suportado",
-                .{func.name},
-            );
-        } else if (return_type == .str) {
-            try self.diags.add(
-                .unsupported,
-                func.return_type.?.span,
-                "função '{s}': retorno de 'str' ainda não é suportado",
                 .{func.name},
             );
         }
@@ -799,7 +799,7 @@ pub const Checker = struct {
                     try self.diags.add(
                         .unsupported,
                         expr.span,
-                        "literal de string isolado não tem efeito; use 'print(...)'",
+                        "expressão do tipo 'str' sem uso; use 'print(...)' ou atribua a uma variável",
                         .{},
                     );
                 } else if (typ == .aggregate) {
@@ -1147,12 +1147,14 @@ pub const Checker = struct {
         const func = self.functions.items[fn_index.?];
         call.callee_fn = fn_index;
 
-        if (call.args.len > max_params) {
+        var arg_words: usize = 0;
+        for (arg_types.items) |typ| arg_words += typ.registerWords();
+        if (arg_words > max_arg_registers) {
             try self.diags.add(
                 .unsupported,
                 span,
-                "chamada de '{s}' com {d} argumentos; o backend atual suporta no máximo {d}",
-                .{ call.callee, call.args.len, max_params },
+                "chamada de '{s}' ocupa {d} registradores; o backend atual suporta no máximo {d} ('str' ocupa dois)",
+                .{ call.callee, arg_words, max_arg_registers },
             );
         }
 
@@ -1856,24 +1858,87 @@ test "sema: 'str' como condição é rejeitado" {
     try expectOnly(&f, .invalid_condition);
 }
 
-test "sema: passagem de 'str' por valor em parâmetro é diagnosticada" {
+test "sema: 'str' é aceito como parâmetro e como retorno" {
     var f = try Fixture.check(
-        \\fn mostra(s: str) -> i32 { return 0; }
-        \\fn main() -> i32 { return 0; }
+        \\fn eco(s: str) -> str { return s; }
+        \\fn mostra(s: str) -> i32 { print(s); return 0; }
+        \\fn main() -> i32 {
+        \\    let a = eco("kyn");
+        \\    print(a);
+        \\    return mostra(eco(a));
+        \\}
     , .{});
     defer f.deinit();
-    try expectOnly(&f, .unsupported);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "passagem de 'str'") != null);
+    try testing.expectEqual(@as(usize, 0), f.diags.count());
+
+    const checked = f.checked.?;
+    // Parâmetro `str` ocupa dois slots (ponteiro e tamanho).
+    try testing.expectEqual(Type.str, checked.functions[0].params[0]);
+    try testing.expectEqual(Type.str, checked.functions[0].return_type);
+    try testing.expectEqual(@as(u32, 2), checked.functions[1].slot_count);
 }
 
-test "sema: retorno de 'str' é diagnosticado" {
+test "sema: limite de registradores conta 'str' como dois" {
     var f = try Fixture.check(
-        \\fn nome() -> str { return "kyn"; }
+        \\fn quatro(a: str, b: str, c: str, d: str) -> i32 { return 0; }
         \\fn main() -> i32 { return 0; }
     , .{});
     defer f.deinit();
     try expectOnly(&f, .unsupported);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "retorno de 'str'") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "8 registradores") != null);
+}
+
+test "sema: três parâmetros 'str' cabem nos seis registradores" {
+    var f = try Fixture.check(
+        \\fn tres(a: str, b: str, c: str) -> i32 {
+        \\    print(a);
+        \\    print(b);
+        \\    print(c);
+        \\    return 0;
+        \\}
+        \\fn main() -> i32 { return tres("a", "b", "c"); }
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 0), f.diags.count());
+}
+
+test "sema: 'main' não pode retornar 'str'" {
+    var f = try Fixture.check(
+        \\fn main() -> str { return "a"; }
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .invalid_main);
+}
+
+test "sema: argumento 'str' onde se espera 'i32' é diagnosticado" {
+    var f = try Fixture.check(
+        \\fn dobro(n: i32) -> i32 { return n + n; }
+        \\fn main() -> i32 { return dobro("a"); }
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .type_mismatch);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "deve ser 'i32', encontrado 'str'") != null);
+}
+
+test "sema: retorno 'str' sem valor é diagnosticado" {
+    var f = try Fixture.check(
+        \\fn nome() -> str { return; }
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .invalid_return);
+}
+
+test "sema: função que retorna 'str' precisa terminar com return" {
+    var f = try Fixture.check(
+        \\fn nome(b: bool) -> str {
+        \\    if b { return "a"; }
+        \\}
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .invalid_return);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "com valor 'str'") != null);
 }
 
 test "sema: campo de tipo 'str' é diagnosticado" {

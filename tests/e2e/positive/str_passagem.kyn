@@ -1,0 +1,23 @@
+// 'str' por valor em parâmetros: ponteiro e tamanho em dois registradores.
+// expect-stdout: ola,
+// expect-stdout: kyn
+// expect-stdout: n=
+// expect-stdout: 42
+// expect-exit: 5
+fn saudacao(nome: str) -> i32 {
+    print("ola,");
+    print(nome);
+    return 2;
+}
+
+fn marca(prefixo: str, n: i32) -> i32 {
+    print(prefixo);
+    print_i32(n);
+    return 3;
+}
+
+fn main() -> i32 {
+    let a = saudacao("kyn");
+    let b = marca("n=", 42);
+    return a + b;
+}
