@@ -22,7 +22,7 @@ function_decl    = "fn", identifier, "(", [ parameters ], ")",
 parameters       = parameter, { ",", parameter } ;
 parameter        = identifier, ":", type_expr ;
 
-(* Aceitos pela semântica: i32, bool, void e nomes de struct declarados. *)
+(* Aceitos pela semântica: i32, bool, str, void e nomes de struct declarados. *)
 type_expr        = identifier ;
 
 block            = "{", { statement }, "}" ;
@@ -75,6 +75,7 @@ unary            = ( "-" | "!" ), unary | postfix ;
 postfix          = primary, { ".", identifier } ;
 
 primary          = integer
+                 | string_literal
                  | "true" | "false"
                  | identifier, [ "(", [ arguments ], ")" ]
                  | struct_literal
@@ -87,5 +88,17 @@ field_init       = identifier, ":", expression ;
 
 arguments        = expression, { ",", expression } ;
 
+(* `str` é uma fatia estática (ponteiro + tamanho), não um escalar: só
+   inicializa variável, é copiado e é argumento de `print`. Diagnósticos:
+   parâmetro/retorno/campo de struct de tipo `str`, `str` em aritmética, em
+   condição e em `==`/`!=` (comparação de bytes ainda não existe), além de
+   literal de string usado como expressão solta. *)
+
+(* `print` é uma função embutida, não uma palavra-chave nem uma declaração:
+   `print(expr)` exige exatamente um argumento `str`, devolve `void` e escreve o
+   texto seguido de quebra de linha. O nome `print` é reservado para funções
+   declaradas na fonte. *)
+
 (* Limites do backend nativo atual (documentados como pendência de projeto):
-   até 6 parâmetros/argumentos por função; sem chamadas externas. *)
+   até 6 parâmetros/argumentos por função; sem chamadas externas; `str` ainda
+   não atravessa chamadas de função. *)

@@ -1,0 +1,14 @@
+// `print` dentro de laço: a mesma variável `str` impressa a cada iteração.
+// expect-exit: 3
+// expect-stdout: kyn
+// expect-stdout: kyn
+// expect-stdout: kyn
+fn main() -> i32 {
+    let msg = "kyn";
+    var n: i32 = 0;
+    while n < 3 {
+        print(msg);
+        n = n + 1;
+    }
+    return n;
+}

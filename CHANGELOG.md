@@ -10,6 +10,47 @@ Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
 > e testes, está em [docs/status.md](docs/status.md). O versionamento será
 > reconciliado antes de qualquer release pública.
 
+## [v0.3.4-alpha.1] — 2026-11-07
+
+Saída de texto: `str` como fatia estática e `print(...)` embutido.
+
+- **AST:** `Expr.Kind.str_literal` (bytes sem aspas) e `Expr.Call.builtin`
+  (`print`), permitindo que a semântica marque chamadas embutidas sem
+  confundi-las com funções declaradas na fonte.
+- **Parser:** literal de string passa a ser expressão (inclusive como argumento
+  de chamada); string não terminada vira diagnóstico `.syntax` com a posição.
+- **Semântica:** novo `Type.str` (não escalar) com **dois slots** (ponteiro e
+  tamanho, mesma convenção nos dois backends) e `print` embutido: exatamente um
+  argumento `str`, resultado `void`, nome reservado para funções declaradas.
+  Diagnósticos novos: `str` em aritmética/condição, comparação `==`/`!=` de
+  `str` (sem comparar ponteiros silenciosamente), literal solto como statement,
+  `str` em parâmetro/retorno/argumento e campo de struct de tipo `str`.
+- **Backend x86-64:** literais deduplicados em `.section .rodata` como listas de
+  `.byte` (sem escapes), atribuição/cópia em dois `movq` e `print` via syscall
+  `write` (texto + quebra de linha), sem depender de libc.
+- **Backend LLVM IR:** `@.strN = private unnamed_addr constant [N x i8]`,
+  `declare i64 @write(i32, ptr, i64)` e `print` como duas chamadas a `write`;
+  `str` usa dois `alloca` (`ptr` + `i64`). IR aceito por `llvm-as` no CI.
+- **Pool de strings:** `codegen.StrPool` deduplica por conteúdo, então cada
+  texto distinto vira um único rótulo/constante independentemente das
+  referências.
+- **Semântica (correção de contrato):** `let`/`var` com inicializador `void`
+  (por exemplo `let x = print("a");` ou `let x = f();` com `f` sem retorno)
+  agora é diagnosticado como um **único** erro; antes `let x = f();` passava
+  pela semântica e chegava ao backend com um tipo sem representação.
+- **Testes:** 162 testes do compilador (29 novos: parser, semântica, os dois
+  backends e o pool) e 7 da std; 4 fixtures e2e novas com `print` (stdout
+  conferido), 1 módulo importado com `print` e 4 fixtures negativas —
+  **86/86 casos**, com `tools/e2e.sh` passando a comparar `// expect-stdout:`
+  além de `// expect-exit:`.
+- **Docs:** `docs/syntax.ebnf`, `docs/grammar.ebnf`, `docs/architecture.md`
+  (representação de `str` e saída de texto), `docs/status.md`,
+  `docs/development.md`, `docs/language_reference.md`, `README.md`,
+  `ROADMAP.md` e `DEVELOPMENT_STATE.md` atualizados.
+- **Versão:** `0.3.4-alpha.1` (derivada de `build.zig.zon`).
+- **Integração:** PR #15; CI verde (run `42420648098`) com `zig fmt --check`,
+  testes, e2e (com stdout conferido) e `validate-ir-strict` sobre 71 módulos.
+
 ## [v0.3.3-alpha.1] — 2026-11-07
 
 Structs com valor: declaração, literais, campos e layout nos dois backends.
@@ -44,6 +85,9 @@ Structs com valor: declaração, literais, campos e layout nos dois backends.
   `docs/status.md`, `docs/development.md`, `docs/language_reference.md`,
   `README.md`, `ROADMAP.md` e `DEVELOPMENT_STATE.md` atualizados.
 - **Versão:** `0.3.3-alpha.1` (derivada de `build.zig.zon`).
+- **Integração:** PR #13 mesclado em `main` como `4234c07`; CI verde nos runs
+  `42417725687` (PR) e `42417878774` (`main`), incluindo
+  `zig build validate-ir-strict` com 66 módulos aceitos por `llvm-as`.
 
 ## [v0.3.2-alpha.1] — 2026-11-07
 

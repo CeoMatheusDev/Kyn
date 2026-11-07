@@ -1,0 +1,9 @@
+// Erro esperado: comparação de 'str' ainda não é suportada.
+fn main() -> i32 {
+    let a = "x";
+    let b = "x";
+    if a == b {
+        return 1;
+    }
+    return 0;
+}

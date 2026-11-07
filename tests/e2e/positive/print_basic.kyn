@@ -1,0 +1,9 @@
+// Saída de texto: dois literais impressos em sequência.
+// expect-exit: 0
+// expect-stdout: kyn
+// expect-stdout: bootstrap
+fn main() -> i32 {
+    print("kyn");
+    print("bootstrap");
+    return 0;
+}

@@ -516,6 +516,16 @@ pub const Parser = struct {
                     .int_literal = .{ .value = value, .text = tok.text },
                 });
             },
+            .string => {
+                self.advance();
+                return ast.Expr.create(self.arena, tok.span, .{ .str_literal = tok.text });
+            },
+            .string_unterminated => return self.fail(
+                .syntax,
+                tok.span,
+                "literal de string não terminado",
+                .{},
+            ),
             .kw_true, .kw_false => {
                 self.advance();
                 return ast.Expr.create(self.arena, tok.span, .{ .bool_literal = tok.tag == .kw_true });
@@ -1042,4 +1052,43 @@ test "parser: 'import' depois de struct é rejeitado" {
     defer parsed.deinit();
     try testing.expectEqual(@as(usize, 1), parsed.diags.count());
     try testing.expect(std.mem.indexOf(u8, parsed.diags.last().?.message, "antes das declarações") != null);
+}
+
+test "parser: literal de string é expressão (argumento de print)" {
+    var parsed = try Parsed.parse(
+        \\fn main() -> i32 {
+        \\    print("kyn");
+        \\    return 0;
+        \\}
+    );
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 0), parsed.diags.count());
+
+    const body = parsed.program.?.functions[0].body;
+    const call = body[0].kind.expr_stmt.kind.call;
+    try testing.expectEqualStrings("print", call.callee);
+    try testing.expectEqualStrings("kyn", call.args[0].kind.str_literal);
+}
+
+test "parser: string vazia é uma expressão válida" {
+    var parsed = try Parsed.parse(
+        \\fn main() -> i32 {
+        \\    print("");
+        \\    return 0;
+        \\}
+    );
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 0), parsed.diags.count());
+    const call = parsed.program.?.functions[0].body[0].kind.expr_stmt.kind.call;
+    try testing.expectEqual(@as(usize, 0), call.args[0].kind.str_literal.len);
+}
+
+test "parser: string não terminada na expressão gera diagnóstico" {
+    var parsed = try Parsed.parse(
+        "fn main() -> i32 {\n    print(\"sem fim);\n    return 0;\n}",
+    );
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 1), parsed.diags.count());
+    try testing.expectEqual(diagnostics.Kind.syntax, parsed.diags.items.items[0].kind);
+    try testing.expect(std.mem.indexOf(u8, parsed.diags.items.items[0].message, "não terminado") != null);
 }

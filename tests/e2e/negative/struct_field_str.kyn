@@ -1,0 +1,8 @@
+// Erro esperado: campo de struct de tipo 'str' ainda não é suportado.
+struct Rotulo {
+    texto: str,
+}
+
+fn main() -> i32 {
+    return 0;
+}

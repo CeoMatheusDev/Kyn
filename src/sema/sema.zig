@@ -23,6 +23,9 @@ pub const Type = enum {
     /// Valor de struct (identidade nominal em `Symbol.struct_id`). Não é
     /// escalar: não participa de operadores, condições nem chamadas por valor.
     aggregate,
+    /// Fatia de string estática (ponteiro + tamanho), representada em dois
+    /// slots. Não é escalar: só inicializa, é copiada e é argumento de `print`.
+    str,
     /// Tipo desconhecido: evita cascata de diagnósticos após um erro.
     unknown,
 
@@ -32,6 +35,7 @@ pub const Type = enum {
             .bool => "bool",
             .void => "void",
             .aggregate => "struct",
+            .str => "str",
             .unknown => "desconhecido",
         };
     }
@@ -40,6 +44,7 @@ pub const Type = enum {
         if (std.mem.eql(u8, text, "i32")) return .i32;
         if (std.mem.eql(u8, text, "bool")) return .bool;
         if (std.mem.eql(u8, text, "void")) return .void;
+        if (std.mem.eql(u8, text, "str")) return .str;
         return null;
     }
 
@@ -250,6 +255,13 @@ pub const Checker = struct {
                     "campo '{s}' de '{s}': struct com campo struct ainda não é suportado",
                     .{ field.name, decl.name },
                 );
+            } else if (typ == .str) {
+                try self.diags.add(
+                    .unsupported,
+                    field.type_name.span,
+                    "campo '{s}' de '{s}' de tipo 'str' ainda não é suportado",
+                    .{ field.name, decl.name },
+                );
             } else if (typ == .void) {
                 try self.diags.add(
                     .type_mismatch,
@@ -274,6 +286,17 @@ pub const Checker = struct {
     }
 
     fn registerFunction(self: *Checker, func: *const ast.Function) std.mem.Allocator.Error!void {
+        // `print` é uma função embutida; declarar outra com o mesmo nome
+        // criaria duas regras de resolução para a mesma chamada.
+        if (std.mem.eql(u8, func.name, "print")) {
+            try self.diags.add(
+                .unsupported,
+                func.name_span,
+                "nome 'print' é reservado para a função embutida",
+                .{},
+            );
+        }
+
         for (self.functions.items) |existing| {
             if (std.mem.eql(u8, existing.decl.name, func.name)) {
                 if (self.fileName(existing.decl.file_id)) |path| {
@@ -315,6 +338,13 @@ pub const Checker = struct {
                     "parâmetro '{s}' de '{s}': passagem de struct por valor ainda não é suportada",
                     .{ param.name, func.name },
                 );
+            } else if (params[i] == .str) {
+                try self.diags.add(
+                    .unsupported,
+                    param.type_name.span,
+                    "parâmetro '{s}' de '{s}': passagem de 'str' por valor ainda não é suportada",
+                    .{ param.name, func.name },
+                );
             }
         }
 
@@ -327,6 +357,13 @@ pub const Checker = struct {
                 .unsupported,
                 func.return_type.?.span,
                 "função '{s}': retorno de struct por valor ainda não é suportado",
+                .{func.name},
+            );
+        } else if (return_type == .str) {
+            try self.diags.add(
+                .unsupported,
+                func.return_type.?.span,
+                "função '{s}': retorno de 'str' ainda não é suportado",
                 .{func.name},
             );
         }
@@ -385,7 +422,7 @@ pub const Checker = struct {
         try self.diags.add(
             .unknown_type,
             tn.span,
-            "tipo '{s}' não suportado (disponíveis: i32, bool, void e structs declarados)",
+            "tipo '{s}' não suportado (disponíveis: i32, bool, str, void e structs declarados)",
             .{tn.name},
         );
         return .unknown;
@@ -481,8 +518,11 @@ pub const Checker = struct {
 
         // Valor de struct ocupa um slot de base (não usado) e um slot por
         // campo, na ordem da declaração — o mesmo mapeamento nos dois backends.
+        // `str` ocupa dois slots consecutivos: ponteiro e tamanho.
         const extra_slots: u32 = if (typ == .aggregate and struct_id < self.structs.items.len)
             @intCast(self.structs.items[struct_id].fields.len)
+        else if (typ == .str)
+            1
         else
             0;
 
@@ -576,7 +616,18 @@ pub const Checker = struct {
                 }
                 const init_struct = self.structIdOfExpr(decl.init) orelse 0;
 
-                if (declared_type != .unknown and init_type != .unknown and declared_type != init_type) {
+                // `void` não é armazenável — nem anotado (`let x: void = ...`)
+                // nem inferido de uma chamada sem retorno (`let x = f();`).
+                // Uma única mensagem cobre os dois casos; a variável não chega
+                // aos backends com um tipo sem representação.
+                if (declared_type == .void or init_type == .void) {
+                    try self.diags.add(
+                        .type_mismatch,
+                        decl.name_span,
+                        "variável '{s}' precisa de um valor: 'void' não pode ser armazenado",
+                        .{decl.name},
+                    );
+                } else if (declared_type != .unknown and init_type != .unknown and declared_type != init_type) {
                     try self.diags.add(
                         .type_mismatch,
                         decl.init.span,
@@ -599,15 +650,6 @@ pub const Checker = struct {
                             },
                         );
                     }
-                }
-
-                if (init_type == .void and declared_type != .void) {
-                    try self.diags.add(
-                        .type_mismatch,
-                        decl.init.span,
-                        "'{s}' exige um valor, mas a expressão é do tipo 'void'",
-                        .{decl.name},
-                    );
                 }
 
                 // Variável de struct sem anotação: o struct vem do inicializador.
@@ -753,7 +795,14 @@ pub const Checker = struct {
 
             .expr_stmt => |expr| {
                 const typ = try self.checkExpr(expr);
-                if (typ == .aggregate) {
+                if (typ == .str) {
+                    try self.diags.add(
+                        .unsupported,
+                        expr.span,
+                        "literal de string isolado não tem efeito; use 'print(...)'",
+                        .{},
+                    );
+                } else if (typ == .aggregate) {
                     try self.diags.add(
                         .unsupported,
                         expr.span,
@@ -814,6 +863,8 @@ pub const Checker = struct {
             },
 
             .bool_literal => return .bool,
+
+            .str_literal => return .str,
 
             .identifier => |name| {
                 const sym_index = self.lookup(name) orelse {
@@ -973,6 +1024,28 @@ pub const Checker = struct {
     ) !Type {
         if (lhs == .unknown or rhs == .unknown) return .unknown;
 
+        // `str` é fatia (ponteiro + tamanho): comparar exigiria comparar
+        // bytes, o que ainda não existe; diagnosticar em vez de comparar
+        // ponteiros silenciosamente.
+        if (lhs == .str or rhs == .str) {
+            if (op == .eq or op == .ne) {
+                try self.diags.add(
+                    .unsupported,
+                    span,
+                    "comparação de 'str' com '{s}' ainda não é suportada",
+                    .{op.spelling()},
+                );
+            } else {
+                try self.diags.add(
+                    .type_mismatch,
+                    span,
+                    "operador '{s}' espera dois 'i32', encontrado '{s}' e '{s}'",
+                    .{ op.spelling(), lhs.name(), rhs.name() },
+                );
+            }
+            return .unknown;
+        }
+
         const both_i32 = lhs == .i32 and rhs == .i32;
         const both_bool = lhs == .bool and rhs == .bool;
 
@@ -1034,6 +1107,29 @@ pub const Checker = struct {
 
         for (call.args) |arg| {
             try arg_types.append(self.arena, try self.checkExpr(arg));
+        }
+
+        if (std.mem.eql(u8, call.callee, "print")) {
+            call.builtin = .print;
+            if (arg_types.items.len != 1) {
+                try self.diags.add(
+                    .invalid_call,
+                    span,
+                    "'print' espera 1 argumento do tipo 'str', recebeu {d}",
+                    .{arg_types.items.len},
+                );
+                return .void;
+            }
+            const arg_type = arg_types.items[0];
+            if (arg_type != .unknown and arg_type != .str) {
+                try self.diags.add(
+                    .type_mismatch,
+                    call.args[0].span,
+                    "'print' espera 'str', encontrado '{s}'",
+                    .{arg_type.name()},
+                );
+            }
+            return .void;
         }
 
         const fn_index = self.findFunctionIndex(call.callee);
@@ -1637,4 +1733,219 @@ test "sema: struct diferente na anotação e no inicializador" {
     defer f.deinit();
     try expectOnly(&f, .type_mismatch);
     try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "struct 'B'") != null);
+}
+
+test "sema: literal de string infere 'str' e ocupa dois slots" {
+    var f = try Fixture.check(
+        \\fn main() -> i32 {
+        \\    let s = "abc";
+        \\    let t: str = s;
+        \\    print(t);
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 0), f.diags.count());
+
+    const checked = f.checked.?;
+    try testing.expectEqual(Type.str, checked.symbols[0].typ);
+    try testing.expectEqual(@as(u32, 2), checked.symbols[1].slot);
+    try testing.expectEqual(@as(u32, 4), checked.functions[0].slot_count);
+}
+
+test "sema: 'print' aceita variável str e é void" {
+    var f = try Fixture.check(
+        \\fn main() -> i32 {
+        \\    var s: str = "a";
+        \\    s = "b";
+        \\    print(s);
+        \\    print("literal");
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 0), f.diags.count());
+}
+
+test "sema: 'print' com tipo errado é diagnosticado" {
+    var f = try Fixture.check(
+        \\fn main() -> i32 {
+        \\    print(1);
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .type_mismatch);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "'print' espera 'str'") != null);
+}
+
+test "sema: 'print' exige exatamente um argumento" {
+    var f = try Fixture.check(
+        \\fn main() -> i32 {
+        \\    print("a", "b");
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .invalid_call);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "recebeu 2") != null);
+}
+
+test "sema: 'print' sem argumento é diagnosticado" {
+    var f = try Fixture.check(
+        \\fn main() -> i32 {
+        \\    print();
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .invalid_call);
+}
+
+test "sema: 'str' não participa de aritmética" {
+    var f = try Fixture.check(
+        \\fn main() -> i32 {
+        \\    let n = "a" + 1;
+        \\    return n;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .type_mismatch);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "'str'") != null);
+}
+
+test "sema: comparação de 'str' é diagnosticada (sem comparar ponteiros)" {
+    var f = try Fixture.check(
+        \\fn main() -> i32 {
+        \\    let s = "a";
+        \\    if s == "a" { return 1; }
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .unsupported);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "comparação de 'str'") != null);
+}
+
+test "sema: 'str' como condição é rejeitado" {
+    var f = try Fixture.check(
+        \\fn main() -> i32 {
+        \\    let s = "a";
+        \\    if s { return 1; }
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .invalid_condition);
+}
+
+test "sema: passagem de 'str' por valor em parâmetro é diagnosticada" {
+    var f = try Fixture.check(
+        \\fn mostra(s: str) -> i32 { return 0; }
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .unsupported);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "passagem de 'str'") != null);
+}
+
+test "sema: retorno de 'str' é diagnosticado" {
+    var f = try Fixture.check(
+        \\fn nome() -> str { return "kyn"; }
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .unsupported);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "retorno de 'str'") != null);
+}
+
+test "sema: campo de tipo 'str' é diagnosticado" {
+    var f = try Fixture.check(
+        \\struct P { nome: str }
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .unsupported);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "tipo 'str'") != null);
+}
+
+test "sema: nome 'print' é reservado" {
+    var f = try Fixture.check(
+        \\fn print(v: i32) -> void {}
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .unsupported);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "reservado") != null);
+}
+
+test "sema: literal de string solto é rejeitado" {
+    var f = try Fixture.check(
+        \\fn main() -> i32 {
+        \\    "texto";
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .unsupported);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "print") != null);
+}
+
+test "sema: atribuir a 'str' imutável é diagnosticado" {
+    var f = try Fixture.check(
+        \\fn main() -> i32 {
+        \\    let s = "a";
+        \\    s = "b";
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .immutable_assignment);
+}
+
+test "sema: variável não pode receber valor 'void' inferido de chamada" {
+    var f = try Fixture.check(
+        \\fn nada() { }
+        \\fn main() -> i32 {
+        \\    let x = nada();
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .type_mismatch);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "'void' não pode ser armazenado") != null);
+}
+
+test "sema: anotação de valor com inicializador 'void' gera um único diagnóstico" {
+    var f = try Fixture.check(
+        \\fn nada() { }
+        \\fn main() -> i32 {
+        \\    let x: i32 = nada();
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .type_mismatch);
+}
+
+test "sema: anotação 'void' explícita em variável é rejeitada" {
+    var f = try Fixture.check(
+        \\fn main() -> i32 {
+        \\    let x: void = 1;
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .type_mismatch);
+}
+
+test "sema: 'print' não produz valor para inicializar variável" {
+    var f = try Fixture.check(
+        \\fn main() -> i32 {
+        \\    let x = print("a");
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .type_mismatch);
 }

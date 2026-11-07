@@ -20,14 +20,18 @@ implementação integrada e testes reproduzíveis.
 - [x] `struct` com campos escalares: declaração, literais, acesso e atribuição
       a campo, cópia por valor, layout documentado nos dois backends e
       restrições diagnosticadas (sem passagem por valor ainda).
+- [x] Saída de texto: `str` como fatia estática (ponteiro + tamanho), literais
+      deduplicados, `print(...)` embutido no backend nativo (syscall `write`) e
+      no IR do LLVM (libc `write`), com stdout conferido na suíte e2e
+      (`// expect-stdout:`).
 - [ ] Completar o parser e a AST para a linguagem-alvo. Subconjunto atual:
       `fn`, `let`/`var`, atribuição, `return`, `if`/`else`, `while`, blocos,
-      expressões com precedência, `import` e `struct`. Faltam struct por valor
-      entre funções, `enum`, `impl`, `unsafe`, atributos, strings em expressões,
-      slices, ponteiros e generics.
+      expressões com precedência, `import`, `struct` e `str`. Faltam struct e
+      `str` por valor entre funções, `enum`, `impl`, `unsafe`, atributos,
+      comparação/concatenação de `str`, slices, ponteiros e generics.
 - [ ] Completar a análise semântica e o sistema de tipos além de
-      `i32`/`bool`/`void` (inteiros de outras larguras, `f32`/`f64`, `str`,
-      ownership, lifetimes, checagem de fluxo).
+      `i32`/`bool`/`void`/`str` (inteiros de outras larguras, `f32`/`f64`,
+      `str` com ownership/lifetimes, checagem de fluxo).
 - [ ] Definir e validar o backend oficial. O backend x86-64 é validado por
       execução; o IR do backend LLVM é aceito por `llvm-as` no CI, mas a
       escolha do backend oficial (e um `target triple` configurável) segue
@@ -44,9 +48,10 @@ implementação integrada e testes reproduzíveis.
 - [ ] Separar e validar as APIs de `kyn:core` e `kyn:std` (hoje stubs
       experimentais; várias APIs não fazem E/S real).
 - [x] Criar runner de testes para fixtures `.kyn` do subconjunto suportado
-      (`tools/e2e.sh` + `zig build e2e`, com `// expect-exit: N`).
+      (`tools/e2e.sh` + `zig build e2e`, com `// expect-exit: N` e
+      `// expect-stdout:`).
 - [ ] Ampliar o runner para fixtures de diagnóstico (mensagem/posição esperadas
-      por arquivo) em vez de apenas código de saída.
+      por arquivo) em vez de apenas código de saída e stdout.
 
 ## Fase 3 — Qualidade e portabilidade
 

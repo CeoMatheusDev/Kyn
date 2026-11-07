@@ -1,0 +1,7 @@
+// String vazia: `print("")` escreve apenas a quebra de linha.
+// expect-exit: 0
+// expect-stdout:
+fn main() -> i32 {
+    print("");
+    return 0;
+}
