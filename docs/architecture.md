@@ -110,6 +110,14 @@ escalar; existe para dar ao programa uma saída observável (texto) e preparar
 
 - `Symbol.typ == .str` reserva dois slots consecutivos: `slot` guarda o
   ponteiro e `slot + 1` o tamanho (mesma convenção nos dois backends).
+- **`str` por valor em chamadas** (Ciclo 8): parâmetros, argumentos e retornos
+  levam dois registradores, sempre o ponteiro antes do tamanho. No x86-64 os pares
+  são `(%rdi,%rsi)`, `(%rdx,%rcx)` e `(%r8,%r9)`; o retorno vem em `%rax`
+  (ponteiro) e `%rdx` (tamanho). No IR os parâmetros viram `ptr %argN` +
+  `i64 %argN+1` e o retorno é o agregado `{ ptr, i64 }` montado com
+  `insertvalue` e lido com `extractvalue`. O limite de seis registradores é
+  contado em **palavras de registrador** (`Type.registerWords()`): cada `str`
+  ocupa dois, o que permite no máximo três `str` por assinatura.
 - Literais de string são deduplicados por conteúdo (`codegen.StrPool`): cada
   texto distinto vira um único rótulo, com o número de referências livre.
 - x86-64: bytes em `.section .rodata` como lista de `.byte` (sem escapes);
@@ -129,10 +137,10 @@ escalar; existe para dar ao programa uma saída observável (texto) e preparar
   no IR, `@kyn_print_i32` faz o mesmo com `urem`/`udiv`, `select` para o módulo
   e um buffer `[12 x i8]` escrito de trás para frente. Nenhum dos dois usa
   `itoa`/libc no backend nativo nem estado global.
-- Restrições desta etapa, todas diagnosticadas: `str` em
-  parâmetro/retorno/argumento, campo de struct de tipo `str`, `str` em
-  aritmética/condição/`==`/`!=` (comparar exigiria comparar bytes) e literal
-  solto como statement.
+- Restrições desta etapa, todas diagnosticadas: campo de struct de tipo `str`,
+  `str` em aritmética/condição/`==`/`!=` (comparar exigiria comparar bytes),
+  `main` com retorno `str`, expressão `str` como statement e assinatura acima
+  de seis registradores (`'str' ocupa dois`).
 
 ### Semântica — `src/sema/sema.zig`
 
@@ -185,6 +193,6 @@ APIs.
    conectar `src/sema/unsafe.zig`.
 5. Definir o modelo de memória executável (ownership, lifetimes, slices) antes
    de expandir a std.
-6. Definir como `str` atravessa chamadas de função (parâmetro/retorno por
-   valor), a comparação por conteúdo e a concatenação/formatação — hoje tudo
-   isso é diagnosticado como não suportado.
+6. Definir a comparação de `str` por conteúdo e a concatenação/formatação
+   (hoje diagnosticadas); a passagem de `str` por valor em parâmetros e retornos
+   foi decidida no Ciclo 8 (par ponteiro+tamanho, ver acima).

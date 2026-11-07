@@ -9,6 +9,10 @@
 //! próprio `alloca` — substituição escalar de um struct que nunca escapa. Isso
 //! dispensa tipos agregados e `getelementptr` sem mudar a semântica observável.
 //!
+//! `str` é uma fatia (ponteiro + tamanho): em variáveis ocupa dois `alloca`
+//! (`ptr` e `i64`); em chamadas vira dois parâmetros (`ptr` + `i64`) e o
+//! retorno usa o agregado `{ ptr, i64 }` com `insertvalue`/`extractvalue`.
+//!
 //! Este emissor não é validado por um montador LLVM no ambiente de
 //! desenvolvimento (não há `llc`/`clang` disponíveis); os testes verificam a
 //! estrutura do texto emitido. Para validação executável de ponta a ponta, veja
@@ -82,6 +86,11 @@ fn llvmType(typ: sema.Type) codegen.Error![]const u8 {
         .str => error.UnsupportedType,
         .unknown => error.UnsupportedType,
     };
+}
+
+/// Tipo de retorno de uma função: `str` volta como par `{ ptr, i64 }`.
+fn llvmReturnType(typ: sema.Type) codegen.Error![]const u8 {
+    return if (typ == .str) "{ ptr, i64 }" else llvmType(typ);
 }
 
 fn typeAlign(typ: sema.Type) codegen.Error!u32 {
@@ -211,13 +220,20 @@ const FnEmitter = struct {
             try self.emit("  {s} = alloca {s}, align {d}\n", .{ name, ty, align_value });
         }
 
-        // Parâmetros são copiados para os seus slots.
+        // Parâmetros são copiados para os seus slots (str: dois argumentos).
+        var arg_index: usize = 0;
         for (self.func.params, 0..) |_, i| {
             const sym = &self.checked.symbols[sym_start + i];
-            const ty = try llvmType(sym.typ);
-            const align_value = try typeAlign(sym.typ);
-            const name = try self.varName(sym.slot);
-            try self.emit("  store {s} %arg{d}, ptr {s}, align {d}\n", .{ ty, i, name, align_value });
+            if (sym.typ == .str) {
+                try self.emit("  store ptr %arg{d}, ptr {s}, align 8\n", .{ arg_index, try self.varName(sym.slot) });
+                try self.emit("  store i64 %arg{d}, ptr {s}, align 8\n", .{ arg_index + 1, try self.varName(sym.slot + 1) });
+                arg_index += 2;
+            } else {
+                const ty = try llvmType(sym.typ);
+                const align_value = try typeAlign(sym.typ);
+                try self.emit("  store {s} %arg{d}, ptr {s}, align {d}\n", .{ ty, arg_index, try self.varName(sym.slot), align_value });
+                arg_index += 1;
+            }
         }
 
         try self.emitStatements(self.func.body);
@@ -245,13 +261,21 @@ const FnEmitter = struct {
 
     fn serialize(self: *FnEmitter, out: *std.ArrayList(u8)) !void {
         var signature: std.ArrayList(u8) = .empty;
+        var arg_index: usize = 0;
         for (self.func.params, 0..) |_, i| {
-            const param_type = try llvmType(self.info.params[i]);
-            if (i != 0) try signature.appendSlice(self.arena, ", ");
-            try signature.print(self.arena, "{s} %arg{d}", .{ param_type, i });
+            const param_type = self.info.params[i];
+            if (arg_index != 0) try signature.appendSlice(self.arena, ", ");
+            if (param_type == .str) {
+                // Fatia: ponteiro e tamanho ocupam dois argumentos.
+                try signature.print(self.arena, "ptr %arg{d}, i64 %arg{d}", .{ arg_index, arg_index + 1 });
+                arg_index += 2;
+            } else {
+                try signature.print(self.arena, "{s} %arg{d}", .{ try llvmType(param_type), arg_index });
+                arg_index += 1;
+            }
         }
 
-        const ret_type = try llvmType(self.info.return_type);
+        const ret_type = try llvmReturnType(self.info.return_type);
         try out.print(self.arena, "define {s} @{s}({s}) {{\n", .{ ret_type, self.func.name, signature.items });
 
         for (self.blocks.items) |*b| {
@@ -324,6 +348,15 @@ const FnEmitter = struct {
             .return_stmt => |maybe_expr| {
                 if (self.info.return_type == .void) {
                     try self.retVoid();
+                } else if (self.info.return_type == .str) {
+                    const expr = maybe_expr orelse return error.MiscompiledAst;
+                    const value = try self.strOperand(expr);
+                    const with_ptr = try self.newTemp();
+                    try self.emit("  {s} = insertvalue {{ ptr, i64 }} undef, ptr {s}, 0\n", .{ with_ptr, value.ptr });
+                    const with_len = try self.newTemp();
+                    try self.emit("  {s} = insertvalue {{ ptr, i64 }} {s}, i64 {s}, 1\n", .{ with_len, with_ptr, value.len });
+                    try self.emit("  ret {{ ptr, i64 }} {s}\n", .{with_len});
+                    self.block().terminated = true;
                 } else {
                     const expr = maybe_expr orelse return error.MiscompiledAst;
                     const value = try self.emitExpr(expr);
@@ -437,28 +470,46 @@ const FnEmitter = struct {
 
     /// Grava um valor `str` (ponteiro e tamanho) nos dois slots de `dst`:
     /// literal direto ou cópia de outra variável `str`.
-    fn emitStrStore(self: *FnEmitter, dst: *const sema.Symbol, value: *ast.Expr) Error!void {
-        const ptr_slot = try self.varName(dst.slot);
-        const len_slot = try self.varName(dst.slot + 1);
+    /// Operandos textuais de um valor `str`: ponteiro e tamanho. Cobre literal,
+    /// variável e chamada que devolve `str` (via `extractvalue`).
+    const StrOperand = struct { ptr: []const u8, len: []const u8 };
 
-        switch (value.kind) {
+    fn strOperand(self: *FnEmitter, expr: *ast.Expr) Error!StrOperand {
+        switch (expr.kind) {
             .str_literal => |text| {
                 const index = try self.state.strs.intern(text);
-                try self.emit("  store ptr @.str{d}, ptr {s}, align 8\n", .{ index, ptr_slot });
-                try self.emit("  store i64 {d}, ptr {s}, align 8\n", .{ text.len, len_slot });
+                return .{
+                    .ptr = try std.fmt.allocPrint(self.arena, "@.str{d}", .{index}),
+                    .len = try std.fmt.allocPrint(self.arena, "{d}", .{text.len}),
+                };
             },
             .identifier => {
-                const src = self.symbolAt(value.resolved orelse return error.MiscompiledAst);
+                const src = self.symbolAt(expr.resolved orelse return error.MiscompiledAst);
                 if (src.typ != .str) return error.MiscompiledAst;
                 const ptr_temp = try self.newTemp();
                 try self.emit("  {s} = load ptr, ptr {s}, align 8\n", .{ ptr_temp, try self.varName(src.slot) });
                 const len_temp = try self.newTemp();
                 try self.emit("  {s} = load i64, ptr {s}, align 8\n", .{ len_temp, try self.varName(src.slot + 1) });
-                try self.emit("  store ptr {s}, ptr {s}, align 8\n", .{ ptr_temp, ptr_slot });
-                try self.emit("  store i64 {s}, ptr {s}, align 8\n", .{ len_temp, len_slot });
+                return .{ .ptr = ptr_temp, .len = len_temp };
+            },
+            .call => |call| {
+                const index = call.callee_fn orelse return error.MiscompiledAst;
+                if (self.checked.functions[index].return_type != .str) return error.MiscompiledAst;
+                const pair = try self.emitStrCall(call);
+                const ptr_temp = try self.newTemp();
+                try self.emit("  {s} = extractvalue {{ ptr, i64 }} {s}, 0\n", .{ ptr_temp, pair });
+                const len_temp = try self.newTemp();
+                try self.emit("  {s} = extractvalue {{ ptr, i64 }} {s}, 1\n", .{ len_temp, pair });
+                return .{ .ptr = ptr_temp, .len = len_temp };
             },
             else => return error.MiscompiledAst,
         }
+    }
+
+    fn emitStrStore(self: *FnEmitter, dst: *const sema.Symbol, value: *ast.Expr) Error!void {
+        const src = try self.strOperand(value);
+        try self.emit("  store ptr {s}, ptr {s}, align 8\n", .{ src.ptr, try self.varName(dst.slot) });
+        try self.emit("  store i64 {s}, ptr {s}, align 8\n", .{ src.len, try self.varName(dst.slot + 1) });
     }
 
     /// `print(s)`: duas chamadas a `write` da libc — o texto e a quebra de
@@ -468,28 +519,8 @@ const FnEmitter = struct {
         if (call.args.len != 1) return error.MiscompiledAst;
         const arg = call.args[0];
 
-        var ptr_text: []const u8 = undefined;
-        var len_text: []const u8 = undefined;
-        switch (arg.kind) {
-            .str_literal => |text| {
-                const index = try self.state.strs.intern(text);
-                ptr_text = try std.fmt.allocPrint(self.arena, "@.str{d}", .{index});
-                len_text = try std.fmt.allocPrint(self.arena, "{d}", .{text.len});
-            },
-            .identifier => {
-                const symbol = self.symbolAt(arg.resolved orelse return error.MiscompiledAst);
-                if (symbol.typ != .str) return error.MiscompiledAst;
-                const ptr_temp = try self.newTemp();
-                try self.emit("  {s} = load ptr, ptr {s}, align 8\n", .{ ptr_temp, try self.varName(symbol.slot) });
-                const len_temp = try self.newTemp();
-                try self.emit("  {s} = load i64, ptr {s}, align 8\n", .{ len_temp, try self.varName(symbol.slot + 1) });
-                ptr_text = ptr_temp;
-                len_text = len_temp;
-            },
-            else => return error.UnsupportedNode,
-        }
-
-        try self.emit("  call i64 @write(i32 1, ptr {s}, i64 {s})\n", .{ ptr_text, len_text });
+        const text = try self.strOperand(arg);
+        try self.emit("  call i64 @write(i32 1, ptr {s}, i64 {s})\n", .{ text.ptr, text.len });
         try self.emit("  call i64 @write(i32 1, ptr @.nl, i64 1)\n", .{});
         self.state.used_print = true;
         return .{ .text = "", .typ = .void };
@@ -615,6 +646,35 @@ const FnEmitter = struct {
         return .{ .text = "", .typ = .void };
     }
 
+    /// Lista de argumentos no formato do IR. `str` contribui com dois
+    /// (`ptr` + `i64`), na ordem em que a assinatura os declara.
+    fn emitArgs(self: *FnEmitter, call: ast.Expr.Call, params: []const sema.Type) Error![]const u8 {
+        var args: std.ArrayList(u8) = .empty;
+        for (call.args, 0..) |arg, i| {
+            const ptype = if (i < params.len) params[i] else return error.MiscompiledAst;
+            if (args.items.len != 0) try args.appendSlice(self.arena, ", ");
+            if (ptype == .str) {
+                const text = try self.strOperand(arg);
+                try args.print(self.arena, "ptr {s}, i64 {s}", .{ text.ptr, text.len });
+            } else {
+                const value = try self.emitExpr(arg);
+                if (value.typ == .void) return error.UnsupportedNode;
+                try args.print(self.arena, "{s} {s}", .{ try llvmType(value.typ), value.text });
+            }
+        }
+        return args.items;
+    }
+
+    /// Chamada cujo retorno é `str`: devolve o temporário com o par `{ptr, i64}`.
+    fn emitStrCall(self: *FnEmitter, call: ast.Expr.Call) Error![]const u8 {
+        const fn_index = call.callee_fn orelse return error.MiscompiledAst;
+        const callee = self.checked.functions[fn_index];
+        const args = try self.emitArgs(call, callee.params);
+        const result = try self.newTemp();
+        try self.emit("  {s} = call {{ ptr, i64 }} @{s}({s})\n", .{ result, call.callee, args });
+        return result;
+    }
+
     fn emitCall(self: *FnEmitter, call: ast.Expr.Call) Error!Operand {
         if (call.builtin) |builtin| switch (builtin) {
             .print => return self.emitPrint(call),
@@ -623,24 +683,19 @@ const FnEmitter = struct {
 
         const fn_index = call.callee_fn orelse return error.MiscompiledAst;
         const callee = self.checked.functions[fn_index];
+        // `str` não cabe em um `Operand`: quem o consome usa `strOperand`.
+        if (callee.return_type == .str) return error.UnsupportedNode;
 
-        var args: std.ArrayList(u8) = .empty;
-        for (call.args, 0..) |arg, i| {
-            const value = try self.emitExpr(arg);
-            if (value.typ == .void) return error.UnsupportedNode;
-            const ty = try llvmType(value.typ);
-            if (i != 0) try args.appendSlice(self.arena, ", ");
-            try args.print(self.arena, "{s} {s}", .{ ty, value.text });
-        }
+        const args = try self.emitArgs(call, callee.params);
 
         const ret_type = try llvmType(callee.return_type);
         if (callee.return_type == .void) {
-            try self.emit("  call void @{s}({s})\n", .{ call.callee, args.items });
+            try self.emit("  call void @{s}({s})\n", .{ call.callee, args });
             return .{ .text = "", .typ = .void };
         }
 
         const result = try self.newTemp();
-        try self.emit("  {s} = call {s} @{s}({s})\n", .{ result, ret_type, call.callee, args.items });
+        try self.emit("  {s} = call {s} @{s}({s})\n", .{ result, ret_type, call.callee, args });
         return .{ .text = result, .typ = callee.return_type };
     }
 };
@@ -907,6 +962,56 @@ test "llvm: str vira dois allocas (ponteiro e tamanho)" {
     try support.expectContains(ir, "store ptr @.str1, ptr %v0, align 8");
     try support.expectContains(ir, "load ptr, ptr %v0, align 8");
     try support.expectContains(ir, "load i64, ptr %v1, align 8");
+    try support.expectAllBlocksTerminated(ir);
+}
+
+test "llvm: 'str' por valor vira par de parâmetros e retorno agregado" {
+    var f = try support.Fixture.build(
+        \\fn eco(s: str) -> str { return s; }
+        \\fn main() -> i32 { print(eco("kyn")); return 0; }
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+
+    // O parâmetro `str` é expandido em ponteiro + tamanho, nesta ordem.
+    try support.expectContains(ir, "define { ptr, i64 } @eco(ptr %arg0, i64 %arg1)");
+    try support.expectContains(ir, "store ptr %arg0, ptr %v0, align 8");
+    try support.expectContains(ir, "store i64 %arg1, ptr %v1, align 8");
+    // O retorno agregado é montado campo a campo.
+    try support.expectContains(ir, "insertvalue { ptr, i64 } undef, ptr %t0, 0");
+    try support.expectContains(ir, "insertvalue { ptr, i64 } %t2, i64 %t1, 1");
+    try support.expectContains(ir, "ret { ptr, i64 } %t3");
+    try support.expectAllBlocksTerminated(ir);
+}
+
+test "llvm: chamada com 'str' extrai ponteiro e tamanho do agregado" {
+    var f = try support.Fixture.build(
+        \\fn eco(s: str) -> str { return s; }
+        \\fn main() -> i32 { print(eco("kyn")); return 0; }
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+
+    try support.expectContains(ir, "call { ptr, i64 } @eco(ptr @.str0, i64 3)");
+    try support.expectContains(ir, "extractvalue { ptr, i64 } %t0, 0");
+    try support.expectContains(ir, "extractvalue { ptr, i64 } %t0, 1");
+    try support.expectContains(ir, "call i64 @write(i32 1, ptr %t1, i64 %t2)");
+}
+
+test "llvm: assinatura mista expande só os parâmetros 'str'" {
+    var f = try support.Fixture.build(
+        \\fn marca(prefixo: str, n: i32) -> i32 {
+        \\    print(prefixo);
+        \\    return n;
+        \\}
+        \\fn main() -> i32 { return marca("n=", 42); }
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+
+    try support.expectContains(ir, "define i32 @marca(ptr %arg0, i64 %arg1, i32 %arg2)");
+    try support.expectContains(ir, "store i32 %arg2, ptr %v2, align 4");
+    try support.expectContains(ir, "call i32 @marca(ptr @.str0, i64 2, i32 42)");
     try support.expectAllBlocksTerminated(ir);
 }
 

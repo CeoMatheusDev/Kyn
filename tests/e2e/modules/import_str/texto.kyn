@@ -1,0 +1,7 @@
+fn prefixo() -> str {
+    return "mod:";
+}
+
+fn rotulo(nome: str) -> str {
+    return nome;
+}

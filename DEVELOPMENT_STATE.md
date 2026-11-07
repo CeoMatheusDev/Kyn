@@ -1,19 +1,20 @@
 # DEVELOPMENT_STATE — Kyn
 
 **Mantido por:** agente de continuidade (Arena)
-**Branch ativa:** `arena/2089e297-kyn` (a partir de `89ca6ce` de `main`)
+**Branch ativa:** `arena/18866cad-kyn` (a partir de `3be9df0` de `main`)
 **Integração:** PRs #7–#11 (módulos/`import`), PR #13 (`struct` com valor,
 `4234c07`) e PR #15 (`str`/`print`, `89ca6ce`) mesclados em `main`
 (2026-11-07); CI verde no PR #15 (run `42420648098`) e no merge
-(`42421025867`). O ciclo atual (`print_i32`, PR #17) foi mesclado como
-`87903db`; CI verde no PR (run `42423945656`) e no merge (`42424147963`).
-**Versão do projeto:** `0.3.5-alpha.1`
+(`42421025867`). PR #17 (`print_i32`) mesclado como `87903db` e PR #18
+(docs) como `3be9df0`; CI verde nos runs `42423945656`/`42424327653` (PRs) e
+`42424147963`/`42424509215` (`main`). O ciclo atual é `str` por valor em
+parâmetros/retornos (PR a abrir sobre `0.3.6-alpha.1`).
+**Versão do projeto:** `0.3.6-alpha.1`
 **Última validação:** 2026-11-07 — local (Zig 0.17.0 + GNU `as`/`ld`, Linux
-x86-64): `zig build`, `zig build test` (181 testes), `zig build e2e` (92/92,
-com stdout conferido, inclui INT_MIN), `zig fmt --check` e `kync --version`
-(`0.3.5-alpha.1`); CI verde no PR #17 (`42423945656`) e em `main` após o merge
-(`42424147963`), com `llvm-as` estrito sobre 75 módulos; suíte local retestada em
-`main` após o merge
+x86-64): `zig build`, `zig build test` (193 testes), `zig build e2e` (97/97,
+com stdout conferido, inclui `str` por valor e INT_MIN), `zig fmt --check` e
+`kync --version` (`0.3.6-alpha.1`); `validate-ir` local sem LLVM (skip
+documentado), validação estrita de 79 módulos feita no CI
 **Estado do working tree:** verificar com `git status` antes de agir
 
 ---
@@ -57,16 +58,16 @@ Neste ciclo o pipeline do frontend foi **integrado e validado por execução**:
 | Diagnósticos | `src/diagnostics.zig` | categoria estável + mensagem + linha/caret + `file` (arquivo de origem) |
 | AST | `src/ast/ast.zig` | programa com `imports` e `structs`, funções (`file_id`), params, let/var, assign (variável e campo), return, if/else, while, blocos, expressões (acesso a campo, literal de struct, literal de string), `Call.builtin` (`print`, `print_i32`) |
 | Parser | `src/parser/parser.zig` | programa completo, `import` antes das declarações, `struct`, literais e acesso a campo, precedência/associatividade, erro no primeiro token inválido |
-| Semântica | `src/sema/sema.zig` | escopos, resolução, `i32`/`bool`/`str`/`void`/struct, campos e literais de struct, `str` com dois slots, builtins genéricos (`print`/`print_i32`: aridade, tipo e nome reservado), mutabilidade, chamadas, slots, `main`, `alwaysReturns` |
-| Backend LLVM | `src/codegen/llvm.zig` | IR derivado da AST; structs por substituição escalar (um `alloca` por campo); `str` em `@.strN` + `declare i64 @write` + dois `alloca`; `print_i32` via `@kyn_print_i32` (uma vez por módulo); validado por `llvm-as` no CI |
-| Backend nativo | `src/codegen/x86_64.zig` | System V sem libc; struct em slots consecutivos; `str` em dois slots (ponteiro/tamanho), texto em `.rodata` e `print` por syscall `write`; `print_i32` com rotina decimal única em `.text`; validado executando binários e conferindo stdout |
+| Semântica | `src/sema/sema.zig` | escopos, resolução, `i32`/`bool`/`str`/`void`/struct, campos e literais de struct, `str` com dois slots e por valor em parâmetros/retornos, limite de 6 registradores por assinatura (`str` = 2), builtins genéricos (`print`/`print_i32`: aridade, tipo e nome reservado), mutabilidade, chamadas, slots, `main`, `alwaysReturns` |
+| Backend LLVM | `src/codegen/llvm.zig` | IR derivado da AST; structs por substituição escalar (um `alloca` por campo); `str` em `@.strN` + `declare i64 @write` + dois `alloca`, `str` por valor como `ptr`+`i64` e retorno `{ ptr, i64 }` (`insertvalue`/`extractvalue`); `print_i32` via `@kyn_print_i32` (uma vez por módulo); validado por `llvm-as` no CI |
+| Backend nativo | `src/codegen/x86_64.zig` | System V sem libc; struct em slots consecutivos; `str` em dois slots (ponteiro/tamanho) e por valor em pares de registradores (retorno `%rax`/`%rdx`), texto em `.rodata` e `print` por syscall `write`; `print_i32` com rotina decimal única em `.text`; validado executando binários e conferindo stdout |
 | Driver | `src/driver.zig` | arena por compilação; `compile` (buffer único) e `compilePath` (grafo de imports, dedupe, ciclos, flatten); `Result.deinit()` |
 | `unsafe`/`repr(C)` | `src/sema/unsafe.zig` | política isolada e testada; sem nós na AST ainda |
 | Self-hosting | `src/kyn/*.kyn`, `src/compiler/*.kyn` | placeholders; não executados |
 | Std | `std/core/*`, `std/os/*` | stubs experimentais; compilam nos testes |
-| Fixtures | `tests/` | 50 `integration/case_N.kyn` (suportadas) + 42 entradas em `tests/e2e` (20 positivas, 5 módulos, 14 negativas, 3 módulos negativos); demais ainda não suportadas |
+| Fixtures | `tests/` | 50 `integration/case_N.kyn` (suportadas) + 47 entradas em `tests/e2e` (23 positivas, 6 módulos, 15 negativas, 3 módulos negativos); demais ainda não suportadas |
 | CI | `.github/workflows/ci.yml` | ubuntu-24.04: fmt + test + e2e + validação de IR estrita |
-| Validação de IR | `tools/validate-ir.sh` | `llvm-as`/`clang` sobre 75 módulos (inclui multi-arquivo, `struct`, `str`/`print` e `print_i32`); estrito no CI |
+| Validação de IR | `tools/validate-ir.sh` | `llvm-as`/`clang` sobre 79 módulos (inclui multi-arquivo, `struct`, `str`/`print`, `str` por valor e `print_i32`); estrito no CI |
 
 ### Subconjunto aceito hoje
 
@@ -75,46 +76,59 @@ importador, cada arquivo carregado uma vez, símbolos achatados em escopo único
 `struct Nome { campo: tipo, ... }`, literais `Nome { campo: valor }` (todos os
 campos, uma vez cada), acesso `p.campo` e atribuição `p.campo = v` em `var`,
 cópia de struct por valor, literais de string, variáveis `str` (inferidas ou
-anotadas) com cópia e atribuição, `print(s: str)` e `print_i32(n: i32)`
-embutidos (texto/decimais + quebra de linha), `fn`, `let`/`var`
+anotadas) com cópia e atribuição, `str` por valor em parâmetros, argumentos e
+retornos (par ponteiro+tamanho, dois registradores por `str`), `print(s: str)` e
+`print_i32(n: i32)` embutidos (texto/decimais + quebra de linha), `fn`, `let`/`var`
 (inicializador obrigatório),
 inferência ou anotação (`i32`/`bool`/`str`/`void`/struct), atribuição só em `var`,
 `return`, `if`/`else`/`else if`, `while`, blocos, aritmética, comparações,
 `&&`/`||` com curto-circuito, `-`/`!`, literais inteiros/booleanos e chamadas a
-funções do programa (≤ 6 args).
+funções do programa (≤ 6 registradores de argumentos, contando `str` como dois).
 
 Fora do subconjunto: impressão de `bool`/`str` interpolado, `enum`,
 `impl`/métodos, `unsafe`, atributos, struct por
 valor em parâmetro/retorno/argumento, struct com campo struct, struct vazio,
-`str` em parâmetro/retorno/argumento, campo de struct de tipo `str`, comparação
-(`==`/`!=`), concatenação e formatação de `str`, `f32`/`f64`, slices,
+campo de struct de tipo `str`, comparação (`==`/`!=`), concatenação e formatação
+de `str`, `main` retornando `str`, assinatura acima de 6 registradores,
+`f32`/`f64`, slices,
 ponteiros, generics, `Result`/`?`, closures, `for`, `pub`, imports
 qualificados/seletivos e pacotes.
 
 ### Validação executada neste ciclo
 
-- `zig build` — sucesso (gera `zig-out/bin/kync`, versão `0.3.5-alpha.1`).
-- `zig build test` — **181 testes** (174 do compilador + 7 da std), todos
-  passando. Inclui 12 novos deste ciclo: parser (chamada `print_i32` com
-  expressão), semântica (aceita `i32`, tipo errado, aridade 0 e 2, nome
-  reservado, `void` não armazenável) e backends (rotina decimal em `.text`,
-  uma única emissão, ausência quando não usada; no IR, `@kyn_print_i32` com
-  `urem`/`udiv`, `store i8 45`, `getelementptr` do buffer e duas chamadas a
-  `write`).
-- `zig build e2e` — **92/92** casos: 20 fixtures comportamentais executadas
-  (4 novas com `print_i32`: `print_int_basic` com 0/7/42/1000/-7,
-  `print_int_extremos` com INT_MAX/INT_MIN/9 dígitos, `print_int_loop` dentro
-  de `while`, e `print_misto` com texto e número intercalados — todas com
-  stdout conferido), 5 programas multi-arquivo, 50 fixtures `case_N.kyn`,
-  14 fixtures negativas (2 novas de `print_i32`, com exatamente 1 diagnóstico
-  cada) e 3 módulos negativos.
-- `zig fmt --check build.zig src std` — sem diferenças (após `zig fmt`, que
-  reformatou a string do helper em `x86_64.zig`).
-- Execução manual fora da suíte: `emit --asm` + `as` + `ld` de um programa com
-  oito `print_i32` (inclui INT_MIN e `6 * 7`) → texto correto e código de saída
-  preservado; `emit --llvm` do mesmo programa → helper único e IR estrutural.
+- `zig build` — sucesso (gera `zig-out/bin/kync`, versão `0.3.6-alpha.1`).
+- `zig build test` — **193 testes** (186 do compilador + 7 da std), todos
+  passando. Deste ciclo entraram: semântica (`str` aceito em parâmetro e
+  retorno, limite de registradores contando `str` como dois, três `str` cabendo
+  em seis registradores, `main` sem retorno `str`, argumento `str`/`i32`
+  trocados, `return;` em função `str` e função `str` que pode terminar sem
+  `return`) e backends (prólogo salvando `%rdi`/`%rsi` em dois slots, retorno em
+  `%rax`/`%rdx`, chamada com dois `str` empilhando duas palavras por argumento,
+  caminho rápido de um argumento; no IR, `define { ptr, i64 } @f(ptr %arg0, i64
+  %arg1)`, `insertvalue`/`extractvalue` e assinatura mista `ptr %arg0, i64
+  %arg1, i32 %arg2`, além de um teste de consistência
+  `sema.max_arg_registers == arg_registers.len`, que falha se a tabela SysV e o
+  limite da semântica divergirem). Dois testes negativos antigos (`str` em
+  parâmetro/retorno "não suportado") foram substituídos por testes do novo
+  contrato — nenhum teste foi apagado sem substituto.
+- `zig build e2e` — **97/97** casos: 23 fixtures comportamentais executadas
+  (3 novas: `str_passagem` com `str` + `i32` por parâmetro, `str_retorno` com
+  helper devolvendo texto, `str_retorno_ramo` com `if` devolvendo `str`
+  diferentes dentro de `while` — todas com stdout conferido), 6 programas
+  multi-arquivo (novo `import_str`, com `str` atravessando a importação),
+  50 fixtures `case_N.kyn`, 15 negativas (`str_param_unsupported` substituída
+  por `str_registradores`, além de `str_retorno_main`) e 3 módulos negativos.
+- `zig fmt --check build.zig src std` — sem diferenças.
+- Execução manual fora da suíte: programa com `fn eco(s: str) -> str`,
+  `fn titulo() -> str`, `fn marca(prefixo: str, n: i32)` e chamadas aninhadas
+  (`print(eco(titulo()))`) → binário via `as`/`ld` imprime as quatro linhas
+  esperadas e sai com `50` (soma dos retornos); `emit --llvm` do mesmo programa
+  confere assinaturas `{ ptr, i64 }` e `extractvalue` nos quatro pontos de uso.
+- Diagnósticos conferidos à mão: assinatura de 7 registradores (2 mensagens,
+  declaração e chamada), `main() -> str`, `return;` em função `str`, função
+  `str` sem `return` final, argumento `i32` onde se espera `str` (e o inverso).
 - `zig build validate-ir` sem LLVM local — avisa e sai 0 (skip documentado);
-  o script percorre 75 módulos quando há `llvm-as`/`clang`.
+  o script percorre 79 módulos quando há `llvm-as`/`clang` (estrito no CI).
 - Nota de método: a contagem de testes só é confiável com cache limpo
   (`rm -rf .zig-cache`), caso contrário `zig build test` reporta o passo
   "cached" e mantém o número antigo.
@@ -164,7 +178,8 @@ qualificados/seletivos e pacotes.
 12. **Atribuição de diagnósticos por arquivo:** cada `ast.Function` carrega
     `file_id`, `Diagnostic.file` indexa `Result.sources` e a CLI imprime o
     `arquivo:linha:coluna` correto mesmo para erros em módulos importados.
-13. **Versionamento:** `0.3.5-alpha.1`; entradas antigas do CHANGELOG (até
+13. **Versionamento:** `0.3.6-alpha.1` (incrementada a cada ciclo integrado;
+    fonte única em `build.zig.zon`); entradas antigas do CHANGELOG (até
     `v2.3.0`) marcadas como não comprovadas.
 14. **CI:** GitHub Actions em `ubuntu-24.04`; a toolchain Zig vem do wheel
     oficial do PyPI (`ziglang==0.17.0.post0`) em um venv, o mesmo caminho
@@ -203,14 +218,32 @@ qualificados/seletivos e pacotes.
     buffer `[12 x i8]`. Nenhuma dependência de `itoa`, estado global ou
     alocação dinâmica.
 
+20. **`str` por valor em chamadas (ABI própria, ciclo 8):** cada parâmetro,
+    argumento e retorno `str` leva um par **ponteiro + tamanho**, sempre nesta
+    ordem. No x86-64 os pares são `(%rdi,%rsi)`, `(%rdx,%rcx)` e `(%r8,%r9)` e o
+    retorno vem em `%rax` (ponteiro) e `%rdx` (tamanho); o prólogo grava os dois
+    registradores nos dois slots da variável. Chamadas com mais de um argumento
+    empilham uma palavra por registrador e desempilham na ordem inversa (ordem
+    de avaliação preservada); com um único argumento a passagem é direta, sem
+    tocar na pilha. No IR os parâmetros viram `ptr %argN` + `i64 %argN+1` e o
+    retorno é o agregado `{ ptr, i64 }` (`insertvalue` para montar,
+    `extractvalue` para ler); `emitCall` recusa `str` de retorno e quem chama
+    usa `strOperand`/`emitStrCall`, para não emitir `call` de agregado truncado.
+21. **Limite de parâmetros é contado em palavras de registrador:** `Type.registerWords()`
+    devolve 1 (escalares) ou 2 (`str`) e `max_params` é aplicado sobre essa
+    soma, tanto na declaração quanto em cada chamada. Assim três `str` cabem,
+    quatro não, e a mensagem cita o total e a regra (`'str' ocupa dois`) em vez
+    de um número de argumentos — se o backend ganhar mais registradores o
+    diagnóstico acompanha sozinho.
+
 ## 4. Pendências (priorizadas)
 
 1. **Linguagem:** sem `enum`, `impl`/métodos, `unsafe`, atributos, tipos
-   numéricos além de `i32`, slices e ponteiros; structs e `str` só em variáveis
-   locais (sem parâmetro/retorno/argumento por valor, sem campo `str` ou struct,
-   sem struct vazio); `str` não tem comparação nem concatenação; a saída cobre
-   texto literal e `i32` (não há impressão de `bool`, `str` interpolado nem
-   formatação configurável).
+   numéricos além de `i32`, slices e ponteiros; struct por valor em
+   parâmetro/retorno/argumento ainda não existe (sem campo `str` ou struct, sem
+   struct vazio) — `str`, ao contrário, já atravessa chamadas por valor; `str`
+   não tem comparação, concatenação nem formatação; a saída cobre texto literal
+   e `i32` (não há impressão de `bool` nem `str` interpolado).
 2. **Módulos:** escopo único achatado (nomes de função precisam ser únicos no
    programa), sem `pub`/visibilidade, imports qualificados/seletivos, aliases,
    pacotes ou manifesto; deduplicação é por caminho normalizado (não por
@@ -225,8 +258,9 @@ qualificados/seletivos e pacotes.
 7. **Fuzz/edge cases** de `tests/fuzz/` não são executados por nenhum runner.
 8. **`tests/diagnostics/*.kyn`** não são verificados pelo e2e (só
    `tests/e2e/negative`).
-9. **Backend nativo** restrito a Linux x86-64, ≤ 6 argumentos, sem libc e sem
-   otimização; sem testes de regressão com IR/asm completos (golden files).
+9. **Backend nativo** restrito a Linux x86-64, ≤ 6 registradores de argumentos
+   (`str` conta dois), sem libc e sem otimização; sem testes de regressão com
+   IR/asm completos (golden files).
 10. **CI** roda apenas em `ubuntu-24.04` (sem matriz de SO, sem cache de build,
    sem artefatos publicados); `target triple` do IR é fixo.
 11. **Cobertura de testes do compiler** concentrada em exemplos; sem medição de
@@ -234,41 +268,38 @@ qualificados/seletivos e pacotes.
 
 ## 5. Próxima etapa prioritária
 
-**`str` por valor em parâmetro e retorno (ABI própria documentada).**
+**Struct por valor em parâmetros e retornos (decisão de ABI primeiro).**
 
-- Por quê: hoje `str` só existe em variáveis locais — não há como escrever um
-  helper `fn titulo() -> str` nem receber texto por parâmetro, o que trava
-  qualquer biblioteca real. É também o pré-requisito mais próximo de
-  `impl`/métodos (struct por valor) e o item nº 6 de
-  `docs/architecture.md` («como `str` atravessa chamadas»).
-- Escopo mínimo proposto (incremental e testável):
-  1. Semântica: permitir `str` em parâmetros e retorno de função, mantendo os
-     diagnósticos apenas para campo de struct de tipo `str` e para as
-     operações ainda inexistentes (comparação/concatenação). `max_params`
-     continua valendo em **registradores** — `str` consome dois.
-  2. x86-64: convenção documentada — cada `str` ocupa dois registradores
-     consecutivos (ponteiro, tamanho), na ordem SysV (`%rdi/%rsi`,
-     `%rdx/%rcx`, `%r8/%r9`), com limite de 3 parâmetros `str`; retorno em
-     `%rax` (ponteiro) e `%rdx` (tamanho). `kyn_main` continua recebendo
-     nada e `str` de retorno só pode ser consumido por `print`/cópia.
-  3. LLVM IR: assinatura com dois parâmetros por `str` (`ptr` + `i64`) e
-     retorno `{ ptr, i64 }`; `extractvalue` para ler o par — é o primeiro uso
-     deliberado de tipo agregado no IR, com `llvm-as` validando no CI.
-  4. Testes: unitários de semântica (aridade/tipos, `str` em retorno,
-     `main` sem retorno `str`) e de codegen (dois registradores/dois
-     parâmetros, ordem dos pares, `extractvalue`), e2e executado com
-     `// expect-stdout:` cobrindo helper que recebe e devolve texto.
-  5. Docs: `docs/syntax.ebnf`, `docs/architecture.md` (convenção de chamada),
-     `docs/status.md`, `docs/language_reference.md`, `README.md`,
-     `CHANGELOG.md` e este arquivo; versão `0.3.6-alpha.1`.
-- Critérios de conclusão: `zig build test`, `zig build e2e` e
-  `validate-ir-strict` verdes no CI, com programas reais usando `str` entre
-  funções.
+- Por quê: `str` já atravessa chamadas; o mesmo contrato falta para `struct`,
+  que hoje só existe em variáveis locais e por isso não serve de base para
+  `impl`/métodos com `self` (item nº 3 de `docs/architecture.md`).
+- Ponto de decisão a resolver no início do ciclo (registrar em §3 antes de
+  codificar): **(a)** achatamento campo a campo em registradores — cada campo
+  escalar = 1 palavra de registrador, cabendo no limite de 6 já existente, com
+  retorno agregado `{ i32, ... }` no IR, coerente com o que o `str` faz; ou
+  **(b)** passagem por pilha (cópia de `1 + n` slots), que não consome
+  registradores mas exige prólogo/`alloca` distintos nos dois backends.
+  Critério: manter a substituição escalar (sem agregados no IR além do retorno)
+  e não introduzir cópia implícita silenciosa.
+- Escopo mínimo: semântica aceitando struct em parâmetros/retornos/argumentos
+  (com o limite contado em palavras de registrador), prólogo e retorno nos dois
+  backends, literais anotados como argumento, `let` recebendo retorno de struct,
+  e diagnósticos para struct vazio/anelar reaproveitados. Efeito colateral
+  esperado: `struct_param_unsupported.kyn` (negativa e2e) sai e vira positiva.
+- Testes: unitários de sema (ordem dos campos, `str` dentro de struct ainda
+  proibido, limite de registradores) e de codegen (offsets/ordem dos campos no
+  prólogo, `extractvalue`/`insertvalue` de agregado), e2e executado com
+  `// expect-stdout:` e um helper `fn soma(p: Ponto) -> i32` mais
+  `fn origem() -> Ponto`.
+- Docs: `docs/architecture.md` (convenção), `docs/status.md`,
+  `docs/syntax.ebnf`, `docs/language_reference.md`, `README.md`, `CHANGELOG.md`
+  e este arquivo; versão `0.3.7-alpha.1`.
 
-**Depois disso (ordem sugerida):** struct por valor e struct aninhado →
+**Depois disso (ordem sugerida):** struct aninhado e struct vazio →
 `enum`/`impl` (métodos com `self`) → tipos numéricos maiores (`i64`, `u8`,
-`f32`) → impressão de `bool` e interpolação de `str` → `unsafe`/`repr(C)` e
-FFI → `target triple` configurável → início do self-hosting em Kyn.
+`f32`) → impressão de `bool` e concatenação/interpolação de `str` →
+`unsafe`/`repr(C)` e FFI → `target triple` configurável → início do
+self-hosting em Kyn.
 
 ## 6. Histórico dos ciclos
 
@@ -281,7 +312,8 @@ FFI → `target triple` configurável → início do self-hosting em Kyn.
 | Ciclo 4 (2026-11-07) | `import` e compilação multi-arquivo: lexer de strings + `import`; parser com `import` no topo; `driver.compilePath` com DFS pré-ordem, dedupe por caminho normalizado, `.import_cycle`/`.import_not_found`; `Diagnostic.file`/`addInFile` e mensagens citando o arquivo; CLI multi-arquivo; 21 testes novos (115 no total); 3 fixtures e2e multi-arquivo executadas + 3 negativas com mensagem esperada; `validate-ir` cobre 62 módulos; versão `0.3.2-alpha.1` (agora derivada de `build.zig.zon`). Integrado via PR #10 (`1c149dd`). | Sim: local (108 testes do compilador, 70/70 e2e, `fmt --check`) e CI runs `42415765698` (PR) e `42415945385` (main), ambos verdes com IR estrito; suíte local retestada em `main` após o merge |
 | Ciclo 5 (2026-11-07) | `struct` com valor: lexer (`struct`, `.`), parser (declaração, literal, acesso e atribuição a campo, condição sem ambiguidade), AST (`structs`, `field_access`, `struct_literal`, `field_assign`), semântica (`Type.aggregate`, `Checked.structs` em duas passadas, literais validados e restrições diagnosticadas), layout `1 + n` slots com substituição escalar no LLVM, driver propagando structs entre módulos, 16 testes novos (139 no total), 3 fixtures e2e com `struct` executadas + 1 módulo + 3 negativas (77/77), `validate-ir` com 66 módulos; versão `0.3.3-alpha.1`. Integrado via PR #13 (`4234c07`). | Sim: local (132 testes do compilador, 77/77 e2e, `fmt --check`) e CI runs `42417725687` (PR) e `42417878774` (main), ambos verdes com IR estrito; suíte local retestada em `main` após o merge |
 | Ciclo 6 (2026-11-07) | `str` e `print`: literal de string como expressão, `ast.Expr.Call.builtin`, `Type.str` em dois slots (ponteiro + tamanho), `codegen.StrPool` deduplicando literais, texto em `.rodata` com syscall `write` no backend nativo e `@.strN` + `declare i64 @write` no IR; `print` embutido (um `str`, saída `void`, nome reservado) e restrições diagnosticadas (parâmetro/retorno/campo `str`, aritmética, condição, `==`/`!=`, literal solto); correção de contrato em `let`/`var` com `void`; `tools/e2e.sh` compara `// expect-stdout:`; 29 testes novos (169 no total), 4 fixtures com `print` + 1 módulo + 4 negativas (86/86), `validate-ir` com 71 módulos; versão `0.3.4-alpha.1`. Integrado via PR #15. | Sim: local (162 testes do compilador, 86/86 e2e com stdout, `fmt --check`, saída de binário via `as`/`ld`) e CI do PR #15 (run `42420648098`) verde com IR estrito; suíte local retestada em `main` após o merge |
-| Ciclo 7 (2026-11-07, atual) | `print_i32`: `ast.Expr.Builtin` com `print_i32` e checagem genérica de builtins (aridade, tipo esperado e nome reservado derivados do enum); rotina `kyn_print_i32` emitida uma vez por programa em `.text` no backend nativo (`divl` unsigned, buffer de 12 bytes, sem libc) e `@kyn_print_i32` no IR (`alloca [12 x i8]`, `phi`, `urem`/`udiv`, `select`, `zext`); 12 testes novos (181 no total), 4 fixtures novas com stdout conferido (inclui INT_MIN) + 2 negativas (92/92), `validate-ir` com 75 módulos; versão `0.3.5-alpha.1`. Integrado via PR #17 (`87903db`). | Sim: local (174 testes do compilador, 92/92 e2e com stdout, `fmt --check`, execução via `as`/`ld`, IR conferido) e CI runs `42423945656` (PR) e `42424147963` (`main`), ambos verdes com IR estrito; suíte local retestada em `main` após o merge |
+| Ciclo 7 (2026-11-07) | `print_i32`: `ast.Expr.Builtin` com `print_i32` e checagem genérica de builtins (aridade, tipo esperado e nome reservado derivados do enum); rotina `kyn_print_i32` emitida uma vez por programa em `.text` no backend nativo (`divl` unsigned, buffer de 12 bytes, sem libc) e `@kyn_print_i32` no IR (`alloca [12 x i8]`, `phi`, `urem`/`udiv`, `select`, `zext`); 12 testes novos (181 no total), 4 fixtures novas com stdout conferido (inclui INT_MIN) + 2 negativas (92/92), `validate-ir` com 75 módulos; versão `0.3.5-alpha.1`. Integrado via PR #17 (`87903db`). | Sim: local (174 testes do compilador, 92/92 e2e com stdout, `fmt --check`, execução via `as`/`ld`, IR conferido) e CI runs `42423945656` (PR) e `42424147963` (`main`), ambos verdes com IR estrito; suíte local retestada em `main` após o merge |
+| Ciclo 8 (2026-11-07, atual) | `str` por valor em parâmetros e retornos: `Type.isValue()` inclui `.str` e novo `Type.registerWords()` (2 para `str`); limite de 6 registradores por assinatura contado em palavras (`função '...' ocupa N registradores...` / `chamada de '...' ocupa N ...`), substituindo `max_params`; backends com ABI própria (`(%rdi,%rsi)`, `(%rdx,%rcx)`, `(%r8,%r9)` e retorno `%rax`/`%rdx` no x86-64; `ptr`+`i64` e `{ ptr, i64 }` com `insertvalue`/`extractvalue` no IR), incluindo caminho rápido para um argumento e desempilhamento inverso para vários; 12 testes novos e 2 negativos obsoletos substituídos (193 no total), 3 fixtures novas com stdout + 1 módulo importado com `str` + 2 negativas novas (97/97), `validate-ir` com 79 módulos; versão `0.3.6-alpha.1`. | Sim: local (186 testes do compilador, 97/97 e2e, `fmt --check`, execução via `as`/`ld` de `eco`/`titulo`/`marca` aninhados, IR conferido à mão); CI do PR e de `main` registrados no cabeçalho |
 
 ---
 

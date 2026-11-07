@@ -1,0 +1,11 @@
+// 'str' por valor atravessa a importação de módulos.
+// expect-stdout: mod:
+// expect-stdout: kyn
+// expect-exit: 3
+import "texto.kyn";
+
+fn main() -> i32 {
+    print(prefixo());
+    print(rotulo("kyn"));
+    return 3;
+}

@@ -8,6 +8,10 @@
 //!   escapam da função (sem parâmetros/retorno por valor), então cabe em
 //!   variáveis locais;
 //! - expressões são avaliadas em `%eax` com pilha de temporários;
+//! - `str` é uma fatia (ponteiro + tamanho) guardada em dois slots; em
+//!   chamadas ela ocupa **dois registradores consecutivos** (`%rdi/%rsi`,
+//!   `%rdx/%rcx`, `%r8/%r9` — no máximo três `str` por chamada) e o retorno
+//!   volta em `%rax` (ponteiro) e `%rdx` (tamanho);
 //! - `_start` chama `kyn_main` e encerra via syscall `exit` (60) com o valor
 //!   retornado por `main` (`0` quando `main` é `void`).
 //!
@@ -25,6 +29,9 @@ const codegen = @import("codegen.zig");
 pub const Error = codegen.Error;
 
 const arg_registers = [_][]const u8{ "%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d" };
+/// Nomes de 64 bits dos mesmos registradores: usados para `str` (ponteiro e
+/// tamanho são valores de 8 bytes).
+const arg_registers_64 = [_][]const u8{ "%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9" };
 
 pub fn emit(
     arena: std.mem.Allocator,
@@ -185,7 +192,10 @@ const FnEmitter = struct {
     fn emitFunction(self: *FnEmitter, out: *std.ArrayList(u8)) !void {
         self.out = out;
 
-        if (self.func.params.len > arg_registers.len) return error.UnsupportedNode;
+        // `str` consome dois registradores; a semântica já limita o total.
+        var register_words: usize = 0;
+        for (self.info.params) |ptype| register_words += ptype.registerWords();
+        if (register_words > arg_registers.len) return error.UnsupportedNode;
 
         const frame_bytes: u32 = std.mem.alignForward(u32, self.info.slot_count * 8, 16);
 
@@ -197,10 +207,18 @@ const FnEmitter = struct {
             try self.print("    subq ${d}, %rsp\n", .{frame_bytes});
         }
 
-        // Parâmetros: registradores -> slots.
+        // Parâmetros: registradores -> slots. `str` grava ponteiro e tamanho.
+        var reg: usize = 0;
         for (self.func.params, 0..) |_, i| {
             const sym = &self.checked.symbols[self.info.symbol_start + i];
-            try self.print("    movl {s}, -{d}(%rbp)\n", .{ arg_registers[i], slotOffset(sym.slot) });
+            if (sym.typ == .str) {
+                try self.print("    movq {s}, -{d}(%rbp)\n", .{ arg_registers_64[reg], slotOffset(sym.slot) });
+                try self.print("    movq {s}, -{d}(%rbp)\n", .{ arg_registers_64[reg + 1], slotOffset(sym.slot + 1) });
+                reg += 2;
+            } else {
+                try self.print("    movl {s}, -{d}(%rbp)\n", .{ arg_registers[reg], slotOffset(sym.slot) });
+                reg += 1;
+            }
         }
 
         try self.emitStatements(self.func.body);
@@ -263,7 +281,12 @@ const FnEmitter = struct {
 
             .return_stmt => |maybe_expr| {
                 if (maybe_expr) |expr| {
-                    try self.emitExpr(expr);
+                    if (self.info.return_type == .str) {
+                        // Fatia de volta em `%rax` (ponteiro) e `%rdx` (tamanho).
+                        try self.emitStrValue(expr);
+                    } else {
+                        try self.emitExpr(expr);
+                    }
                 } else if (self.info.return_type != .void) {
                     return error.MiscompiledAst;
                 }
@@ -420,24 +443,34 @@ const FnEmitter = struct {
 
     /// Grava um valor `str` (ponteiro e tamanho) nos dois slots de `dst`:
     /// literal direto ou cópia de outra variável `str`.
-    fn emitStrStore(self: *FnEmitter, dst: *const sema.Symbol, value: *ast.Expr) Error!void {
+    /// Deixa um valor `str` em `%rax` (ponteiro) e `%rdx` (tamanho) — a mesma
+    /// convenção do retorno de função, o que permite reutilizar chamadas.
+    fn emitStrValue(self: *FnEmitter, value: *ast.Expr) Error!void {
         switch (value.kind) {
             .str_literal => |text| {
                 const index = try self.state.strs.intern(text);
                 try self.print("    leaq .Lstr{d}(%rip), %rax\n", .{index});
-                try self.print("    movq %rax, -{d}(%rbp)\n", .{slotOffset(dst.slot)});
-                try self.print("    movq ${d}, -{d}(%rbp)\n", .{ text.len, slotOffset(dst.slot + 1) });
+                try self.print("    movq ${d}, %rdx\n", .{text.len});
             },
             .identifier => {
                 const src = self.symbolAt(value.resolved orelse return error.MiscompiledAst);
                 if (src.typ != .str) return error.MiscompiledAst;
                 try self.print("    movq -{d}(%rbp), %rax\n", .{slotOffset(src.slot)});
-                try self.print("    movq %rax, -{d}(%rbp)\n", .{slotOffset(dst.slot)});
-                try self.print("    movq -{d}(%rbp), %rax\n", .{slotOffset(src.slot + 1)});
-                try self.print("    movq %rax, -{d}(%rbp)\n", .{slotOffset(dst.slot + 1)});
+                try self.print("    movq -{d}(%rbp), %rdx\n", .{slotOffset(src.slot + 1)});
+            },
+            .call => |call| {
+                const index = call.callee_fn orelse return error.MiscompiledAst;
+                if (self.checked.functions[index].return_type != .str) return error.MiscompiledAst;
+                try self.emitCall(call);
             },
             else => return error.MiscompiledAst,
         }
+    }
+
+    fn emitStrStore(self: *FnEmitter, dst: *const sema.Symbol, value: *ast.Expr) Error!void {
+        try self.emitStrValue(value);
+        try self.print("    movq %rax, -{d}(%rbp)\n", .{slotOffset(dst.slot)});
+        try self.print("    movq %rdx, -{d}(%rbp)\n", .{slotOffset(dst.slot + 1)});
     }
 
     /// `print(s)`: uma syscall `write(1, ptr, len)` para o texto e outra para a
@@ -447,20 +480,10 @@ const FnEmitter = struct {
         if (call.args.len != 1) return error.MiscompiledAst;
         const arg = call.args[0];
 
-        switch (arg.kind) {
-            .str_literal => |text| {
-                const index = try self.state.strs.intern(text);
-                try self.print("    leaq .Lstr{d}(%rip), %rsi\n", .{index});
-                try self.print("    movq ${d}, %rdx\n", .{text.len});
-            },
-            .identifier => {
-                const symbol = self.symbolAt(arg.resolved orelse return error.MiscompiledAst);
-                if (symbol.typ != .str) return error.MiscompiledAst;
-                try self.print("    movq -{d}(%rbp), %rsi\n", .{slotOffset(symbol.slot)});
-                try self.print("    movq -{d}(%rbp), %rdx\n", .{slotOffset(symbol.slot + 1)});
-            },
-            else => return error.UnsupportedNode,
-        }
+        // `emitStrValue` deixa ponteiro em `%rax` e tamanho em `%rdx`; `write`
+        // espera ponteiro em `%rsi` e tamanho em `%rdx`.
+        try self.emitStrValue(arg);
+        try self.print("    movq %rax, %rsi\n", .{});
 
         try self.print("    movl $1, %eax\n", .{}); // syscall write
         try self.print("    movl $1, %edi\n", .{}); // fd = stdout
@@ -556,18 +579,49 @@ const FnEmitter = struct {
             .print_i32 => return self.emitPrintI32(call),
         };
 
-        if (call.args.len > arg_registers.len) return error.UnsupportedNode;
+        const callee_index = call.callee_fn orelse return error.MiscompiledAst;
+        const callee = self.checked.functions[callee_index];
+        if (call.args.len != callee.params.len) return error.MiscompiledAst;
 
-        for (call.args) |arg| {
-            try self.emitExpr(arg);
-            try self.print("    pushq %rax\n", .{});
+        // Cada argumento ocupa 1 registrador, ou 2 quando é `str` (ponteiro e
+        // tamanho, nesta ordem). A semântica já validou o total.
+        var words: usize = 0;
+        for (callee.params) |ptype| words += ptype.registerWords();
+        if (words > arg_registers.len) return error.UnsupportedNode;
+
+        // Caminho rápido: com um único argumento nada pode clobberar os
+        // registradores de destino, então movemos direto sem passar pela pilha.
+        if (call.args.len == 1) {
+            if (callee.params[0] == .str) {
+                try self.emitStrValue(call.args[0]);
+                try self.print("    movq %rax, {s}\n", .{arg_registers_64[0]});
+                try self.print("    movq %rdx, {s}\n", .{arg_registers_64[1]});
+            } else {
+                try self.emitExpr(call.args[0]);
+                try self.print("    movl %eax, {s}\n", .{arg_registers[0]});
+            }
+            try self.print("    call kyn_{s}\n", .{call.callee});
+            return;
         }
 
-        var i: usize = call.args.len;
-        while (i > 0) {
-            i -= 1;
+        for (call.args, callee.params) |arg, ptype| {
+            if (ptype == .str) {
+                try self.emitStrValue(arg);
+                try self.print("    pushq %rax\n", .{});
+                try self.print("    pushq %rdx\n", .{});
+            } else {
+                try self.emitExpr(arg);
+                try self.print("    pushq %rax\n", .{});
+            }
+        }
+
+        // Desempilha na ordem inversa: a última palavra empilhada volta para o
+        // registrador de maior índice, preservando a ordem dos argumentos.
+        var word: usize = words;
+        while (word > 0) {
+            word -= 1;
             try self.print("    popq %rax\n", .{});
-            try self.print("    movl %eax, {s}\n", .{arg_registers[i]});
+            try self.print("    movq %rax, {s}\n", .{arg_registers_64[word]});
         }
 
         // A pilha volta ao alinhamento de 16 bytes antes da chamada,
@@ -678,9 +732,68 @@ test "x86_64: chamada passa argumentos em registradores SysV" {
     );
     defer f.deinit();
     const asm_text = try emitFixture(&f);
-    try support.expectContains(asm_text, "movl %eax, %edi");
-    try support.expectContains(asm_text, "movl %eax, %esi");
+    // Com dois argumentos os valores passam pela pilha para preservar a ordem
+    // de avaliação; a volta é na ordem inversa (%rsi antes de %rdi).
+    try support.expectContains(asm_text, "movl $10, %eax\n    pushq %rax");
+    try support.expectContains(asm_text, "movl $4, %eax\n    pushq %rax");
+    try support.expectContains(asm_text, "popq %rax\n    movq %rax, %rsi\n    popq %rax\n    movq %rax, %rdi");
     try support.expectContains(asm_text, "call kyn_sub");
+}
+
+test "x86_64: limite de argumentos da semântica coincide com a tabela SysV" {
+    // A semântica valida `str` como duas palavras; a tabela precisa ter o mesmo
+    // tamanho, senão o diagnóstico e o backend divergem silenciosamente.
+    try testing.expectEqual(sema.max_arg_registers, arg_registers.len);
+    try testing.expectEqual(sema.max_arg_registers, arg_registers_64.len);
+}
+
+test "x86_64: parâmetro 'str' chega em %rdi/%rsi e é salvo em dois slots" {
+    var f = try support.Fixture.build(
+        \\fn eco(s: str) -> str { return s; }
+        \\fn main() -> i32 { return 0; }
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+
+    try support.expectContains(asm_text, "movq %rdi, -8(%rbp)");
+    try support.expectContains(asm_text, "movq %rsi, -16(%rbp)");
+    // `return s` devolve ponteiro em %rax e tamanho em %rdx.
+    try support.expectContains(asm_text, "movq -8(%rbp), %rax");
+    try support.expectContains(asm_text, "movq -16(%rbp), %rdx");
+    try support.expectContains(asm_text, "subq $16, %rsp");
+}
+
+test "x86_64: chamada com 'str' empilha duas palavras por argumento" {
+    var f = try support.Fixture.build(
+        \\fn par(a: str, b: str) -> i32 {
+        \\    print(a);
+        \\    return 0;
+        \\}
+        \\fn main() -> i32 { return par("a", "b"); }
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+
+    try support.expectContains(asm_text, "pushq %rax\n    pushq %rdx");
+    // Ponteiro/tamanho chegam em %rdi/%rsi e %rdx/%rcx; desempilhamento é inverso.
+    try support.expectContains(asm_text, "movq %rax, %rcx");
+    try support.expectContains(asm_text, "movq %rax, %rdx");
+    try support.expectContains(asm_text, "movq %rax, %rsi");
+    try support.expectContains(asm_text, "movq %rax, %rdi");
+    try support.expectContains(asm_text, "call kyn_par");
+}
+
+test "x86_64: chamada de um argumento não passa pela pilha" {
+    var f = try support.Fixture.build(
+        \\fn eco(s: str) -> str { return s; }
+        \\fn dobro(n: i32) -> i32 { return n + n; }
+        \\fn main() -> i32 { print(eco("kyn")); return dobro(2); }
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+
+    try support.expectContains(asm_text, "movq %rax, %rdi\n    movq %rdx, %rsi\n    call kyn_eco");
+    try support.expectContains(asm_text, "movl %eax, %edi\n    call kyn_dobro");
 }
 
 test "x86_64: and/or têm curto-circuito" {
@@ -754,8 +867,9 @@ test "x86_64: print emite write do texto e da quebra de linha" {
     defer f.deinit();
     const asm_text = try emitFixture(&f);
 
-    try support.expectContains(asm_text, "leaq .Lstr0(%rip), %rsi");
+    try support.expectContains(asm_text, "leaq .Lstr0(%rip), %rax");
     try support.expectContains(asm_text, "movq $2, %rdx");
+    try support.expectContains(asm_text, "movq %rax, %rsi");
     try support.expectContains(asm_text, "movl $1, %eax");
     try support.expectContains(asm_text, "movl $1, %edi");
     try support.expectContains(asm_text, "syscall");
@@ -778,9 +892,11 @@ test "x86_64: variável str ocupa dois slots (ponteiro e tamanho)" {
 
     // slot 0 guarda o ponteiro (-8) e o slot 1 o tamanho (-16).
     try support.expectContains(asm_text, "movq %rax, -8(%rbp)");
-    try support.expectContains(asm_text, "movq $3, -16(%rbp)");
-    try support.expectContains(asm_text, "movq -8(%rbp), %rsi");
+    try support.expectContains(asm_text, "movq $3, %rdx");
+    try support.expectContains(asm_text, "movq %rdx, -16(%rbp)");
+    try support.expectContains(asm_text, "movq -8(%rbp), %rax");
     try support.expectContains(asm_text, "movq -16(%rbp), %rdx");
+    try support.expectContains(asm_text, "movq %rax, %rsi");
     try support.expectContains(asm_text, "subq $16, %rsp");
 }
 
@@ -796,7 +912,7 @@ test "x86_64: literais de string repetidos compartilham o rótulo" {
     const asm_text = try emitFixture(&f);
 
     try testing.expectEqual(@as(usize, 1), std.mem.count(u8, asm_text, ".Lstr0:"));
-    try testing.expectEqual(@as(usize, 2), std.mem.count(u8, asm_text, "leaq .Lstr0(%rip), %rsi"));
+    try testing.expectEqual(@as(usize, 2), std.mem.count(u8, asm_text, "leaq .Lstr0(%rip), %rax"));
     try testing.expect(std.mem.indexOf(u8, asm_text, ".Lstr1:") == null);
 }
 

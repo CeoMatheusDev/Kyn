@@ -1,0 +1,20 @@
+// Funções podem retornar 'str' (ponteiro em %rax, tamanho em %rdx).
+// expect-stdout: kyn lang
+// expect-stdout: kyn lang
+// expect-stdout: eco
+// expect-exit: 0
+fn titulo() -> str {
+    return "kyn lang";
+}
+
+fn eco(s: str) -> str {
+    return s;
+}
+
+fn main() -> i32 {
+    let t = titulo();
+    print(t);
+    print(titulo());
+    print(eco("eco"));
+    return 0;
+}

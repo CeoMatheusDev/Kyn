@@ -27,11 +27,16 @@ implementação integrada e testes reproduzíveis.
 - [x] Saída de valores: `print_i32(...)` embutido, com conversão decimal própria
       em cada backend (`divl` unsigned no nativo, `urem`/`udiv` no IR),
       cobrindo zero, negativos e os limites de `i32`; stdout conferido no e2e.
+- [x] `str` por valor em parâmetros e retornos: ABI própria documentada
+      (ponteiro + tamanho em pares de registradores, retorno em `%rax`/`%rdx`;
+      `ptr`+`i64` e `{ ptr, i64 }` no IR), limite de seis registradores contando
+      `str` como dois, e2e com helpers recebendo e devolvendo texto.
 - [ ] Completar o parser e a AST para a linguagem-alvo. Subconjunto atual:
       `fn`, `let`/`var`, atribuição, `return`, `if`/`else`, `while`, blocos,
-      expressões com precedência, `import`, `struct` e `str`. Faltam struct e
-      `str` por valor entre funções, `enum`, `impl`, `unsafe`, atributos,
-      comparação/concatenação de `str`, slices, ponteiros e generics.
+      expressões com precedência, `import`, `struct` (local) e `str` (inclusive
+      por valor entre funções). Faltam struct por valor entre funções, `enum`,
+      `impl`, `unsafe`, atributos, comparação/concatenação de `str`, slices,
+      ponteiros e generics.
 - [ ] Completar a análise semântica e o sistema de tipos além de
       `i32`/`bool`/`void`/`str` (inteiros de outras larguras, `f32`/`f64`,
       `str` com ownership/lifetimes, checagem de fluxo).

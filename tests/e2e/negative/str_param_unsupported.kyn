@@ -1,8 +1,0 @@
-// Erro esperado: passagem de 'str' por valor ainda não é suportada.
-fn imprime(s: str) -> i32 {
-    return 0;
-}
-
-fn main() -> i32 {
-    return imprime("kyn");
-}
