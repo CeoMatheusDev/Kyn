@@ -37,6 +37,9 @@ Saída de valores: builtin `print_i32(n: i32)` com formatação decimal própria
   `docs/language_reference.md`, `README.md`, `ROADMAP.md` e
   `DEVELOPMENT_STATE.md` atualizados.
 - **Versão:** `0.3.5-alpha.1` (derivada de `build.zig.zon`).
+- **Integração:** PR #17 mesclado em `main` como `87903db`; CI verde nos runs
+  `42423945656` (PR) e `42424147963` (`main`), com `zig fmt --check`, testes,
+  e2e (stdout conferido) e `validate-ir-strict` sobre 75 módulos.
 
 ## [v0.3.4-alpha.1] — 2026-11-07
 
