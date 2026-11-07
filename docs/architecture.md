@@ -102,13 +102,38 @@ campo de tipo struct nesta etapa, então um struct nunca escapa da função.
 - Literais exigem todos os campos exatamente uma vez, o que garante struct
   sempre inicializado (sem estado parcialmente construído).
 
+### Strings e saída de texto (`str`) — `print` + backends
+
+`str` é uma **fatia estática**: ponteiro para bytes constantes + tamanho. Não é
+escalar; existe para dar ao programa uma saída observável (texto) e preparar
+`kyn:core` para E/S real.
+
+- `Symbol.typ == .str` reserva dois slots consecutivos: `slot` guarda o
+  ponteiro e `slot + 1` o tamanho (mesma convenção nos dois backends).
+- Literais de string são deduplicados por conteúdo (`codegen.StrPool`): cada
+  texto distinto vira um único rótulo, com o número de referências livre.
+- x86-64: bytes em `.section .rodata` como lista de `.byte` (sem escapes);
+  `print` faz `write(1, ptr, len)` por syscall e uma segunda chamada para a
+  quebra de linha (`.Lnl`). Não há dependência de libc.
+- LLVM IR: cada texto vira `@.strN = private unnamed_addr constant [N x i8]`,
+  `print` vira `call i64 @write(i32 1, ptr @.strN, i64 N)` com
+  `declare i64 @write(i32, ptr, i64)`; o verificador do LLVM no CI aceita o IR.
+- `print` é embutida (`ast.Expr.Call.builtin`): exige exatamente um `str`,
+  devolve `void` e escreve sempre com quebra de linha. O nome é reservado para
+  funções declaradas na fonte.
+- Restrições desta etapa, todas diagnosticadas: `str` em
+  parâmetro/retorno/argumento, campo de struct de tipo `str`, `str` em
+  aritmética/condição/`==`/`!=` (comparar exigiria comparar bytes) e literal
+  solto como statement.
+
 ### Semântica — `src/sema/sema.zig`
 
 - dois passos: assinaturas primeiro (permite recursão e chamadas antes da
   declaração), depois corpos;
 - escopos aninhados com shadowing permitido e duplicidade diagnosticada no
   mesmo escopo;
-- tipos `i32`, `bool`, `void`; operadores verificados por categoria;
+- tipos `i32`, `bool`, `str`, `void` e structs nominais; operadores
+  verificados por categoria;
 - atribuição exige `var`;
 - verificação estrutural de retorno (`alwaysReturns`) para funções não-void;
 - validação de `fn main()` (sem parâmetros, retorno `i32` ou `void`);
@@ -117,8 +142,9 @@ campo de tipo struct nesta etapa, então um struct nunca escapa da função.
 ### Backends — `src/codegen/`
 
 - `llvm.zig`: IR textual com SSA simples, blocos básicos, `phi` para `&&`/`||`,
-  `alloca` para variáveis. Sem ferramenta LLVM no ambiente, a validação é
-  estrutural (todo bloco termina com `ret`/`br`/`unreachable`).
+  `alloca` para variáveis. Sem ferramenta LLVM no ambiente local, a validação é
+  estrutural (todo bloco termina com `ret`/`br`/`unreachable`) e o CI roda
+  `llvm-as` sobre todas as fixtures (`tools/validate-ir.sh`).
 - `x86_64.zig`: assembly System V sem libc. `_start` chama `kyn_main` e encerra
   via syscall `exit`. Variáveis em slots de 8 bytes no frame, expressões em
   `%eax` com pilha de temporários, chamadas com argumentos em
@@ -151,5 +177,6 @@ APIs.
    conectar `src/sema/unsafe.zig`.
 5. Definir o modelo de memória executável (ownership, lifetimes, slices) antes
    de expandir a std.
-6. Definir a representação de `str` e a saída de texto (`write`/libc) para que
-   a validação observe conteúdo, não apenas código de saída.
+6. Definir como `str` atravessa chamadas de função (parâmetro/retorno por
+   valor), a comparação por conteúdo e a concatenação/formatação — hoje tudo
+   isso é diagnosticado como não suportado.

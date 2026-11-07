@@ -41,7 +41,7 @@ zig build run -- --help
 | --- | --- |
 | `zig build` | Compila e instala `zig-out/bin/kync`. |
 | `zig build test` | Executa os testes unitários do compilador e da std experimental. |
-| `zig build e2e` | Compila fixtures, monta com `as`, liga com `ld` e confere códigos de saída. |
+| `zig build e2e` | Compila fixtures, monta com `as`, liga com `ld` e confere códigos de saída e o texto impresso (`// expect-stdout:`). |
 | `zig build validate-ir` | Valida o LLVM IR com `llvm-as`/`clang`; sem LLVM, avisa e ignora. |
 | `zig build validate-ir-strict` | Igual ao anterior, mas falha se não houver LLVM (usado no CI). |
 | `zig build run -- <args>` | Executa o `kync` recém-compilado com os argumentos informados. |
@@ -84,6 +84,10 @@ zig-out/bin/kync check tests/e2e/positive/fib.kyn
 zig-out/bin/kync emit --llvm tests/e2e/positive/fib.kyn -o /tmp/fib.ll
 zig-out/bin/kync emit --asm  tests/e2e/positive/fib.kyn -o /tmp/fib.s
 as /tmp/fib.s -o /tmp/fib.o && ld /tmp/fib.o -o /tmp/fib && /tmp/fib; echo $?
+
+# saída de texto: `print` escreve a string e a quebra de linha
+zig-out/bin/kync emit --asm tests/e2e/positive/print_basic.kyn -o /tmp/p.s
+as /tmp/p.s -o /tmp/p.o && ld /tmp/p.o -o /tmp/p && /tmp/p       # kyn / bootstrap
 ```
 
 ## Validação
@@ -93,9 +97,10 @@ O projeto só declara uma etapa concluída quando existe teste executável:
 1. **Testes unitários** (`zig build test`): lexer, spans, diagnósticos, AST,
    parser, semântica, backends e driver, além dos testes da std experimental.
 2. **Ponta a ponta** (`zig build e2e`): cada fixture positiva vira binário
-   nativo e o código de saída é comparado com `// expect-exit: N` (inclui as
-   fixtures de `struct`); o mesmo vale para programas multi-arquivo em
-   `tests/e2e/modules/<caso>/main.kyn`; as
+   nativo; o código de saída é comparado com `// expect-exit: N` e o stdout com
+   as linhas `// expect-stdout: ...` (na ordem, uma diretiva por linha — é assim
+   que as fixtures de `str`/`print` são validadas). O mesmo vale para programas
+   multi-arquivo em `tests/e2e/modules/<caso>/main.kyn`; as
    fixtures de `tests/integration/case_N.kyn` devem terminar com código `N`;
    cada fixture negativa deve falhar com código `1` e mensagem `erro:`; em
    `tests/e2e/modules_negative/<caso>/` o arquivo opcional `expect-error.txt`
@@ -104,7 +109,8 @@ O projeto só declara uma etapa concluída quando existe teste executável:
 
 3. **LLVM IR** (`zig build validate-ir-strict`): roda `llvm-as` (ou `clang`)
    sobre o IR de todas as fixtures suportadas, incluindo os programas
-   multi-arquivo e as fixtures de `struct` (66 módulos). Não há LLVM instalado no ambiente
+   multi-arquivo e as fixtures de `struct`/`print` (71 módulos). Não há LLVM
+   instalado no ambiente
    de desenvolvimento padrão, então localmente o passo `validate-ir` apenas
    avisa; o CI instala LLVM e usa a variante **estrita**, que falha se o
    verificador estiver ausente ou rejeitar qualquer módulo.
@@ -122,8 +128,8 @@ manualmente. Em `ubuntu-24.04` o workflow:
 2. instala Zig 0.17.0 a partir do wheel oficial do PyPI (o mesmo caminho
    descrito acima) e o expõe no `PATH`;
 3. executa `zig fmt --check build.zig src std`;
-4. executa `zig build test` (139 testes) e `zig build e2e` (77 casos);
-5. executa `zig build validate-ir-strict` (IR de 66 módulos aceito por
+4. executa `zig build test` (169 testes) e `zig build e2e` (86 casos);
+5. executa `zig build validate-ir-strict` (IR de 71 módulos aceito por
    `llvm-as`).
 
 A ausência de LLVM no CI **falha** o build, por isso a validação do IR não pode

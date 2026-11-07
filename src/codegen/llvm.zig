@@ -27,14 +27,36 @@ pub fn emit(
     checked: *const sema.Checked,
 ) Error![]const u8 {
     var out: std.ArrayList(u8) = .empty;
+    var state = codegen.ProgramState{ .strs = codegen.StrPool.init(arena) };
     try out.print(arena, "; LLVM IR gerado pelo kync (bootstrap)\n", .{});
     try out.print(arena, "target triple = \"x86_64-unknown-linux-gnu\"\n\n", .{});
 
     for (program.functions, 0..) |func, i| {
-        var emitter = FnEmitter.init(arena, func, checked, checked.functions[i]);
+        var emitter = FnEmitter.init(arena, func, checked, checked.functions[i], &state);
         try emitter.emitFunction();
         try emitter.serialize(&out);
         try out.append(arena, '\n');
+    }
+
+    // `print` usa `write` da libc: o IR declara o símbolo e cada string vira
+    // uma constante privada em lista de bytes (sem escapes de aspas).
+    if (state.strs.texts.items.len > 0 or state.used_print) {
+        try out.print(arena, "declare i64 @write(i32, ptr, i64)\n\n", .{});
+        for (state.strs.texts.items, 0..) |text, index| {
+            if (text.len == 0) {
+                try out.print(arena, "@.str{d} = private unnamed_addr constant [0 x i8] zeroinitializer, align 1\n", .{index});
+                continue;
+            }
+            try out.print(arena, "@.str{d} = private unnamed_addr constant [{d} x i8] [", .{ index, text.len });
+            for (text, 0..) |byte, byte_index| {
+                if (byte_index != 0) try out.print(arena, ", ", .{});
+                try out.print(arena, "i8 {d}", .{byte});
+            }
+            try out.print(arena, "], align 1\n", .{});
+        }
+        if (state.used_print) {
+            try out.print(arena, "@.nl = private unnamed_addr constant [1 x i8] [i8 10], align 1\n", .{});
+        }
     }
 
     return out.toOwnedSlice(arena);
@@ -47,6 +69,8 @@ fn llvmType(typ: sema.Type) codegen.Error![]const u8 {
         .void => "void",
         // Struct em LLVM é representado campo a campo (substituição escalar).
         .aggregate => error.UnsupportedType,
+        // `str` é ponteiro + tamanho: representado por dois slots.
+        .str => error.UnsupportedType,
         .unknown => error.UnsupportedType,
     };
 }
@@ -57,6 +81,7 @@ fn typeAlign(typ: sema.Type) codegen.Error!u32 {
         .bool => 1,
         .void => error.UnsupportedType,
         .aggregate => error.UnsupportedType,
+        .str => error.UnsupportedType,
         .unknown => error.UnsupportedType,
     };
 }
@@ -77,6 +102,8 @@ const FnEmitter = struct {
     func: *const ast.Function,
     checked: *const sema.Checked,
     info: sema.FunctionInfo,
+    /// Estado compartilhado do programa (pool de strings e uso de `print`).
+    state: *codegen.ProgramState,
 
     blocks: std.ArrayList(Block) = .empty,
     current: usize = 0,
@@ -88,8 +115,9 @@ const FnEmitter = struct {
         func: *const ast.Function,
         checked: *const sema.Checked,
         info: sema.FunctionInfo,
+        state: *codegen.ProgramState,
     ) FnEmitter {
-        return .{ .arena = arena, .func = func, .checked = checked, .info = info };
+        return .{ .arena = arena, .func = func, .checked = checked, .info = info, .state = state };
     }
 
     fn block(self: *FnEmitter) *Block {
@@ -152,6 +180,12 @@ const FnEmitter = struct {
         const sym_start: usize = self.info.symbol_start;
         const sym_end: usize = sym_start + self.info.symbol_count;
         for (self.checked.symbols[sym_start..sym_end]) |sym| {
+            if (sym.typ == .str) {
+                // Ponteiro no slot base e tamanho no slot seguinte.
+                try self.emit("  {s} = alloca ptr, align 8\n", .{try self.varName(sym.slot)});
+                try self.emit("  {s} = alloca i64, align 8\n", .{try self.varName(sym.slot + 1)});
+                continue;
+            }
             if (sym.typ == .aggregate) {
                 if (sym.struct_id >= self.checked.structs.len) return error.MiscompiledAst;
                 for (self.checked.structs[sym.struct_id].fields, 0..) |field, i| {
@@ -233,6 +267,10 @@ const FnEmitter = struct {
                     try self.emitStructStore(symbol, decl.init);
                     return;
                 }
+                if (symbol.typ == .str) {
+                    try self.emitStrStore(symbol, decl.init);
+                    return;
+                }
                 const value = try self.emitExpr(decl.init);
                 if (value.typ == .void) return error.UnsupportedNode;
                 const ty = try llvmType(symbol.typ);
@@ -245,6 +283,10 @@ const FnEmitter = struct {
                 const symbol = self.symbolAt(assign.resolved orelse return error.MiscompiledAst);
                 if (symbol.typ == .aggregate) {
                     try self.emitStructStore(symbol, assign.value);
+                    return;
+                }
+                if (symbol.typ == .str) {
+                    try self.emitStrStore(symbol, assign.value);
                     return;
                 }
                 const value = try self.emitExpr(assign.value);
@@ -343,6 +385,9 @@ const FnEmitter = struct {
 
             .identifier => {
                 const symbol = self.symbolAt(expr.resolved orelse return error.MiscompiledAst);
+                // `str` são dois slots: só é copiado/impresso por rotinas
+                // dedicadas, e a semântica recusa usá-lo como escalar.
+                if (symbol.typ == .str) return error.MiscompiledAst;
                 const ty = try llvmType(symbol.typ);
                 const align_value = try typeAlign(symbol.typ);
                 const name = try self.varName(symbol.slot);
@@ -375,7 +420,70 @@ const FnEmitter = struct {
             // Struct completo não é um operando: `let`/atribuição o tratam
             // campo a campo em `emitStructStore`.
             .struct_literal => return error.UnsupportedNode,
+            // `str` são dois slots (ponteiro + tamanho), tratados por
+            // `emitStrStore` e `emitPrint`.
+            .str_literal => return error.UnsupportedNode,
         }
+    }
+
+    /// Grava um valor `str` (ponteiro e tamanho) nos dois slots de `dst`:
+    /// literal direto ou cópia de outra variável `str`.
+    fn emitStrStore(self: *FnEmitter, dst: *const sema.Symbol, value: *ast.Expr) Error!void {
+        const ptr_slot = try self.varName(dst.slot);
+        const len_slot = try self.varName(dst.slot + 1);
+
+        switch (value.kind) {
+            .str_literal => |text| {
+                const index = try self.state.strs.intern(text);
+                try self.emit("  store ptr @.str{d}, ptr {s}, align 8\n", .{ index, ptr_slot });
+                try self.emit("  store i64 {d}, ptr {s}, align 8\n", .{ text.len, len_slot });
+            },
+            .identifier => {
+                const src = self.symbolAt(value.resolved orelse return error.MiscompiledAst);
+                if (src.typ != .str) return error.MiscompiledAst;
+                const ptr_temp = try self.newTemp();
+                try self.emit("  {s} = load ptr, ptr {s}, align 8\n", .{ ptr_temp, try self.varName(src.slot) });
+                const len_temp = try self.newTemp();
+                try self.emit("  {s} = load i64, ptr {s}, align 8\n", .{ len_temp, try self.varName(src.slot + 1) });
+                try self.emit("  store ptr {s}, ptr {s}, align 8\n", .{ ptr_temp, ptr_slot });
+                try self.emit("  store i64 {s}, ptr {s}, align 8\n", .{ len_temp, len_slot });
+            },
+            else => return error.MiscompiledAst,
+        }
+    }
+
+    /// `print(s)`: duas chamadas a `write` da libc — o texto e a quebra de
+    /// linha. O resultado de `write` é descartado (a linguagem não expõe I/O
+    /// de baixo nível ainda).
+    fn emitPrint(self: *FnEmitter, call: ast.Expr.Call) Error!Operand {
+        if (call.args.len != 1) return error.MiscompiledAst;
+        const arg = call.args[0];
+
+        var ptr_text: []const u8 = undefined;
+        var len_text: []const u8 = undefined;
+        switch (arg.kind) {
+            .str_literal => |text| {
+                const index = try self.state.strs.intern(text);
+                ptr_text = try std.fmt.allocPrint(self.arena, "@.str{d}", .{index});
+                len_text = try std.fmt.allocPrint(self.arena, "{d}", .{text.len});
+            },
+            .identifier => {
+                const symbol = self.symbolAt(arg.resolved orelse return error.MiscompiledAst);
+                if (symbol.typ != .str) return error.MiscompiledAst;
+                const ptr_temp = try self.newTemp();
+                try self.emit("  {s} = load ptr, ptr {s}, align 8\n", .{ ptr_temp, try self.varName(symbol.slot) });
+                const len_temp = try self.newTemp();
+                try self.emit("  {s} = load i64, ptr {s}, align 8\n", .{ len_temp, try self.varName(symbol.slot + 1) });
+                ptr_text = ptr_temp;
+                len_text = len_temp;
+            },
+            else => return error.UnsupportedNode,
+        }
+
+        try self.emit("  call i64 @write(i32 1, ptr {s}, i64 {s})\n", .{ ptr_text, len_text });
+        try self.emit("  call i64 @write(i32 1, ptr @.nl, i64 1)\n", .{});
+        self.state.used_print = true;
+        return .{ .text = "", .typ = .void };
     }
 
     /// Copia um struct para os slots de `dst` (literal ou outra variável).
@@ -489,6 +597,10 @@ const FnEmitter = struct {
     }
 
     fn emitCall(self: *FnEmitter, call: ast.Expr.Call) Error!Operand {
+        if (call.builtin) |builtin| switch (builtin) {
+            .print => return self.emitPrint(call),
+        };
+
         const fn_index = call.callee_fn orelse return error.MiscompiledAst;
         const callee = self.checked.functions[fn_index];
 
@@ -690,4 +802,74 @@ fn findFieldInit(inits: []ast.Expr.FieldInit, name: []const u8) ?*ast.Expr {
         if (std.mem.eql(u8, init.name, name)) return init.value;
     }
     return null;
+}
+
+test "llvm: print declara e chama write com a constante da string" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    print("ok");
+        \\    return 0;
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+
+    try support.expectContains(ir, "declare i64 @write(i32, ptr, i64)");
+    try support.expectContains(ir, "@.str0 = private unnamed_addr constant [2 x i8] [i8 111, i8 107], align 1");
+    try support.expectContains(ir, "call i64 @write(i32 1, ptr @.str0, i64 2)");
+    try support.expectContains(ir, "@.nl = private unnamed_addr constant [1 x i8] [i8 10], align 1");
+    try support.expectContains(ir, "call i64 @write(i32 1, ptr @.nl, i64 1)");
+    try support.expectAllBlocksTerminated(ir);
+}
+
+test "llvm: str vira dois allocas (ponteiro e tamanho)" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    var s: str = "abc";
+        \\    s = "de";
+        \\    print(s);
+        \\    return 0;
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+
+    try support.expectContains(ir, "%v0 = alloca ptr, align 8");
+    try support.expectContains(ir, "%v1 = alloca i64, align 8");
+    try support.expectContains(ir, "store ptr @.str0, ptr %v0, align 8");
+    try support.expectContains(ir, "store i64 3, ptr %v1, align 8");
+    try support.expectContains(ir, "store ptr @.str1, ptr %v0, align 8");
+    try support.expectContains(ir, "load ptr, ptr %v0, align 8");
+    try support.expectContains(ir, "load i64, ptr %v1, align 8");
+    try support.expectAllBlocksTerminated(ir);
+}
+
+test "llvm: literais repetidos compartilham a mesma constante" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    print("kyn");
+        \\    print("kyn");
+        \\    return 0;
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+
+    try testing.expectEqual(@as(usize, 1), std.mem.count(u8, ir, "@.str0 ="));
+    try testing.expectEqual(@as(usize, 2), std.mem.count(u8, ir, "ptr @.str0"));
+    try testing.expect(std.mem.indexOf(u8, ir, "@.str1") == null);
+}
+
+test "llvm: string vazia usa zeroinitializer" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    print("");
+        \\    return 0;
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+
+    try support.expectContains(ir, "@.str0 = private unnamed_addr constant [0 x i8] zeroinitializer, align 1");
+    try support.expectContains(ir, "call i64 @write(i32 1, ptr @.str0, i64 0)");
 }

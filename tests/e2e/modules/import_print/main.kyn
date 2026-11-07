@@ -1,0 +1,13 @@
+// `str` e `print` com módulo importado: constantes de string do programa todo.
+// expect-exit: 4
+// expect-stdout: modulo
+// expect-stdout: ok
+import "saida.kyn";
+
+fn main() -> i32 {
+    print("modulo");
+    if sufixo() == 4 {
+        print("ok");
+    }
+    return sufixo();
+}

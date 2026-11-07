@@ -32,6 +32,7 @@ pub fn emit(
     checked: *const sema.Checked,
 ) Error![]const u8 {
     var out: std.ArrayList(u8) = .empty;
+    var state = codegen.ProgramState{ .strs = codegen.StrPool.init(arena) };
 
     // Ponto de entrada do processo: chama `kyn_main` e encerra com syscall.
     const main_index = checked.findFunction("main") orelse return error.UnsupportedNode;
@@ -51,9 +52,33 @@ pub fn emit(
     try out.print(arena, "    syscall\n\n", .{});
 
     for (program.functions, 0..) |func, i| {
-        var emitter = FnEmitter.init(arena, func, checked, checked.functions[i]);
+        var emitter = FnEmitter.init(arena, func, checked, checked.functions[i], &state);
         try emitter.emitFunction(&out);
         try out.append(arena, '\n');
+    }
+
+    // Rodapé: constantes de string (deduplicadas) e a quebra de linha de
+    // `print`. Só são emitidas quando o programa usa esse recurso.
+    if (state.strs.texts.items.len > 0 or state.used_print) {
+        try out.print(arena, ".section .rodata\n", .{});
+        for (state.strs.texts.items, 0..) |text, index| {
+            try out.print(arena, ".Lstr{d}:\n", .{index});
+            if (text.len == 0) {
+                // `as` não aceita `.byte` sem operandos; um byte de padding
+                // mantém o rótulo válido para comprimento zero (nada é escrito).
+                try out.print(arena, "    .zero 1\n", .{});
+            } else {
+                try out.print(arena, "    .byte ", .{});
+                for (text, 0..) |byte, byte_index| {
+                    if (byte_index != 0) try out.print(arena, ", ", .{});
+                    try out.print(arena, "{d}", .{byte});
+                }
+                try out.print(arena, "\n", .{});
+            }
+        }
+        if (state.used_print) {
+            try out.print(arena, ".Lnl:\n    .byte 10\n", .{});
+        }
     }
 
     try out.print(arena, ".section .note.GNU-stack,\"\",@progbits\n", .{});
@@ -66,6 +91,8 @@ const FnEmitter = struct {
     checked: *const sema.Checked,
     info: sema.FunctionInfo,
     out: *std.ArrayList(u8) = undefined,
+    /// Estado compartilhado do programa (pool de strings e uso de `print`).
+    state: *codegen.ProgramState,
     label_count: u32 = 0,
     /// Bloco corrente já terminou (return)? Evita emitir código inalcançável.
     terminated: bool = false,
@@ -75,8 +102,9 @@ const FnEmitter = struct {
         func: *const ast.Function,
         checked: *const sema.Checked,
         info: sema.FunctionInfo,
+        state: *codegen.ProgramState,
     ) FnEmitter {
-        return .{ .arena = arena, .func = func, .checked = checked, .info = info };
+        return .{ .arena = arena, .func = func, .checked = checked, .info = info, .state = state };
     }
 
     fn print(self: *FnEmitter, comptime fmt: []const u8, args: anytype) !void {
@@ -148,6 +176,8 @@ const FnEmitter = struct {
                 const symbol = self.symbolAt(stmt.decl_symbol orelse return error.MiscompiledAst);
                 if (symbol.typ == .aggregate) {
                     try self.emitStructStore(symbol, decl.init);
+                } else if (symbol.typ == .str) {
+                    try self.emitStrStore(symbol, decl.init);
                 } else {
                     try self.emitExpr(decl.init);
                     try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
@@ -158,6 +188,8 @@ const FnEmitter = struct {
                 const symbol = self.symbolAt(assign.resolved orelse return error.MiscompiledAst);
                 if (symbol.typ == .aggregate) {
                     try self.emitStructStore(symbol, assign.value);
+                } else if (symbol.typ == .str) {
+                    try self.emitStrStore(symbol, assign.value);
                 } else {
                     try self.emitExpr(assign.value);
                     try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
@@ -251,6 +283,9 @@ const FnEmitter = struct {
 
             .identifier => {
                 const symbol = self.symbolAt(expr.resolved orelse return error.MiscompiledAst);
+                // `str` não cabe em `%eax`: só é copiado/impresso por rotinas
+                // dedicadas, e a semântica recusa usá-lo como escalar.
+                if (symbol.typ == .str) return error.MiscompiledAst;
                 try self.print("    movl -{d}(%rbp), %eax\n", .{slotOffset(symbol.slot)});
             },
 
@@ -288,6 +323,9 @@ const FnEmitter = struct {
             // Valor de struct não cabe em `%eax`: `let`/atribuição tratam o
             // literal campo a campo em `emitStructStore`.
             .struct_literal => return error.UnsupportedNode,
+            // `str` são dois slots (ponteiro + tamanho), tratados por
+            // `emitStrStore` e `emitPrint`.
+            .str_literal => return error.UnsupportedNode,
         }
     }
 
@@ -323,6 +361,61 @@ const FnEmitter = struct {
             },
             else => return error.MiscompiledAst,
         }
+    }
+
+    /// Grava um valor `str` (ponteiro e tamanho) nos dois slots de `dst`:
+    /// literal direto ou cópia de outra variável `str`.
+    fn emitStrStore(self: *FnEmitter, dst: *const sema.Symbol, value: *ast.Expr) Error!void {
+        switch (value.kind) {
+            .str_literal => |text| {
+                const index = try self.state.strs.intern(text);
+                try self.print("    leaq .Lstr{d}(%rip), %rax\n", .{index});
+                try self.print("    movq %rax, -{d}(%rbp)\n", .{slotOffset(dst.slot)});
+                try self.print("    movq ${d}, -{d}(%rbp)\n", .{ text.len, slotOffset(dst.slot + 1) });
+            },
+            .identifier => {
+                const src = self.symbolAt(value.resolved orelse return error.MiscompiledAst);
+                if (src.typ != .str) return error.MiscompiledAst;
+                try self.print("    movq -{d}(%rbp), %rax\n", .{slotOffset(src.slot)});
+                try self.print("    movq %rax, -{d}(%rbp)\n", .{slotOffset(dst.slot)});
+                try self.print("    movq -{d}(%rbp), %rax\n", .{slotOffset(src.slot + 1)});
+                try self.print("    movq %rax, -{d}(%rbp)\n", .{slotOffset(dst.slot + 1)});
+            },
+            else => return error.MiscompiledAst,
+        }
+    }
+
+    /// `print(s)`: uma syscall `write(1, ptr, len)` para o texto e outra para a
+    /// quebra de linha. `syscall` não exige alinhamento de pilha e clobbera
+    /// `%rcx`/`%r11`, que não guardam estado entre expressões neste backend.
+    fn emitPrint(self: *FnEmitter, call: ast.Expr.Call) Error!void {
+        if (call.args.len != 1) return error.MiscompiledAst;
+        const arg = call.args[0];
+
+        switch (arg.kind) {
+            .str_literal => |text| {
+                const index = try self.state.strs.intern(text);
+                try self.print("    leaq .Lstr{d}(%rip), %rsi\n", .{index});
+                try self.print("    movq ${d}, %rdx\n", .{text.len});
+            },
+            .identifier => {
+                const symbol = self.symbolAt(arg.resolved orelse return error.MiscompiledAst);
+                if (symbol.typ != .str) return error.MiscompiledAst;
+                try self.print("    movq -{d}(%rbp), %rsi\n", .{slotOffset(symbol.slot)});
+                try self.print("    movq -{d}(%rbp), %rdx\n", .{slotOffset(symbol.slot + 1)});
+            },
+            else => return error.UnsupportedNode,
+        }
+
+        try self.print("    movl $1, %eax\n", .{}); // syscall write
+        try self.print("    movl $1, %edi\n", .{}); // fd = stdout
+        try self.print("    syscall\n", .{});
+        try self.print("    leaq .Lnl(%rip), %rsi\n", .{});
+        try self.print("    movq $1, %rdx\n", .{});
+        try self.print("    movl $1, %eax\n", .{});
+        try self.print("    movl $1, %edi\n", .{});
+        try self.print("    syscall\n", .{});
+        self.state.used_print = true;
     }
 
     fn emitBinaryOp(self: *FnEmitter, binary: ast.Expr.Binary) Error!void {
@@ -393,6 +486,10 @@ const FnEmitter = struct {
     }
 
     fn emitCall(self: *FnEmitter, call: ast.Expr.Call) Error!void {
+        if (call.builtin) |builtin| switch (builtin) {
+            .print => return self.emitPrint(call),
+        };
+
         if (call.args.len > arg_registers.len) return error.UnsupportedNode;
 
         for (call.args) |arg| {
@@ -579,4 +676,74 @@ fn findFieldInit(inits: []ast.Expr.FieldInit, name: []const u8) ?*ast.Expr {
         if (std.mem.eql(u8, init.name, name)) return init.value;
     }
     return null;
+}
+
+test "x86_64: print emite write do texto e da quebra de linha" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    print("ok");
+        \\    return 0;
+        \\}
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+
+    try support.expectContains(asm_text, "leaq .Lstr0(%rip), %rsi");
+    try support.expectContains(asm_text, "movq $2, %rdx");
+    try support.expectContains(asm_text, "movl $1, %eax");
+    try support.expectContains(asm_text, "movl $1, %edi");
+    try support.expectContains(asm_text, "syscall");
+    // Texto e quebra de linha em .rodata, como listas de bytes.
+    try support.expectContains(asm_text, ".section .rodata");
+    try support.expectContains(asm_text, ".Lstr0:\n    .byte 111, 107");
+    try support.expectContains(asm_text, ".Lnl:\n    .byte 10");
+}
+
+test "x86_64: variável str ocupa dois slots (ponteiro e tamanho)" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    var s: str = "abc";
+        \\    print(s);
+        \\    return 0;
+        \\}
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+
+    // slot 0 guarda o ponteiro (-8) e o slot 1 o tamanho (-16).
+    try support.expectContains(asm_text, "movq %rax, -8(%rbp)");
+    try support.expectContains(asm_text, "movq $3, -16(%rbp)");
+    try support.expectContains(asm_text, "movq -8(%rbp), %rsi");
+    try support.expectContains(asm_text, "movq -16(%rbp), %rdx");
+    try support.expectContains(asm_text, "subq $16, %rsp");
+}
+
+test "x86_64: literais de string repetidos compartilham o rótulo" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    print("ok");
+        \\    print("ok");
+        \\    return 0;
+        \\}
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+
+    try testing.expectEqual(@as(usize, 1), std.mem.count(u8, asm_text, ".Lstr0:"));
+    try testing.expectEqual(@as(usize, 2), std.mem.count(u8, asm_text, "leaq .Lstr0(%rip), %rsi"));
+    try testing.expect(std.mem.indexOf(u8, asm_text, ".Lstr1:") == null);
+}
+
+test "x86_64: string vazia mantém o rótulo válido e escreve zero bytes" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    print("");
+        \\    return 0;
+        \\}
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+
+    try support.expectContains(asm_text, ".Lstr0:\n    .zero 1");
+    try support.expectContains(asm_text, "movq $0, %rdx");
 }

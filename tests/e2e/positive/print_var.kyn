@@ -1,0 +1,14 @@
+// `str` em variáveis: literal, cópia e atribuição, com código de saída próprio.
+// expect-exit: 9
+// expect-stdout: a
+// expect-stdout: b
+// expect-stdout: b
+fn main() -> i32 {
+    var s: str = "a";
+    print(s);
+    s = "b";
+    print(s);
+    let t = s;
+    print(t);
+    return 9;
+}

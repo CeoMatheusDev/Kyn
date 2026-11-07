@@ -52,6 +52,38 @@ pub const Backend = enum {
     }
 };
 
+/// Pool de literais de string de um programa.
+///
+/// Deduplica por conteúdo: cada texto distinto vira um único rótulo no
+/// artefato (`@.strN` no LLVM IR, `.LstrN` no assembly), não importa quantas
+/// vezes apareça na fonte. O identificador devolvido por `intern` é estável e
+/// específico do backend que o formatar.
+pub const StrPool = struct {
+    arena: std.mem.Allocator,
+    texts: std.ArrayList([]const u8) = .empty,
+
+    pub fn init(arena: std.mem.Allocator) StrPool {
+        return .{ .arena = arena };
+    }
+
+    /// Devolve o índice do texto, inserindo-o se ainda não existir.
+    pub fn intern(self: *StrPool, text: []const u8) !u32 {
+        for (self.texts.items, 0..) |existing, i| {
+            if (std.mem.eql(u8, existing, text)) return @intCast(i);
+        }
+        try self.texts.append(self.arena, text);
+        return @intCast(self.texts.items.len - 1);
+    }
+};
+
+/// Estado compartilhado entre as funções de um programa durante a emissão.
+pub const ProgramState = struct {
+    strs: StrPool,
+    /// Alguma chamada a `print` foi emitida? Controla a constante de quebra de
+    /// linha no rodapé do artefato.
+    used_print: bool = false,
+};
+
 pub const Error = error{
     /// A AST não contém as anotações esperadas da semântica.
     MiscompiledAst,
@@ -71,6 +103,18 @@ pub fn generate(
         .llvm_ir => llvm.emit(arena, program, checked),
         .x86_64_asm => x86_64.emit(arena, program, checked),
     };
+}
+
+test "codegen: pool de strings deduplica por conteúdo" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var pool = StrPool.init(arena.allocator());
+    try std.testing.expectEqual(@as(u32, 0), try pool.intern("kyn"));
+    try std.testing.expectEqual(@as(u32, 1), try pool.intern("bootstrap"));
+    try std.testing.expectEqual(@as(u32, 0), try pool.intern("kyn"));
+    try std.testing.expectEqual(@as(usize, 2), pool.texts.items.len);
+    try std.testing.expectEqualStrings("bootstrap", pool.texts.items[1]);
 }
 
 test "codegen: nomes de backend para CLI" {

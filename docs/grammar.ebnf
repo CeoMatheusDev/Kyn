@@ -16,7 +16,8 @@ integer    = digit, { digit } ;   (* valor convertido para i64 pelo parser *)
 
 (* Literal de string: conteúdo entre aspas duplas, sem escapes e sem quebra de
    linha. O token guarda o texto sem as aspas; um literal aberto vira
-   "string_unterminated" e o parser reporta erro com a posição. *)
+   "string_unterminated" e o parser reporta erro com a posição. É usado como
+   caminho de `import` e como expressão do tipo `str` (argumento de `print`). *)
 string_literal = '"', { any_char - ( '"' | "\n" | "\r" ) }, '"' ;
 
 keyword    = "fn" | "let" | "var" | "return"

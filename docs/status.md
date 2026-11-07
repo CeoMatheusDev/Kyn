@@ -12,15 +12,17 @@ ciclo anterior é que agora existe um pipeline do frontend integrado e
 compiladas para assembly x86-64, montadas, ligadas e executadas com código de
 saída conferido.
 
-Agora também existem **tipos compostos nomeados**: `struct` com campos
-escalares, literais `Nome { campo: valor }`, acesso e atribuição a campo
-(`p.x`), cópia por valor entre variáveis e layout definido e documentado nos dois
-backends. Structs vivem apenas em variáveis locais nesta etapa.
+Agora também existem **tipos compostos nomeados** (`struct` com campos
+escalares, literais, acesso/atribuição a campo, cópia por valor) e **saída de
+texto**: `str` como fatia estática (ponteiro + tamanho) e `print(...)` embutido,
+que escreve o texto seguido de quebra de linha. Isso permite validar
+**conteúdo**, não apenas o código de saída do processo, e a suíte e2e passou a
+conferir stdout (`// expect-stdout:`).
 
 Ainda não existem: `enum`, `impl`/métodos, generics, slices, ponteiros,
 `unsafe`, struct por valor em parâmetros/retorno/argumentos, struct com campo
-struct, strings em expressões (só o literal do `import` é léxico), FFI
-integrada, biblioteca padrão estável nem self-hosting funcional.
+struct, `str` em parâmetro/retorno/campo de struct, comparação ou concatenação
+de `str`, FFI integrada, biblioteca padrão estável nem self-hosting funcional.
 
 ## Evidências por componente
 
@@ -31,17 +33,17 @@ integrada, biblioteca padrão estável nem self-hosting funcional.
 | Lexer | `src/lexer/lexer.zig` | Tokens tipados com span (linha/coluna), palavras-chave (inclui `import` e `struct`), operadores de 2 caracteres, pontuação com `.`, literal de string sem escapes; descarta comentários/espaços | Testes unitários |
 | Spans | `src/span.zig` | Offsets + linha/coluna; sem cópia de texto | Testes unitários |
 | Diagnósticos | `src/diagnostics.zig` | Categoria estável + mensagem + linha/caret + arquivo de origem (`file`) | Testes unitários |
-| AST | `src/ast/ast.zig` | Funções, `struct`/campos, parâmetros, `let`/`var`, atribuição (variável e campo), `return`, `if`/`else`, `while`, blocos, expressões (inclui acesso a campo e literal de struct) | Testes unitários |
+| AST | `src/ast/ast.zig` | Funções, `struct`/campos, parâmetros, `let`/`var`, atribuição (variável e campo), `return`, `if`/`else`, `while`, blocos, expressões (acesso a campo, literal de struct, literal de string), `Call.builtin` para `print` | Testes unitários |
 | Parser | `src/parser/parser.zig` | Programa completo, `import` antes das declarações, `struct`, literais de struct e acesso a campo, precedência e associatividade, erros com span | Testes unitários e negativos |
 | Módulos | `src/driver.zig` | `compilePath` carrega o grafo de imports em pré-ordem, normaliza caminhos, deduplica e achata em um `Program` | Testes com diretório temporário + 3 fixtures e2e executadas + 3 negativas |
-| Semântica | `src/sema/sema.zig` | Escopos aninhados, resolução de nomes, tipos `i32`/`bool`/`void`/struct, campos e literais de struct, mutabilidade, chamadas, slots de pilha, validação de `main` | Testes unitários |
-| Backend LLVM IR | `src/codegen/llvm.zig` | IR textual derivado da AST (aritmética, comparações, `&&`/`||` com `phi`, `if`, `while`, chamadas); structs por substituição escalar (um `alloca` por campo) | Testes estruturais localmente; aceito por `llvm-as` no CI (66/66 módulos) |
-| Backend x86-64 | `src/codegen/x86_64.zig` | Assembly System V sem libc, `_start` + syscall `exit`; struct em slots consecutivos (base + um por campo) | Executado: `as` + `ld` + código de saída |
+| Semântica | `src/sema/sema.zig` | Escopos aninhados, resolução de nomes, tipos `i32`/`bool`/`str`/`void`/struct, campos e literais de struct, `str` com dois slots e `print` embutido, mutabilidade, chamadas, slots de pilha, validação de `main` | Testes unitários |
+| Backend LLVM IR | `src/codegen/llvm.zig` | IR textual derivado da AST (aritmética, comparações, `&&`/`||` com `phi`, `if`, `while`, chamadas); structs por substituição escalar (um `alloca` por campo); `str` em `@.strN` com `declare i64 @write(i32, ptr, i64)` e `print` chamando `write` | Testes estruturais localmente; aceito por `llvm-as` no CI (71/71 módulos) |
+| Backend x86-64 | `src/codegen/x86_64.zig` | Assembly System V sem libc, `_start` + syscall `exit`; struct em slots consecutivos (base + um por campo); `str` em dois slots, texto em `.rodata` e `print` via syscall `write` | Executado: `as` + `ld` + código de saída e stdout conferido |
 | FFI | `src/ffi/ffi.zig` | Experimento isolado de `extern "c" printf` | Não integrado |
 | `unsafe`/`repr(C)` | `src/sema/unsafe.zig` | Política isolada e testada; AST ainda não possui esses nós | Testes unitários do módulo |
 | Self-hosting | `src/kyn/*.kyn`, `src/compiler/*.kyn` | Placeholders; não executados pelo `kync` | Não demonstrado |
 | Biblioteca padrão | `std/core/core.zig`, `std/os/*.zig` | Stubs experimentais; algumas APIs não fazem E/S real | Compilam nos testes da std |
-| Fixtures | `tests/` | 50 `integration/case_N.kyn` + 24 fixtures em `tests/e2e` (inclui `struct_*`, `modules/` e `modules_negative/`) + demais casos de linguagem ainda não suportados | `zig build e2e` (77 casos) |
+| Fixtures | `tests/` | 50 `integration/case_N.kyn` + 36 entradas em `tests/e2e` (16 positivas com `struct_*`/`print_*`, 5 módulos, 12 negativas, 3 módulos negativos) + demais casos de linguagem ainda não suportados | `zig build e2e` (86 casos) |
 
 ## Subconjunto da linguagem aceito hoje
 
@@ -68,41 +70,45 @@ Suportado: `import "caminho";` antes das declarações (arquivos `.kyn` resolvid
 relativos ao arquivo importador, cada um carregado uma vez), `struct Nome { ... }`
 com campos escalares, literais `Nome { campo: valor }` (todos os campos, uma vez
 cada), acesso `p.campo` e atribuição `p.campo = v` em variáveis `var`, cópia de
-struct por valor, `fn`, `let`/`var` com inicializador obrigatório, anotação ou
-inferência de tipo (`i32`, `bool`, `void`), atribuição (somente em `var`),
+struct por valor, literais de string e variáveis `str` (inferidas ou anotadas)
+com cópia e atribuição, `print(s: str)` embutido com saída de texto e quebra de
+linha, `fn`, `let`/`var` com inicializador obrigatório, anotação ou
+inferência de tipo (`i32`, `bool`, `str`, `void`), atribuição (somente em `var`),
 `return`, `if`/`else`/`else if`, `while`, blocos, expressões aritméticas,
 comparações, `&&`/`||` com curto-circuito, unários `-`/`!`, literais inteiros e
 booleanos, chamadas diretas de funções do próprio programa (até 6 argumentos).
 
 Fora do subconjunto (diagnosticado ou rejeitado): `enum`, `impl`/métodos,
 `unsafe`, atributos `#[...]`, struct por valor em parâmetro/retorno/argumento,
-struct com campo de tipo struct, struct vazio, strings em expressões (o lexer
-reconhece o literal, mas não há tipo `str`), `f32`/`f64` e demais tipos, slices
-`[]T`, ponteiros, generics, `Result<T, E>`/`?`, closures, `for`, visibilidade
-(`pub`), imports qualificados/seletivos e pacotes.
+struct com campo de tipo struct, struct vazio, `str` em
+parâmetro/retorno/argumento, campo de struct de tipo `str`, comparação
+(`==`/`!=`), concatenação e formatação de `str`, `f32`/`f64` e demais tipos,
+slices `[]T`, ponteiros, generics, `Result<T, E>`/`?`, closures, `for`,
+visibilidade (`pub`), imports qualificados/seletivos e pacotes.
 
 ## Validação executada neste ciclo
 
 - `zig build` — sucesso.
-- `zig build test` — 139 testes: 132 do compilador (spans, lexer, diagnóstico,
-  ast, parser, sema, unsafe, backends, driver, carregamento multi-arquivo e
-  structs) e 7 da std experimental.
-- `zig build e2e` — 77/77 casos: 12 fixtures comportamentais (3 delas com
-  `struct`), 4 programas multi-arquivo executados (um com struct no módulo),
-  50 fixtures `case_N.kyn` com código de saída `N`, 8 fixtures negativas
-  (3 de struct) e 3 módulos negativos (ciclo, arquivo ausente, símbolo
+- `zig build test` — 169 testes: 162 do compilador (spans, lexer, diagnóstico,
+  ast, parser, sema, unsafe, backends, driver, carregamento multi-arquivo,
+  structs, `str`/`print`, pool de strings e rejeição de variável `void`) e
+  7 da std experimental.
+- `zig build e2e` — 86/86 casos: 16 fixtures comportamentais (3 com `struct`,
+  4 com `print` comparando stdout), 5 programas multi-arquivo executados (com
+  struct no módulo e com `print` no módulo), 50 fixtures `case_N.kyn` com
+  código de saída `N`, 12 fixtures negativas (3 de struct, 3 de `str`/`print`,
+  1 de campo `str`) e 3 módulos negativos (ciclo, arquivo ausente, símbolo
   duplicado) com mensagem esperada.
 - `zig fmt --check build.zig src std` — sem diferenças.
 - `zig build validate-ir` (local, sem LLVM) — avisa e ignora, como documentado
-  no ambiente de desenvolvimento; o mesmo script cobre 66 módulos quando há
+  no ambiente de desenvolvimento; o mesmo script cobre 71 módulos quando há
   `llvm-as`/`clang`.
-- CI (`.github/workflows/ci.yml`, runs `42415765698` no PR e `42415945385` em
-  `main`, 2026-11-07) — job "build, testes e validação de IR" concluído com
-  sucesso: `zig fmt --check`, `zig build test` (139 testes), `zig build e2e`
-  (77 casos) e `zig build validate-ir-strict` (o `llvm-as` instalado no runner
-  aceitou os 66 módulos emitidos, incluindo os multi-arquivo e os de `struct`;
-  o passo estrito falharia se o verificador faltasse ou rejeitasse qualquer
-  módulo).
+- CI (`.github/workflows/ci.yml`) — no ciclo do `struct`, runs `42417725687`
+  (PR #13) e `42417878774` (`main`) verdes com `zig fmt --check`,
+  `zig build test`, `zig build e2e` e `zig build validate-ir-strict`; no ciclo
+  atual, os runs do PR e do merge em `main` ficam registrados no
+  `DEVELOPMENT_STATE.md`. O passo estrito falha se o verificador faltar ou
+  rejeitar qualquer módulo, inclusive os de `str`/`print`.
 
 Não validado: execução em plataformas diferentes de Linux x86-64; desempenho;
 fidelidade do IR a alvos LLVM diferentes de x86-64 (o `target triple` é fixo).

@@ -1,0 +1,5 @@
+// Erro esperado: 'print' espera 'str'.
+fn main() -> i32 {
+    print(1);
+    return 0;
+}

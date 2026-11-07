@@ -106,7 +106,33 @@ Conjunto inicial sugerido:
 | Texto | `str` |
 | Sem valor de retorno | `void` |
 
-Tamanhos, alinhamento, overflow, conversões implícitas e representação de `char` e `str` ainda não são contratos estáveis. Em particular, `str` precisa ter uma representação e um modelo de lifetime definidos.
+**Implementado hoje:** `i32` (32 bits com sinal, overflow de literal
+diagnosticado), `bool` e `void`, além de `str` para literais estáticos.
+
+`str` é, nesta etapa, uma **fatia estática**: ponteiro para bytes constantes +
+tamanho, guardada em dois slots. Ele existe para dar saída de texto ao programa:
+
+```kyn
+fn main() -> i32 {
+    print("kyn");          // escreve "kyn" e uma quebra de linha
+    var s: str = "a";
+    s = "b";
+    let t = s;             // cópia da fatia (ponteiro + tamanho)
+    print(t);              // escreve "b"
+    return 0;
+}
+```
+
+`print` é uma função embutida (`print(expr)` exige exatamente um `str`, devolve
+`void`, escreve o texto e a quebra de linha); o nome é reservado para funções
+declaradas na fonte. Limites atuais, todos diagnosticados: `str` em
+parâmetro/retorno/argumento, campo de struct de tipo `str`, `str` em aritmética,
+condição ou `==`/`!=` (comparar exigiria comparar bytes), concatenação e
+formatação, e literal de string como expressão solta.
+
+Ainda não são contratos estáveis: tamanhos e alinhamento dos demais tipos,
+overflow em tempo de execução, conversões implícitas, representação de `char` e
+o modelo de lifetime de `str` (por enquanto só existem literais estáticos).
 
 ## 6. Estruturas e métodos
 

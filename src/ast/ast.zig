@@ -82,6 +82,9 @@ pub const Expr = struct {
     pub const Kind = union(enum) {
         int_literal: IntLiteral,
         bool_literal: bool,
+        /// Literal de string: bytes entre aspas, sem interpretar escapes.
+        /// O valor é uma fatia estática (ponteiro + tamanho), não um escalar.
+        str_literal: []const u8,
         identifier: []const u8,
         call: Call,
         binary: Binary,
@@ -196,12 +199,20 @@ pub const Expr = struct {
         operand: *Expr,
     };
 
+    /// Funções embutidas reconhecidas pela semântica, sem declaração na fonte.
+    pub const Builtin = enum {
+        print,
+    };
+
     pub const Call = struct {
         callee: []const u8,
         callee_span: Span,
         args: []*Expr,
         /// Índice da função resolvida pela semântica.
         callee_fn: ?u32 = null,
+        /// Preenchido pela semântica quando a chamada é uma função embutida
+        /// (nesse caso `callee_fn` fica nulo).
+        builtin: ?Builtin = null,
     };
 
     pub fn create(arena: std.mem.Allocator, span: Span, kind: Kind) !*Expr {

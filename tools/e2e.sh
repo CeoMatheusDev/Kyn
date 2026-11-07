@@ -2,7 +2,9 @@
 # Validação de ponta a ponta do kync no alvo x86-64 Linux.
 #
 # Para cada caso positivo: .kyn -> assembly -> as -> ld -> executar -> conferir
-# o código de saída. Para cada caso negativo: `kync check` deve falhar (código 1).
+# o código de saída (`// expect-exit: N`) e/ou o texto impresso
+# (`// expect-stdout: ...`, uma diretiva por linha, comparadas na ordem).
+# Para cada caso negativo: `kync check` deve falhar (código 1).
 #
 # Uso: tools/e2e.sh [caminho-do-kync]
 # Requisitos: bash, as (GNU binutils), ld. Sem isso, o script informa e sai com
@@ -67,53 +69,72 @@ build_binary() {
     echo "$bin_file"
 }
 
+# Extrai as linhas de stdout esperadas (`// expect-stdout: ...`) para o arquivo $2.
+extract_stdout() {
+    sed -n 's|^// expect-stdout: *\(.*\)$|\1|p' "$1" > "$2"
+}
+
+# Executa um caso positivo comparando o que foi declarado no cabeçalho:
+# `// expect-exit: N` (código de saída) e `// expect-stdout: ...` (texto).
+run_positive() {
+    local src="$1"
+    local name="$2"
+    local expected_exit has_stdout=0 bin_file actual ok=1 detail="" report=""
+
+    expected_exit="$(sed -n 's|^// expect-exit: \([0-9]\{1,3\}\).*|\1|p' "$src" | head -1)"
+    if grep -q '^// expect-stdout:' "$src"; then has_stdout=1; fi
+    total=$((total + 1))
+
+    if [ -z "$expected_exit" ] && [ "$has_stdout" -eq 0 ]; then
+        report_fail "$name" "sem cabeçalho '// expect-exit: N' nem '// expect-stdout:'"
+        return
+    fi
+
+    if ! bin_file="$(build_binary "$src" "$name")"; then
+        failed=$((failed + 1))
+        return
+    fi
+
+    "$bin_file" >"$WORK/$name.stdout"
+    actual=$?
+
+    if [ -n "$expected_exit" ]; then
+        report="saída=$actual"
+        if [ "$actual" -ne "$expected_exit" ]; then
+            ok=0
+            detail="saída $actual, esperado $expected_exit"
+        fi
+    fi
+
+    if [ "$has_stdout" -eq 1 ]; then
+        extract_stdout "$src" "$WORK/$name.expected"
+        report="${report:+$report }stdout=$(wc -l < "$WORK/$name.expected" | tr -d ' ')l"
+        if ! diff -u "$WORK/$name.expected" "$WORK/$name.stdout" >"$WORK/$name.diff"; then
+            ok=0
+            detail="${detail:+$detail; }stdout diferente do esperado"
+        fi
+    fi
+
+    if [ "$ok" -eq 1 ]; then
+        passed=$((passed + 1))
+        printf '  ok     %-18s %s\n' "$name" "$report"
+    else
+        report_fail "$name" "$detail"
+        [ -f "$WORK/$name.diff" ] && head -12 "$WORK/$name.diff" | sed 's/^/         /'
+    fi
+}
+
 echo "e2e: casos positivos (assembly -> binário -> execução)"
 
 for src in "$ROOT"/tests/e2e/positive/*.kyn; do
-    name="$(basename "$src" .kyn)"
-    expected="$(sed -n 's/^\/\/ expect-exit: \([0-9]\{1,3\}\).*/\1/p' "$src" | head -1)"
-    total=$((total + 1))
-
-    if [ -z "$expected" ]; then
-        report_fail "$name" "sem cabeçalho '// expect-exit: N'"
-        continue
-    fi
-
-    bin_file="$(build_binary "$src" "$name")" || { failed=$((failed + 1)); continue; }
-
-    "$bin_file"
-    actual=$?
-    if [ "$actual" -eq "$expected" ]; then
-        passed=$((passed + 1))
-        printf '  ok     %-18s saída=%s\n' "$name" "$actual"
-    else
-        report_fail "$name" "saída $actual, esperado $expected"
-    fi
+    run_positive "$src" "$(basename "$src" .kyn)"
 done
 
 echo "e2e: módulos importados (tests/e2e/modules/<caso>/main.kyn -> saída esperada)"
 
 for src in "$ROOT"/tests/e2e/modules/*/main.kyn; do
     [ -e "$src" ] || continue
-    name="$(basename "$(dirname "$src")")"
-    expected="$(sed -n 's/^\/\/ expect-exit: \([0-9]\{1,3\}\).*/\1/p' "$src" | head -1)"
-    total=$((total + 1))
-
-    if [ -z "$expected" ]; then
-        report_fail "$name" "sem cabeçalho '// expect-exit: N'"
-        continue
-    fi
-
-    bin_file="$(build_binary "$src" "mod_$name")" || { failed=$((failed + 1)); continue; }
-
-    "$bin_file"
-    actual=$?
-    if [ "$actual" -eq "$expected" ]; then
-        passed=$((passed + 1))
-        printf '  ok     %-18s saída=%s\n' "$name" "$actual"
-    else
-        report_fail "$name" "saída $actual, esperado $expected"
-    fi
+    run_positive "$src" "mod_$(basename "$(dirname "$src")")"
 done
 
 echo "e2e: fixtures de integração (tests/integration/case_N.kyn -> saída N)"
