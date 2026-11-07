@@ -11,7 +11,11 @@
 parâmetros/retornos) foi integrado pelo PR #19 como `9ec07be`; CI verde nos
 runs `42425605484` (PR) e `42425757025` (`main`). O registro da integração
 (PR #20, docs) foi mesclado como `2a68d9a`, com CI verde nos runs
-`42425944808` (PR) e `42426099894` (`main`); `main` é a referência atual.
+`42425944808` (PR) e `42426099894` (`main`). O PR #21 (último registro de
+rastreabilidade) foi mesclado como `da92f44`, com CI verde no run
+`42426443691`; `main` é a referência atual — conferir com
+`gh run list --branch main` antes de retomar, porque o merge deste próprio
+registro é validado pelo CI de `main`, não por um run citado aqui.
 **Versão do projeto:** `0.3.6-alpha.1`
 **Última validação:** 2026-11-07 — local (Zig 0.17.0 + GNU `as`/`ld`, Linux
 x86-64): `zig build`, `zig build test` (193 testes), `zig build e2e` (97/97,
