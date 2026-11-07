@@ -76,8 +76,8 @@ slices `[]T`, ponteiros, generics, `Result<T, E>`/`?`, closures, `for`.
   `case_N.kyn` com código de saída `N`, 5 fixtures negativas com código `1`.
 - `zig fmt --check build.zig src std` — sem diferenças.
 - `zig build validate-ir` (local, sem LLVM) — avisa e ignora, como documentado.
-- CI (`.github/workflows/ci.yml`, run `42413779278` em 2026-11-07) — job
-  "build, testes e validação de IR" concluído com sucesso em 1m50s:
+- CI (`.github/workflows/ci.yml`, run `42414049577` em 2026-11-07) — job
+  "build, testes e validação de IR" concluído com sucesso em 2m05s:
   `zig fmt --check`, `zig build test`, `zig build e2e` e
   `zig build validate-ir-strict` (o `llvm-as` instalado no runner aceitou os 59
   módulos emitidos; o passo estrito falharia se o verificador faltasse ou

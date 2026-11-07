@@ -4,7 +4,8 @@
 **Branch ativa:** `arena/599599bc-kyn` (a partir de `5217796375ee4a6dbcd83036a3b3c7d4afee3eff` de `main`)
 **Versão do projeto:** `0.3.1-alpha.1`
 **Última validação:** 2026-11-07 — local (Zig 0.17.0 + GNU as/ld, Debian 12 /
-x86-64) e CI (run `42413779278`, ubuntu-24.04, 1m50s, verde)
+x86-64) e CI (run `42414049577`, ubuntu-24.04, 2m05s, verde, com
+`validate-ir-strict`)
 **Estado do working tree:** verificar com `git status` antes de agir
 
 ---
@@ -81,7 +82,7 @@ strings, `f32`/`f64`, slices, ponteiros, generics, `Result`/`?`, closures, `for`
   `--require-tool` (passo estrito) — sai 1, como esperado.
 - Script de validação testado com stubs de `llvm-as`: aceitação (59/59),
   rejeição (59 falhas, exit 1) e descoberta de `llvm-as-18`.
-- **CI real (GitHub Actions, run `42413779278`)**: verde em 1m50s, incluindo
+- **CI real (GitHub Actions, run `42414049577`)**: verde em 2m05s, incluindo
   `zig build test`, `zig build e2e` e `zig build validate-ir-strict` (o
   `llvm-as` do runner aceitou o IR das 59 fixtures; o passo estrito falharia se
   o verificador faltasse ou rejeitasse algum módulo).
@@ -178,7 +179,7 @@ início do self-hosting em Kyn.
 |---|---|---|
 | Anterior | Análise do repositório; declarado bloqueio de toolchain (Zig 0.17.0 "indisponível") | Não (nenhum build/teste) |
 | Ciclo 1 (2026-11-07) | Toolchain obtida via PyPI; `build.zig`+`.zon`; lexer/AST/parser/semântica reescritos com spans e diagnósticos; backends LLVM IR e x86-64; CLI `kync`; driver; 96 testes unitários; suíte e2e com 64 casos; documentação reconciliada; testes antigos consolidados. Integrado via PR #7 (`5217796`). | Sim: `zig build`, `zig build test`, `zig build e2e`, `zig fmt --check`; retestado após o merge |
-| Ciclo 2 — atual (2026-11-07) | CI no GitHub Actions (venv Python + wheel PyPI da toolchain; LLVM instalado no runner); `tools/validate-ir.sh` validando o IR de 59 fixtures com `llvm-as`, em modo estrito; passos `zig build validate-ir` e `validate-ir-strict`; versão `0.3.1-alpha.1`; docs atualizadas com a evidência do run | Sim: run `42413779278` verde (fmt + 96 testes + 64 e2e + IR estrito); suíte local reproduzida do zero antes e depois |
+| Ciclo 2 — atual (2026-11-07) | CI no GitHub Actions (venv Python + wheel PyPI da toolchain; LLVM instalado no runner); `tools/validate-ir.sh` validando o IR de 59 fixtures com `llvm-as`, em modo estrito; passos `zig build validate-ir` e `validate-ir-strict`; versão `0.3.1-alpha.1`; docs atualizadas com a evidência do run | Sim: runs `42413779278` e `42414049577` verdes (fmt + 96 testes + 64 e2e + IR estrito); suíte local reproduzida do zero antes e depois |
 
 ---
 

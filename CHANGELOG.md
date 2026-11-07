@@ -17,7 +17,8 @@ Integração contínua e validação do backend LLVM IR por ferramenta real.
 - **CI:** adicionado `.github/workflows/ci.yml` (ubuntu-24.04) que instala Zig
   0.17.0 a partir do wheel oficial do PyPI, instala LLVM e executa
   `zig fmt --check`, `zig build test`, `zig build e2e` e
-  `zig build validate-ir-strict`. Primeira execução verde: run `42413779278`.
+  `zig build validate-ir-strict`. Execuções verdes: `42413779278` (primeira)
+  e `42414049577` (com validação estrita e `actions/checkout@v7`).
 - **Validação de IR:** novo `tools/validate-ir.sh`, que roda `llvm-as`
   (PATH, sufixo de versão ou `/usr/lib/llvm-*/bin`) ou `clang -x ir` sobre o IR
   de todas as fixtures suportadas (59 módulos). Sem LLVM, a variante leniente
