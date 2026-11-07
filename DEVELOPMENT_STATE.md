@@ -2,6 +2,9 @@
 
 **Mantido por:** agente de continuidade (Arena)
 **Branch ativa:** `arena/599599bc-kyn` (a partir de `5217796375ee4a6dbcd83036a3b3c7d4afee3eff` de `main`)
+**Integração:** PR #8 mesclado em `main` como `837d4edb1fa64cf48ba7efe2d30735b087d92945`
+(2026-11-07); CI em `main` verde (run `42414408475`) e suíte local retestada
+após o merge.
 **Versão do projeto:** `0.3.1-alpha.1`
 **Última validação:** 2026-11-07 — local (Zig 0.17.0 + GNU as/ld, Debian 12 /
 x86-64) e CI (run `42414049577`, ubuntu-24.04, 2m05s, verde, com
@@ -179,10 +182,12 @@ início do self-hosting em Kyn.
 |---|---|---|
 | Anterior | Análise do repositório; declarado bloqueio de toolchain (Zig 0.17.0 "indisponível") | Não (nenhum build/teste) |
 | Ciclo 1 (2026-11-07) | Toolchain obtida via PyPI; `build.zig`+`.zon`; lexer/AST/parser/semântica reescritos com spans e diagnósticos; backends LLVM IR e x86-64; CLI `kync`; driver; 96 testes unitários; suíte e2e com 64 casos; documentação reconciliada; testes antigos consolidados. Integrado via PR #7 (`5217796`). | Sim: `zig build`, `zig build test`, `zig build e2e`, `zig fmt --check`; retestado após o merge |
-| Ciclo 2 — atual (2026-11-07) | CI no GitHub Actions (venv Python + wheel PyPI da toolchain; LLVM instalado no runner); `tools/validate-ir.sh` validando o IR de 59 fixtures com `llvm-as`, em modo estrito; passos `zig build validate-ir` e `validate-ir-strict`; versão `0.3.1-alpha.1`; docs atualizadas com a evidência do run | Sim: runs `42413779278` e `42414049577` verdes (fmt + 96 testes + 64 e2e + IR estrito); suíte local reproduzida do zero antes e depois |
+| Ciclo 2 (2026-11-07) | CI no GitHub Actions (venv Python + wheel PyPI da toolchain; LLVM instalado no runner); `tools/validate-ir.sh` validando o IR de 59 fixtures com `llvm-as`, em modo estrito; passos `zig build validate-ir` e `validate-ir-strict`; versão `0.3.1-alpha.1`; docs atualizadas com a evidência do run. Integrado via PR #8 (`837d4ed`). | Sim: runs `42413779278`, `42414049577` e `42414408475` (main) verdes: fmt + 96 testes + 64 e2e + IR estrito; suíte local reproduzida do zero antes e depois do merge |
 
 ---
 
 **Regra de retomada:** reinstalar a toolchain (§1), rodar `zig build test` e
-`zig build e2e`, conferir `git status`, e só então seguir para §5. Não repetir
-etapas já validadas nem presumir resultados sem executar os comandos.
+`zig build e2e` (e `zig build validate-ir` se houver LLVM), conferir
+`git status` e o último CI em `main` (`gh run list --branch main`), e só então
+seguir para §5. Não repetir etapas já validadas nem presumir resultados sem
+executar os comandos.
