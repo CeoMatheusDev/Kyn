@@ -44,6 +44,9 @@ Structs com valor: declaração, literais, campos e layout nos dois backends.
   `docs/status.md`, `docs/development.md`, `docs/language_reference.md`,
   `README.md`, `ROADMAP.md` e `DEVELOPMENT_STATE.md` atualizados.
 - **Versão:** `0.3.3-alpha.1` (derivada de `build.zig.zon`).
+- **Integração:** PR #13 mesclado em `main` como `4234c07`; CI verde nos runs
+  `42417725687` (PR) e `42417878774` (`main`), incluindo
+  `zig build validate-ir-strict` com 66 módulos aceitos por `llvm-as`.
 
 ## [v0.3.2-alpha.1] — 2026-11-07
 

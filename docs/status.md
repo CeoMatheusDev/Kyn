@@ -96,8 +96,8 @@ reconhece o literal, mas não há tipo `str`), `f32`/`f64` e demais tipos, slice
 - `zig build validate-ir` (local, sem LLVM) — avisa e ignora, como documentado
   no ambiente de desenvolvimento; o mesmo script cobre 66 módulos quando há
   `llvm-as`/`clang`.
-- CI (`.github/workflows/ci.yml`, runs `42415765698` no PR e `42415945385` em
-  `main`, 2026-11-07) — job "build, testes e validação de IR" concluído com
+- CI (`.github/workflows/ci.yml`, runs `42417725687` no PR #13 e `42417878774`
+  em `main`, 2026-11-07) — job "build, testes e validação de IR" concluído com
   sucesso: `zig fmt --check`, `zig build test` (139 testes), `zig build e2e`
   (77 casos) e `zig build validate-ir-strict` (o `llvm-as` instalado no runner
   aceitou os 66 módulos emitidos, incluindo os multi-arquivo e os de `struct`;
