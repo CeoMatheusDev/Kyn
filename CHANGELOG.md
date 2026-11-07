@@ -45,6 +45,11 @@ Módulos: `import` com caminhos relativos e compilação multi-arquivo.
   literal de string; `docs/status.md`, `docs/development.md`,
   `docs/architecture.md`, `README.md`, `ROADMAP.md` e `DEVELOPMENT_STATE.md`
   atualizados com o estado verificado.
+- **Build:** `kyn.version` passa a vir de `build.zig.zon` via opções de build
+  (fim da duplicação da versão em `src/root.zig`).
+- **Integração:** PR #10 mesclado em `main` como `1c149dd`; CI verde nos runs
+  `42415765698` (PR) e `42415945385` (`main`), incluindo
+  `zig build validate-ir-strict` com 62 módulos aceitos por `llvm-as`.
 
 ## [v0.3.1-alpha.1] — 2026-11-07
 

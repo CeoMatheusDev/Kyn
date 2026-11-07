@@ -91,12 +91,12 @@ ponteiros, generics, `Result<T, E>`/`?`, closures, `for`, visibilidade
 - `zig build validate-ir` (local, sem LLVM) — avisa e ignora, como documentado
   no ambiente de desenvolvimento; o mesmo script cobre 62 módulos quando há
   `llvm-as`/`clang`.
-- CI (`.github/workflows/ci.yml`, run `42414049577` em 2026-11-07) — job
-  "build, testes e validação de IR" concluído com sucesso em 2m05s:
-  `zig fmt --check`, `zig build test`, `zig build e2e` e
-  `zig build validate-ir-strict` (o `llvm-as` instalado no runner aceitou os 59
-  módulos emitidos; o passo estrito falharia se o verificador faltasse ou
-  rejeitasse qualquer módulo).
+- CI (`.github/workflows/ci.yml`, runs `42415765698` no PR e `42415945385` em
+  `main`, 2026-11-07) — job "build, testes e validação de IR" concluído com
+  sucesso: `zig fmt --check`, `zig build test` (115 testes), `zig build e2e`
+  (70 casos) e `zig build validate-ir-strict` (o `llvm-as` instalado no runner
+  aceitou os 62 módulos emitidos, incluindo os multi-arquivo; o passo estrito
+  falharia se o verificador faltasse ou rejeitasse qualquer módulo).
 
 Não validado: execução em plataformas diferentes de Linux x86-64; desempenho;
 fidelidade do IR a alvos LLVM diferentes de x86-64 (o `target triple` é fixo).
