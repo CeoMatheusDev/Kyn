@@ -9,7 +9,9 @@
 (docs) como `3be9df0`; CI verde nos runs `42423945656`/`42424327653` (PRs) e
 `42424147963`/`42424509215` (`main`). O ciclo atual (`str` por valor em
 parâmetros/retornos) foi integrado pelo PR #19 como `9ec07be`; CI verde nos
-runs `42425605484` (PR) e `42425757025` (`main`).
+runs `42425605484` (PR) e `42425757025` (`main`). O registro da integração
+(PR #20, docs) foi mesclado como `2a68d9a`, com CI verde nos runs
+`42425944808` (PR) e `42426099894` (`main`); `main` é a referência atual.
 **Versão do projeto:** `0.3.6-alpha.1`
 **Última validação:** 2026-11-07 — local (Zig 0.17.0 + GNU `as`/`ld`, Linux
 x86-64): `zig build`, `zig build test` (193 testes), `zig build e2e` (97/97,
