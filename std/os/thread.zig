@@ -8,3 +8,13 @@ pub const Thread = struct {
         _ = self;
     }
 };
+
+test "thread: spawn/join compilam e não criam thread real" {
+    const std = @import("std");
+    const Runner = struct {
+        fn run() void {}
+    };
+    var t = try Thread.spawn(&Runner.run);
+    t.join();
+    _ = std;
+}

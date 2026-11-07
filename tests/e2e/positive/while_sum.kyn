@@ -1,0 +1,11 @@
+// expect-exit: 55
+// Soma 1..10 em laço com variável mutável e comparação.
+fn main() -> i32 {
+    var total: i32 = 0;
+    var i: i32 = 1;
+    while i <= 10 {
+        total = total + i;
+        i = i + 1;
+    }
+    return total;
+}

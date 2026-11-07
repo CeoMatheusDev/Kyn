@@ -14,3 +14,10 @@ pub const Socket = struct {
         _ = self;
     }
 };
+
+test "net: connect/send/close compilam e não abrem socket real" {
+    const std = @import("std");
+    var s = try Socket.connect("localhost", 80);
+    try std.testing.expectEqual(@as(usize, 0), try s.send("ping"));
+    s.close();
+}
