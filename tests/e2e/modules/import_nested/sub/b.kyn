@@ -1,0 +1,4 @@
+// Módulo no subdiretório: multiplica por dez.
+fn dez(x: i32) -> i32 {
+    return x * 10;
+}

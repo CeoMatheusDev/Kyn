@@ -20,13 +20,27 @@ pub const TypeName = struct {
 };
 
 pub const Program = struct {
+    /// Importações declaradas no arquivo, na ordem da fonte. O loader de
+    /// módulos as resolve; o programa achatado entregue à semântica/backends
+    /// tem `imports` vazio.
+    imports: []Import = &.{},
     functions: []*Function,
+    span: Span,
+};
+
+/// `import "caminho";` — caminho relativo ao arquivo que importa.
+pub const Import = struct {
+    path: []const u8,
+    path_span: Span,
     span: Span,
 };
 
 pub const Function = struct {
     name: []const u8,
     name_span: Span,
+    /// Arquivo-fonte de origem (índice em `driver.SourceFile`), atribuído pelo
+    /// loader de módulos; 0 em compilações de buffer único.
+    file_id: u32 = 0,
     params: []Param,
     /// `null` quando não há anotação de retorno (`fn main() { ... }`).
     return_type: ?TypeName,

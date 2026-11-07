@@ -1,10 +1,14 @@
 (* Kyn — gramática sintática do subconjunto implementado.
    Este arquivo descreve exatamente o que o parser em src/parser/parser.zig
-   aceita hoje. Construções da visão de linguagem (import, struct, enum, impl,
-   generics, slices, ponteiros, unsafe, atributos) ainda NÃO fazem parte deste
+   aceita hoje. Construções da visão de linguagem (struct, enum, impl, generics,
+   slices, ponteiros, unsafe, atributos) ainda NÃO fazem parte deste
    subconjunto; ver docs/language_reference.md e docs/status.md. *)
 
-program          = { function_decl }, EOF ;
+(* Importações vêm antes de qualquer função; o caminho é literal de string e é
+   resolvido em relação ao diretório do arquivo que importa. *)
+program          = { import_decl }, { function_decl }, EOF ;
+
+import_decl      = "import", string_literal, ";" ;
 
 function_decl    = "fn", identifier, "(", [ parameters ], ")",
                    [ "->", type_expr ], block ;

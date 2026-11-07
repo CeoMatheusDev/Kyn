@@ -88,6 +88,9 @@ pub const max_params: usize = 6;
 pub const Options = struct {
     /// Exige que o programa defina `fn main() -> i32` ou `fn main() -> void`.
     require_main: bool = true,
+    /// Caminho de cada arquivo, indexado por `ast.Function.file_id`. Usado nas
+    /// mensagens para desambiguar declarações vindas de módulos importados.
+    file_names: []const []const u8 = &.{},
 };
 
 pub const Checker = struct {
@@ -113,6 +116,7 @@ pub const Checker = struct {
         // Passo 1: registrar assinaturas (permite chamadas antes da declaração
         // e recursão).
         for (program.functions) |func| {
+            self.diags.current_file = func.file_id;
             try self.registerFunction(func);
         }
 
@@ -122,8 +126,10 @@ pub const Checker = struct {
 
         // Passo 2: verificar corpos.
         for (program.functions, 0..) |func, i| {
+            self.diags.current_file = func.file_id;
             try self.checkFunctionBody(func, @intCast(i));
         }
+        self.diags.current_file = 0;
 
         return .{
             .functions = try self.functions.toOwnedSlice(self.arena),
@@ -131,15 +137,32 @@ pub const Checker = struct {
         };
     }
 
+    /// Caminho do arquivo de um símbolo, quando conhecido e diferente do
+    /// arquivo atual (evita ruído em programas de um só arquivo).
+    fn fileName(self: *const Checker, file_id: u32) ?[]const u8 {
+        if (file_id == self.diags.current_file) return null;
+        if (file_id >= self.options.file_names.len) return null;
+        return self.options.file_names[file_id];
+    }
+
     fn registerFunction(self: *Checker, func: *const ast.Function) std.mem.Allocator.Error!void {
         for (self.functions.items) |existing| {
             if (std.mem.eql(u8, existing.decl.name, func.name)) {
-                try self.diags.add(
-                    .duplicate_declaration,
-                    func.name_span,
-                    "função '{s}' já declarada (primeira declaração na linha {d})",
-                    .{ func.name, existing.decl.name_span.line },
-                );
+                if (self.fileName(existing.decl.file_id)) |path| {
+                    try self.diags.add(
+                        .duplicate_declaration,
+                        func.name_span,
+                        "função '{s}' já declarada em '{s}' (linha {d})",
+                        .{ func.name, path, existing.decl.name_span.line },
+                    );
+                } else {
+                    try self.diags.add(
+                        .duplicate_declaration,
+                        func.name_span,
+                        "função '{s}' já declarada (primeira declaração na linha {d})",
+                        .{ func.name, existing.decl.name_span.line },
+                    );
+                }
                 break;
             }
         }
@@ -180,6 +203,7 @@ pub const Checker = struct {
                 break;
             }
         }
+        self.diags.current_file = if (main_fn) |main| main.file_id else 0;
 
         const main = main_fn orelse {
             try self.diags.add(

@@ -1,0 +1,6 @@
+// Erro esperado: ciclo de importação.
+import "b.kyn";
+
+fn main() -> i32 {
+    return 0;
+}

@@ -49,7 +49,7 @@ zig build run -- --help
 ## CLI `kync`
 
 ```text
-kync <comando> [opções] <arquivo.kyn>
+kync <comando> [opções] <arquivo.kyn>      # carrega o arquivo e seus imports
 
 check <arquivo>   valida sintaxe e semântica, sem gerar código
 emit <arquivo>    emite o artefato do backend selecionado
@@ -71,9 +71,15 @@ Códigos de saída (contrato observado nos testes de fumaça manuais):
 | `2` | uso inválido (comando/opção/argumento) |
 | `3` | falha de E/S (ler fonte ou gravar artefato) |
 
+Importações: `import "caminho.kyn";` aparece antes das funções e o caminho é
+resolvido em relação ao diretório do arquivo importador. Cada arquivo é lido uma
+única vez (importações em diamante são mescladas), ciclos e arquivos ausentes
+viram diagnóstico (código `1`) e os diagnósticos citam o arquivo de origem.
+
 Exemplos:
 
 ```sh
+zig-out/bin/kync check tests/e2e/modules/import_nested/main.kyn
 zig-out/bin/kync check tests/e2e/positive/fib.kyn
 zig-out/bin/kync emit --llvm tests/e2e/positive/fib.kyn -o /tmp/fib.ll
 zig-out/bin/kync emit --asm  tests/e2e/positive/fib.kyn -o /tmp/fib.s
@@ -87,12 +93,17 @@ O projeto só declara uma etapa concluída quando existe teste executável:
 1. **Testes unitários** (`zig build test`): lexer, spans, diagnósticos, AST,
    parser, semântica, backends e driver, além dos testes da std experimental.
 2. **Ponta a ponta** (`zig build e2e`): cada fixture positiva vira binário
-   nativo e o código de saída é comparado com `// expect-exit: N`; as fixtures
-   de `tests/integration/case_N.kyn` devem terminar com código `N`; cada fixture
-   negativa deve falhar com código `1` e mensagem `erro:`.
+   nativo e o código de saída é comparado com `// expect-exit: N`; o mesmo vale
+   para programas multi-arquivo em `tests/e2e/modules/<caso>/main.kyn`; as
+   fixtures de `tests/integration/case_N.kyn` devem terminar com código `N`;
+   cada fixture negativa deve falhar com código `1` e mensagem `erro:`; em
+   `tests/e2e/modules_negative/<caso>/` o arquivo opcional `expect-error.txt`
+   exige um trecho específico na mensagem (ciclo, arquivo ausente, símbolo
+   duplicado).
 
 3. **LLVM IR** (`zig build validate-ir-strict`): roda `llvm-as` (ou `clang`)
-   sobre o IR de todas as fixtures suportadas. Não há LLVM instalado no ambiente
+   sobre o IR de todas as fixtures suportadas, incluindo os programas
+   multi-arquivo (62 módulos). Não há LLVM instalado no ambiente
    de desenvolvimento padrão, então localmente o passo `validate-ir` apenas
    avisa; o CI instala LLVM e usa a variante **estrita**, que falha se o
    verificador estiver ausente ou rejeitar qualquer módulo.
@@ -110,8 +121,8 @@ manualmente. Em `ubuntu-24.04` o workflow:
 2. instala Zig 0.17.0 a partir do wheel oficial do PyPI (o mesmo caminho
    descrito acima) e o expõe no `PATH`;
 3. executa `zig fmt --check build.zig src std`;
-4. executa `zig build test` (96 testes) e `zig build e2e` (64 casos);
-5. executa `zig build validate-ir-strict` (IR de 59 fixtures aceito por
+4. executa `zig build test` (115 testes) e `zig build e2e` (70 casos);
+5. executa `zig build validate-ir-strict` (IR de 62 módulos aceito por
    `llvm-as`).
 
 A ausência de LLVM no CI **falha** o build, por isso a validação do IR não pode
@@ -125,7 +136,7 @@ build.zig.zon          # versão mínima do Zig, versão do projeto
 src/
   root.zig             # API pública (módulo "kyn")
   main.zig             # CLI kync
-  driver.zig           # pipeline lexer -> parser -> sema -> backend
+  driver.zig           # pipeline lexer -> parser -> sema -> backend + loader de imports
   span.zig             # offsets/linha/coluna
   diagnostics.zig      # diagnósticos e renderização
   lexer/lexer.zig      # tokens com spans

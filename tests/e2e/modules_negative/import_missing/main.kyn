@@ -1,0 +1,6 @@
+// Erro esperado: arquivo importado não existe.
+import "nao_existe.kyn";
+
+fn main() -> i32 {
+    return 0;
+}

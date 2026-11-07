@@ -4,12 +4,18 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Versão do projeto derivada de `build.zig.zon`, para que a CLI
+    // (`kync --version`) e o changelog tenham uma única fonte de verdade.
+    const build_options = b.addOptions();
+    build_options.addOption([]const u8, "version", @import("build.zig.zon").version);
+
     // Biblioteca do compilador (lexer -> parser/AST -> sema -> backends).
     const kyn = b.addModule("kyn", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
+    kyn.addOptions("build_options", build_options);
 
     // CLI `kync`.
     const exe = b.addExecutable(.{

@@ -44,8 +44,6 @@ const exit_compile_error: u8 = 1;
 const exit_usage: u8 = 2;
 const exit_io: u8 = 3;
 
-const max_source_bytes: usize = 16 * 1024 * 1024;
-
 const Cli = struct {
     arena: std.mem.Allocator,
     io: std.Io,
@@ -158,24 +156,25 @@ pub fn main(init: std.process.Init) !void {
         std.process.exit(exit_usage);
     }
 
-    const source = std.Io.Dir.cwd().readFileAlloc(init.io, path, arena, .limited(max_source_bytes)) catch |err| {
-        cli.printStderr("erro: não foi possível ler '{s}': {s}\n", .{ path, @errorName(err) });
-        std.process.exit(exit_io);
-    };
-
-    var result = driver.compile(arena, source, .{
+    var result = driver.compilePath(init.gpa, init.io, std.Io.Dir.cwd(), path, .{
         .action = action,
         .backend = backend,
         .require_main = require_main,
-    }) catch |err| {
-        cli.printStderr("erro interno: {s}\n", .{@errorName(err)});
-        std.process.exit(exit_io);
+    }) catch |err| switch (err) {
+        error.OutOfMemory => {
+            cli.writeStderr("erro: memória insuficiente\n");
+            std.process.exit(exit_io);
+        },
+        else => {
+            cli.printStderr("erro: não foi possível ler '{s}': {s}\n", .{ path, @errorName(err) });
+            std.process.exit(exit_io);
+        },
     };
     defer result.deinit();
 
     if (result.diags.count() > 0) {
         var writer = std.Io.File.stderr().writerStreaming(init.io, &.{});
-        driver.renderDiagnostics(&writer.interface, path, source, result.diags) catch {};
+        driver.renderDiagnostics(&writer.interface, result.sources, result.diags) catch {};
         writer.interface.flush() catch {};
         std.process.exit(exit_compile_error);
     }

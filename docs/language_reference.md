@@ -29,15 +29,35 @@ O ponto de entrada `main`, a assinatura aceita e a convenção de retorno ainda 
 
 ## 2. Importações e módulos
 
-A proposta utiliza importações explícitas:
+**Implementado hoje:** a importação é um caminho de arquivo relativo ao arquivo
+que a declara, colocada antes das funções:
 
 ```kyn
-import std.io;
-import std.memory;
-import app.math.vector;
+// main.kyn
+import "util/format.kyn";
+import "lib/math.kyn";
+
+fn main() -> i32 {
+    return dobro(21);
+}
 ```
 
-A resolução de caminhos, visibilidade, aliases, importações cíclicas e empacotamento de módulos ainda estão em aberto.
+```kyn
+// lib/math.kyn
+fn dobro(x: i32) -> i32 {
+    return x * 2;
+}
+```
+
+Regras observadas: o caminho é um literal de string entre aspas; cada arquivo é
+carregado uma única vez; ciclos, arquivos ausentes e funções declaradas em mais
+de um arquivo produzem diagnóstico com `arquivo:linha:coluna` do arquivo de
+origem. Os símbolos de todos os módulos são reunidos em um único escopo global
+(*flattening*), portanto nomes de função devem ser únicos no programa.
+
+**Visão de design (não implementada):** importações por pacote (`import
+std.io;`), visibilidade (`pub`), aliases, imports seletivos e
+empacotamento/manifesto de módulos.
 
 ## 3. Funções
 

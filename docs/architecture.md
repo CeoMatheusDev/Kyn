@@ -51,6 +51,13 @@ backend; `Result.deinit()` libera tudo.
 - **Semântica**: produz `Checked` com assinaturas de funções, tipos de retorno,
   contagem de slots e uma tabela plana de símbolos. Erros não abortam a análise:
   são acumulados e o tipo `unknown` interrompe cascatas de diagnóstico.
+- **Módulos**: `driver.compilePath` carrega o arquivo raiz e resolve cada
+  `import` com `std.fs.path.resolveAlloc` a partir do diretório do arquivo
+  importador; caminhos normalizados funcionam como chave de deduplicação. O
+  grafo é percorrido em pré-ordem (raiz primeiro) e achatado em um único
+  `ast.Program` — cada `ast.Function` carrega `file_id`, indexando
+  `Result.sources` para atribuir diagnósticos ao arquivo certo. Ciclos,
+  arquivos ausentes e nomes repetidos são diagnosticados antes do backend.
 - **Backends**: recebem `*ast.Program` + `*sema.Checked` e devolvem texto
   alocado na arena. `codegen.Error` distingue AST inconsistente
   (`MiscompiledAst`), subconjunto não suportado (`UnsupportedNode`) e tipo sem
@@ -68,6 +75,14 @@ caracteres e pontuação. Mantém slices da entrada; nenhuma alocação por toke
 Constrói o programa completo com precedência e associatividade documentadas em
 `docs/syntax.ebnf`. Erros sintáticos registram diagnóstico com span e retornam
 `error.ParseError`.
+
+### Loader de módulos — `src/driver.zig`
+
+`compilePath` mantém a pilha de DFS (detecção de ciclos), o conjunto de
+caminhos já carregados e a lista de módulos na ordem de carregamento. Cada
+módulo é lexado e parseado com o `current_file` correto nos diagnósticos; se
+algum arquivo falhar, a compilação para com os diagnósticos já atribuídos. Não
+há estado global: toda a memória vem da arena do `Result`.
 
 ### Semântica — `src/sema/sema.zig`
 
@@ -110,7 +125,8 @@ APIs.
 
 1. Escolher o backend oficial de longo prazo (LLVM IR validado por ferramenta
    ou backend nativo próprio) e definir critérios de aceitação para ele.
-2. Definir contrato de módulos/imports e resolução de caminhos.
+2. Ampliar o contrato de módulos (visibilidade, imports qualificados, pacotes);
+   hoje a resolução é por caminho relativo e os símbolos são achatados.
 3. Adicionar à AST os nós hoje ausentes (`struct`, `enum`, `impl`, `unsafe`,
    atributos) e conectar `src/sema/unsafe.zig`.
 4. Definir o modelo de memória executável (ownership, lifetimes, slices) antes

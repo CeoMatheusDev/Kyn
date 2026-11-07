@@ -24,6 +24,9 @@ pub const Kind = enum {
     invalid_call,
     missing_main,
     invalid_main,
+    // módulos
+    import_not_found,
+    import_cycle,
     // infraestrutura
     unsupported,
     internal,
@@ -34,12 +37,17 @@ pub const Diagnostic = struct {
     span: Span,
     message: []const u8,
     severity: Severity = .@"error",
+    /// Índice do arquivo de origem (ver `driver.Result.sources`).
+    file: u32 = 0,
 };
 
 /// Lista de diagnósticos alocada em uma arena.
 pub const List = struct {
     arena: std.mem.Allocator,
     items: std.ArrayList(Diagnostic) = .empty,
+    /// Arquivo atribuído aos diagnósticos adicionados via `add`. O driver e a
+    /// semântica o atualizam ao entrar em cada módulo/função.
+    current_file: u32 = 0,
 
     pub fn init(arena: std.mem.Allocator) List {
         return .{ .arena = arena };
@@ -52,15 +60,32 @@ pub const List = struct {
         comptime fmt: []const u8,
         args: anytype,
     ) !void {
+        try self.addInFile(self.current_file, kind, span, fmt, args);
+    }
+
+    pub fn addInFile(
+        self: *List,
+        file: u32,
+        kind: Kind,
+        span: Span,
+        comptime fmt: []const u8,
+        args: anytype,
+    ) !void {
         try self.items.append(self.arena, .{
             .kind = kind,
             .span = span,
             .message = try std.fmt.allocPrint(self.arena, fmt, args),
+            .file = file,
         });
     }
 
     pub fn addError(self: *List, kind: Kind, span: Span, message: []const u8) !void {
-        try self.items.append(self.arena, .{ .kind = kind, .span = span, .message = message });
+        try self.items.append(self.arena, .{
+            .kind = kind,
+            .span = span,
+            .message = message,
+            .file = self.current_file,
+        });
     }
 
     pub fn count(self: *const List) usize {

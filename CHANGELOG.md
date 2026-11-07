@@ -10,6 +10,42 @@ Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
 > e testes, está em [docs/status.md](docs/status.md). O versionamento será
 > reconciliado antes de qualquer release pública.
 
+## [v0.3.2-alpha.1] — 2026-11-07
+
+Módulos: `import` com caminhos relativos e compilação multi-arquivo.
+
+- **Lexer:** literais de string entre aspas duplas (`"..."`, sem escapes e sem
+  quebra de linha), com token `.string` guardando o conteúdo e
+  `.string_unterminated` para literais abertos; nova palavra-chave `import`.
+- **Parser:** `import "caminho";` no nível superior, antes das funções. Caminho
+  precisa ser literal de string; `import` depois de uma função, caminho sem
+  aspas e falta de `;` produzem diagnóstico de sintaxe com span.
+- **Driver:** novo `compilePath(gpa, io, dir, caminho, opções)`, que carrega o
+  arquivo raiz e resolve `import` recursivamente em relação ao diretório do
+  arquivo importador (`std.fs.path.resolveAlloc`, sem syscalls). Cada caminho é
+  normalizado e carregado uma única vez (importações em diamante não duplicam
+  símbolos); ciclos geram `.import_cycle`, arquivos ausentes `.import_not_found`
+  e símbolos repetidos entre arquivos `.duplicate_declaration`. Os módulos são
+  achatados em um único `ast.Program` em pré-ordem (raiz primeiro), antes da
+  semântica, de modo que os backends existentes não mudaram. `compile` continua
+  disponível para um único buffer e diagnostica `import` como não resolvido.
+- **Diagnósticos:** `Diagnostic.file` + `List.addInFile`; a CLI imprime
+  `arquivo:linha:coluna` do arquivo correto, inclusive para erros dentro de
+  módulos importados. `renderDiagnostics` agora recebe a lista de fontes.
+- **CLI:** `kync check/emit <arquivo.kyn>` compila o arquivo e seus imports;
+  erro de leitura do arquivo raiz continua saindo com código 3, enquanto
+  importação ausente é erro de compilação (código 1).
+- **Testes:** 108 testes do compilador (21 novos: lexer de strings, parser de
+  `import` e carregamento multi-arquivo com diamante, ciclo, arquivo ausente,
+  símbolo duplicado e atribuição de arquivo nos diagnósticos); 3 fixtures e2e
+  positivas multi-arquivo executadas de verdade e 3 negativas com mensagem
+  esperada. `tools/e2e.sh` e `tools/validate-ir.sh` ganharam as seções de
+  módulos (70 casos e2e, 62 módulos de IR).
+- **Docs:** `docs/syntax.ebnf` e `docs/grammar.ebnf` descrevem `import` e o
+  literal de string; `docs/status.md`, `docs/development.md`,
+  `docs/architecture.md`, `README.md`, `ROADMAP.md` e `DEVELOPMENT_STATE.md`
+  atualizados com o estado verificado.
+
 ## [v0.3.1-alpha.1] — 2026-11-07
 
 Integração contínua e validação do backend LLVM IR por ferramenta real.

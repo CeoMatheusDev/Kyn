@@ -14,10 +14,13 @@ implementação integrada e testes reproduzíveis.
 - [x] Integrar o pipeline de compilação de ponta a ponta para o subconjunto
       atual (lexer → parser → AST → semântica → backend), com validação
       executável via `as`/`ld`.
+- [x] Compilação multi-arquivo com `import "caminho";` (resolução relativa ao
+      arquivo importador, deduplicação, ciclos/arquivos ausentes/símbolos
+      duplicados diagnosticados) e fixtures e2e executadas.
 - [ ] Completar o parser e a AST para a linguagem-alvo. Subconjunto atual:
-      `fn`, `let`/`var`, atribuição, `return`, `if`/`else`, `while`, blocos e
-      expressões com precedência. Faltam `import`, `struct`, `enum`, `impl`,
-      `unsafe`, atributos, strings, slices, ponteiros e generics.
+      `fn`, `let`/`var`, atribuição, `return`, `if`/`else`, `while`, blocos,
+      expressões com precedência e `import`. Faltam `struct`, `enum`, `impl`,
+      `unsafe`, atributos, strings em expressões, slices, ponteiros e generics.
 - [ ] Completar a análise semântica e o sistema de tipos além de
       `i32`/`bool`/`void` (inteiros de outras larguras, `f32`/`f64`, `str`,
       ownership, lifetimes, checagem de fluxo).

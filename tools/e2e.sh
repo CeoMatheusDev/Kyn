@@ -91,6 +91,31 @@ for src in "$ROOT"/tests/e2e/positive/*.kyn; do
     fi
 done
 
+echo "e2e: módulos importados (tests/e2e/modules/<caso>/main.kyn -> saída esperada)"
+
+for src in "$ROOT"/tests/e2e/modules/*/main.kyn; do
+    [ -e "$src" ] || continue
+    name="$(basename "$(dirname "$src")")"
+    expected="$(sed -n 's/^\/\/ expect-exit: \([0-9]\{1,3\}\).*/\1/p' "$src" | head -1)"
+    total=$((total + 1))
+
+    if [ -z "$expected" ]; then
+        report_fail "$name" "sem cabeçalho '// expect-exit: N'"
+        continue
+    fi
+
+    bin_file="$(build_binary "$src" "mod_$name")" || { failed=$((failed + 1)); continue; }
+
+    "$bin_file"
+    actual=$?
+    if [ "$actual" -eq "$expected" ]; then
+        passed=$((passed + 1))
+        printf '  ok     %-18s saída=%s\n' "$name" "$actual"
+    else
+        report_fail "$name" "saída $actual, esperado $expected"
+    fi
+done
+
 echo "e2e: fixtures de integração (tests/integration/case_N.kyn -> saída N)"
 
 for src in "$ROOT"/tests/integration/case_*.kyn; do
@@ -124,6 +149,40 @@ for src in "$ROOT"/tests/e2e/negative/*.kyn; do
         report_fail "$name" "código $code (esperado 1) ou mensagem de erro ausente"
         sed 's/^/         /' "$WORK/$name.err"
     fi
+done
+
+echo "e2e: módulos negativos (tests/e2e/modules_negative/<caso>/main.kyn deve falhar)"
+
+for src in "$ROOT"/tests/e2e/modules_negative/*/main.kyn; do
+    [ -e "$src" ] || continue
+    name="mod_$(basename "$(dirname "$src")")"
+    dir="$(dirname "$src")"
+    total=$((total + 1))
+
+    "$KYNC" check "$src" >"$WORK/$name.out" 2>"$WORK/$name.err"
+    code=$?
+    expected_text=""
+    if [ -f "$dir/expect-error.txt" ]; then
+        expected_text="$(cat "$dir/expect-error.txt")"
+    fi
+
+    if [ "$code" -ne 1 ]; then
+        report_fail "$name" "código $code (esperado 1)"
+        sed 's/^/         /' "$WORK/$name.err"
+        continue
+    fi
+    if ! grep -q "erro:" "$WORK/$name.err"; then
+        report_fail "$name" "mensagem de erro ausente"
+        continue
+    fi
+    if [ -n "$expected_text" ] && ! grep -qF "$expected_text" "$WORK/$name.err"; then
+        report_fail "$name" "mensagem não contém: $expected_text"
+        sed 's/^/         /' "$WORK/$name.err"
+        continue
+    fi
+
+    passed=$((passed + 1))
+    printf '  ok     %-18s código=%s\n' "$name" "$code"
 done
 
 echo

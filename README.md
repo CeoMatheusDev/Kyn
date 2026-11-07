@@ -36,12 +36,13 @@ interpretados como garantias de recursos completos.
 | CLI | `kync check` / `kync emit` (`--llvm`, `--asm`, `-o`, `--lib`) | Funcional para o subconjunto atual |
 | Lexer | `src/lexer/lexer.zig` com tokens tipados e spans | Funcional, testado |
 | Parser e AST | `src/parser/`, `src/ast/` para o subconjunto documentado | Funcional, testado |
+| Módulos | `src/driver.zig` (`compilePath`): `import "arquivo.kyn";` resolvido no disco | Funcional; caminhos relativos ao arquivo importador |
 | Análise semântica | `src/sema/` com escopos, tipos e mutabilidade | Funcional para `i32`/`bool`/`void` |
-| Backend LLVM IR | `src/codegen/llvm.zig` derivado da AST | Aceito por `llvm-as` no CI (59/59 módulos) |
+| Backend LLVM IR | `src/codegen/llvm.zig` derivado da AST | Aceito por `llvm-as` no CI (62/62 módulos) |
 | Backend x86-64 | `src/codegen/x86_64.zig` (asm + `as`/`ld`) | Validado por execução |
 | Implementação em Kyn | `src/kyn/`, `src/compiler/` | Esqueleto / placeholders |
 | Biblioteca padrão | `std/` | Experimental |
-| Testes | Unitários (`zig build test`), e2e (`zig build e2e`) e IR (`zig build validate-ir`) | 96 testes unitários; 64 casos e2e; IR validado por `llvm-as` no CI |
+| Testes | Unitários (`zig build test`), e2e (`zig build e2e`) e IR (`zig build validate-ir`) | 115 testes unitários (108 do compilador + 7 da std); 70 casos e2e; IR validado por `llvm-as` no CI |
 
 Consulte [o estado detalhado](docs/status.md) e o
 [subconjunto aceito hoje](docs/syntax.ebnf) antes de depender de qualquer
@@ -85,6 +86,29 @@ zig-out/bin/kync emit --llvm hello.kyn -o hello.ll
 zig-out/bin/kync emit --asm  hello.kyn -o hello.s
 as hello.s -o hello.o && ld hello.o -o hello && ./hello; echo "saída: $?"
 ```
+
+Um programa pode ser dividido em arquivos; cada `import` vem antes das funções e
+o caminho é relativo ao arquivo que importa:
+
+```sh
+cat > util.kyn <<'KYN'
+fn dobro(x: i32) -> i32 {
+    return x * 2;
+}
+KYN
+cat > app.kyn <<'KYN'
+import "util.kyn";
+
+fn main() -> i32 {
+    return dobro(21);
+}
+KYN
+zig-out/bin/kync check app.kyn
+zig-out/bin/kync emit --asm app.kyn -o app.s
+```
+
+Ciclos, arquivos ausentes e funções repetidas entre arquivos são diagnosticados
+com `arquivo:linha:coluna` do arquivo de origem.
 
 `kync` retorna `0` em sucesso, `1` para erros de compilação, `2` para uso
 inválido e `3` para falhas de E/S. Detalhes em

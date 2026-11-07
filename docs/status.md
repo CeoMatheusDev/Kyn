@@ -12,9 +12,14 @@ ciclo anterior é que agora existe um pipeline do frontend integrado e
 compiladas para assembly x86-64, montadas, ligadas e executadas com código de
 saída conferido.
 
-Ainda não existem: `import`, `struct`, `enum`, `impl`, generics, slices,
-ponteiros, `unsafe`, strings, FFI integrada, biblioteca padrão estável nem
-self-hosting funcional.
+Agora também existe **compilação multi-arquivo**: `import "caminho";` carrega
+módulos do disco, resolve caminhos relativos ao arquivo importador, carrega cada
+arquivo uma única vez e reporta ciclos, arquivos ausentes e símbolos duplicados
+com a posição no arquivo correto.
+
+Ainda não existem: `struct`, `enum`, `impl`, generics, slices, ponteiros,
+`unsafe`, strings em expressões (só o literal do `import` é léxico), FFI
+integrada, biblioteca padrão estável nem self-hosting funcional.
 
 ## Evidências por componente
 
@@ -22,19 +27,20 @@ self-hosting funcional.
 | --- | --- | --- | --- |
 | Build | `build.zig`, `build.zig.zon` | Fonte única de build, teste e e2e; Zig 0.17.0 exigido | `zig build`, `zig build test` executam |
 | CLI | `src/main.zig` | `kync check`/`emit` com `--llvm`/`--asm`, `-o`, `--lib`; códigos 0/1/2/3 | Testes de fumaça manuais registrados em `docs/development.md` |
-| Lexer | `src/lexer/lexer.zig` | Tokens tipados com span (linha/coluna), palavras-chave, operadores de 2 caracteres; descarta comentários/espaços | Testes unitários |
+| Lexer | `src/lexer/lexer.zig` | Tokens tipados com span (linha/coluna), palavras-chave (inclui `import`), operadores de 2 caracteres, literal de string sem escapes; descarta comentários/espaços | Testes unitários |
 | Spans | `src/span.zig` | Offsets + linha/coluna; sem cópia de texto | Testes unitários |
-| Diagnósticos | `src/diagnostics.zig` | Categoria estável + mensagem + linha/caret | Testes unitários |
+| Diagnósticos | `src/diagnostics.zig` | Categoria estável + mensagem + linha/caret + arquivo de origem (`file`) | Testes unitários |
 | AST | `src/ast/ast.zig` | Funções, parâmetros, `let`/`var`, atribuição, `return`, `if`/`else`, `while`, blocos, expressões | Testes unitários |
-| Parser | `src/parser/parser.zig` | Programa completo, precedência e associatividade, erros com span | Testes unitários e negativos |
+| Parser | `src/parser/parser.zig` | Programa completo, `import` antes das funções, precedência e associatividade, erros com span | Testes unitários e negativos |
+| Módulos | `src/driver.zig` | `compilePath` carrega o grafo de imports em pré-ordem, normaliza caminhos, deduplica e achata em um `Program` | Testes com diretório temporário + 3 fixtures e2e executadas + 3 negativas |
 | Semântica | `src/sema/sema.zig` | Escopos aninhados, resolução de nomes, tipos `i32`/`bool`/`void`, mutabilidade, chamadas, slots de pilha, validação de `main` | Testes unitários |
-| Backend LLVM IR | `src/codegen/llvm.zig` | IR textual derivado da AST (aritmética, comparações, `&&`/`||` com `phi`, `if`, `while`, chamadas) | Testes estruturais localmente; aceito por `llvm-as` no CI (59/59 módulos) |
+| Backend LLVM IR | `src/codegen/llvm.zig` | IR textual derivado da AST (aritmética, comparações, `&&`/`||` com `phi`, `if`, `while`, chamadas) | Testes estruturais localmente; aceito por `llvm-as` no CI (62/62 módulos) |
 | Backend x86-64 | `src/codegen/x86_64.zig` | Assembly System V sem libc, `_start` + syscall `exit` | Executado: `as` + `ld` + código de saída |
 | FFI | `src/ffi/ffi.zig` | Experimento isolado de `extern "c" printf` | Não integrado |
 | `unsafe`/`repr(C)` | `src/sema/unsafe.zig` | Política isolada e testada; AST ainda não possui esses nós | Testes unitários do módulo |
 | Self-hosting | `src/kyn/*.kyn`, `src/compiler/*.kyn` | Placeholders; não executados pelo `kync` | Não demonstrado |
 | Biblioteca padrão | `std/core/core.zig`, `std/os/*.zig` | Stubs experimentais; algumas APIs não fazem E/S real | Compilam nos testes da std |
-| Fixtures | `tests/` | 50 `integration/case_N.kyn` + 14 fixtures em `tests/e2e` + demais casos de linguagem ainda não suportados | `zig build e2e` (64 casos) |
+| Fixtures | `tests/` | 50 `integration/case_N.kyn` + 17 fixtures em `tests/e2e` (inclui `modules/` e `modules_negative/`) + demais casos de linguagem ainda não suportados | `zig build e2e` (70 casos) |
 
 ## Subconjunto da linguagem aceito hoje
 
@@ -57,25 +63,34 @@ fn main() -> i32 {
 }
 ```
 
-Suportado: `fn`, `let`/`var` com inicializador obrigatório, anotação ou
+Suportado: `import "caminho";` antes das funções (arquivos `.kyn` resolvidos
+relativos ao arquivo importador, cada um carregado uma vez), `fn`, `let`/`var`
+com inicializador obrigatório, anotação ou
 inferência de tipo (`i32`, `bool`, `void`), atribuição (somente em `var`),
 `return`, `if`/`else`/`else if`, `while`, blocos, expressões aritméticas,
 comparações, `&&`/`||` com curto-circuito, unários `-`/`!`, literais inteiros e
 booleanos, chamadas diretas de funções do próprio programa (até 6 argumentos).
 
-Fora do subconjunto (diagnosticado ou rejeitado): `import`, `struct`, `enum`,
-`impl`, `unsafe`, atributos `#[...]`, strings, `f32`/`f64` e demais tipos,
-slices `[]T`, ponteiros, generics, `Result<T, E>`/`?`, closures, `for`.
+Fora do subconjunto (diagnosticado ou rejeitado): `struct`, `enum`, `impl`,
+`unsafe`, atributos `#[...]`, strings em expressões (o lexer reconhece o
+literal, mas não há tipo `str`), `f32`/`f64` e demais tipos, slices `[]T`,
+ponteiros, generics, `Result<T, E>`/`?`, closures, `for`, visibilidade
+(`pub`), imports qualificados/seletivos e pacotes.
 
 ## Validação executada neste ciclo
 
 - `zig build` — sucesso.
-- `zig build test` — 96 testes: 89 do compilador (spans, lexer, diagnóstico,
-  ast, parser, sema, unsafe, backends, driver) e 7 da std experimental.
-- `zig build e2e` — 64/64 casos: 9 fixtures comportamentais, 50 fixtures
-  `case_N.kyn` com código de saída `N`, 5 fixtures negativas com código `1`.
+- `zig build test` — 115 testes: 108 do compilador (spans, lexer, diagnóstico,
+  ast, parser, sema, unsafe, backends, driver e carregamento multi-arquivo) e 7
+  da std experimental.
+- `zig build e2e` — 70/70 casos: 9 fixtures comportamentais, 3 programas
+  multi-arquivo executados, 50 fixtures `case_N.kyn` com código de saída `N`,
+  5 fixtures negativas e 3 módulos negativos (ciclo, arquivo ausente, símbolo
+  duplicado) com mensagem esperada.
 - `zig fmt --check build.zig src std` — sem diferenças.
-- `zig build validate-ir` (local, sem LLVM) — avisa e ignora, como documentado.
+- `zig build validate-ir` (local, sem LLVM) — avisa e ignora, como documentado
+  no ambiente de desenvolvimento; o mesmo script cobre 62 módulos quando há
+  `llvm-as`/`clang`.
 - CI (`.github/workflows/ci.yml`, run `42414049577` em 2026-11-07) — job
   "build, testes e validação de IR" concluído com sucesso em 2m05s:
   `zig fmt --check`, `zig build test`, `zig build e2e` e
