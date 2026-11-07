@@ -24,7 +24,26 @@ pub const Program = struct {
     /// módulos as resolve; o programa achatado entregue à semântica/backends
     /// tem `imports` vazio.
     imports: []Import = &.{},
+    /// Declarações `struct` de todos os módulos, em pré-ordem.
+    structs: []*StructDecl = &.{},
     functions: []*Function,
+    span: Span,
+};
+
+/// `struct Nome { campo: tipo, ... }` — declaração no nível superior.
+pub const StructDecl = struct {
+    name: []const u8,
+    name_span: Span,
+    fields: []Field,
+    /// Arquivo-fonte de origem, atribuído pelo loader de módulos.
+    file_id: u32 = 0,
+    span: Span,
+};
+
+pub const Field = struct {
+    name: []const u8,
+    name_span: Span,
+    type_name: TypeName,
     span: Span,
 };
 
@@ -67,6 +86,31 @@ pub const Expr = struct {
         call: Call,
         binary: Binary,
         unary: Unary,
+        /// `base.campo` — hoje só bases de tipo struct com campos escalares.
+        field_access: FieldAccess,
+        /// `Nome { campo: valor, ... }`
+        struct_literal: StructLiteral,
+    };
+
+    pub const FieldAccess = struct {
+        base: *Expr,
+        name: []const u8,
+        name_span: Span,
+        /// Índice do campo na declaração do struct, preenchido pela semântica.
+        field_index: ?u32 = null,
+    };
+
+    pub const StructLiteral = struct {
+        type_name: TypeName,
+        fields: []FieldInit,
+        /// Índice do struct resolvido pela semântica.
+        resolved_struct: ?u32 = null,
+    };
+
+    pub const FieldInit = struct {
+        name: []const u8,
+        name_span: Span,
+        value: *Expr,
     };
 
     pub const IntLiteral = struct {
@@ -176,6 +220,8 @@ pub const Stmt = struct {
     pub const Kind = union(enum) {
         let_decl: VarDecl,
         assign: Assign,
+        /// `base.campo = valor;` — atribuição a campo de struct.
+        field_assign: FieldAssign,
         return_stmt: ?*Expr,
         expr_stmt: *Expr,
         if_stmt: IfStmt,
@@ -198,6 +244,15 @@ pub const Stmt = struct {
         value: *Expr,
         /// Índice do símbolo resolvido pela semântica.
         resolved: ?u32 = null,
+    };
+
+    pub const FieldAssign = struct {
+        base: *Expr,
+        name: []const u8,
+        name_span: Span,
+        value: *Expr,
+        /// Índice do campo na declaração do struct, preenchido pela semântica.
+        field_index: ?u32 = null,
     };
 
     pub const IfStmt = struct {

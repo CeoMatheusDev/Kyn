@@ -110,7 +110,31 @@ Tamanhos, alinhamento, overflow, conversões implícitas e representação de `c
 
 ## 6. Estruturas e métodos
 
-`struct` representa agregados nomeados:
+**Implementado hoje:** `struct` com campos escalares, literais `Nome { campo:
+valor }` (todos os campos, exatamente uma vez), acesso `p.campo`, atribuição
+`p.campo = v` (somente em `var`) e cópia por valor entre variáveis:
+
+```kyn
+struct Ponto {
+    x: i32,
+    y: i32,
+}
+
+fn main() -> i32 {
+    var p: Ponto = Ponto { x: 3, y: 4 };
+    p.x = p.x + p.y;
+    let q: Ponto = p;
+    return q.x;
+}
+```
+
+Limites atuais, todos diagnosticados: struct por valor em parâmetro, retorno ou
+argumento; campo de tipo struct (struct aninhado); `struct` vazio; struct como
+condição, operando aritmético ou de comparação; literal de struct fora de
+inicialização/atribuição.
+
+**Visão de design (não implementada):** o exemplo abaixo mostra agregados com
+tipos não escalares e métodos associados:
 
 ```kyn
 struct Vector3 {

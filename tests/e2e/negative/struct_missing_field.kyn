@@ -1,0 +1,10 @@
+// Erro esperado: literal não inicializa todos os campos.
+struct P {
+    x: i32,
+    y: i32,
+}
+
+fn main() -> i32 {
+    let p: P = P { x: 1 };
+    return p.x;
+}

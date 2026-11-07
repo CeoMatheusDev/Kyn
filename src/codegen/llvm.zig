@@ -4,6 +4,11 @@
 //! (`i32`/`bool`), aritmética, comparações, `&&`/`||` com curto-circuito,
 //! `if`/`else`, `while` e chamadas diretas de função.
 //!
+//! Structs: como valores de struct só existem em variáveis locais (sem
+//! parâmetros, retorno, ponteiros ou campos de struct), cada campo ganha seu
+//! próprio `alloca` — substituição escalar de um struct que nunca escapa. Isso
+//! dispensa tipos agregados e `getelementptr` sem mudar a semântica observável.
+//!
 //! Este emissor não é validado por um montador LLVM no ambiente de
 //! desenvolvimento (não há `llc`/`clang` disponíveis); os testes verificam a
 //! estrutura do texto emitido. Para validação executável de ponta a ponta, veja
@@ -40,6 +45,8 @@ fn llvmType(typ: sema.Type) codegen.Error![]const u8 {
         .i32 => "i32",
         .bool => "i1",
         .void => "void",
+        // Struct em LLVM é representado campo a campo (substituição escalar).
+        .aggregate => error.UnsupportedType,
         .unknown => error.UnsupportedType,
     };
 }
@@ -49,6 +56,7 @@ fn typeAlign(typ: sema.Type) codegen.Error!u32 {
         .i32 => 4,
         .bool => 1,
         .void => error.UnsupportedType,
+        .aggregate => error.UnsupportedType,
         .unknown => error.UnsupportedType,
     };
 }
@@ -144,6 +152,16 @@ const FnEmitter = struct {
         const sym_start: usize = self.info.symbol_start;
         const sym_end: usize = sym_start + self.info.symbol_count;
         for (self.checked.symbols[sym_start..sym_end]) |sym| {
+            if (sym.typ == .aggregate) {
+                if (sym.struct_id >= self.checked.structs.len) return error.MiscompiledAst;
+                for (self.checked.structs[sym.struct_id].fields, 0..) |field, i| {
+                    const ty = try llvmType(field.typ);
+                    const align_value = try typeAlign(field.typ);
+                    const name = try self.varName(sym.slot + 1 + @as(u32, @intCast(i)));
+                    try self.emit("  {s} = alloca {s}, align {d}\n", .{ name, ty, align_value });
+                }
+                continue;
+            }
             const ty = try llvmType(sym.typ);
             const align_value = try typeAlign(sym.typ);
             const name = try self.varName(sym.slot);
@@ -211,6 +229,10 @@ const FnEmitter = struct {
         switch (stmt.kind) {
             .let_decl => |decl| {
                 const symbol = self.symbolAt(stmt.decl_symbol orelse return error.MiscompiledAst);
+                if (symbol.typ == .aggregate) {
+                    try self.emitStructStore(symbol, decl.init);
+                    return;
+                }
                 const value = try self.emitExpr(decl.init);
                 if (value.typ == .void) return error.UnsupportedNode;
                 const ty = try llvmType(symbol.typ);
@@ -221,11 +243,30 @@ const FnEmitter = struct {
 
             .assign => |assign| {
                 const symbol = self.symbolAt(assign.resolved orelse return error.MiscompiledAst);
+                if (symbol.typ == .aggregate) {
+                    try self.emitStructStore(symbol, assign.value);
+                    return;
+                }
                 const value = try self.emitExpr(assign.value);
                 if (value.typ == .void) return error.UnsupportedNode;
                 const ty = try llvmType(symbol.typ);
                 const align_value = try typeAlign(symbol.typ);
                 const name = try self.varName(symbol.slot);
+                try self.emit("  store {s} {s}, ptr {s}, align {d}\n", .{ ty, value.text, name, align_value });
+            },
+
+            .field_assign => |field_assign| {
+                const base = self.symbolAt(field_assign.base.resolved orelse return error.MiscompiledAst);
+                if (base.typ != .aggregate) return error.MiscompiledAst;
+                const field_index = field_assign.field_index orelse return error.MiscompiledAst;
+                if (base.struct_id >= self.checked.structs.len) return error.MiscompiledAst;
+                const field = &self.checked.structs[base.struct_id].fields[field_index];
+
+                const value = try self.emitExpr(field_assign.value);
+                if (value.typ == .void) return error.UnsupportedNode;
+                const ty = try llvmType(field.typ);
+                const align_value = try typeAlign(field.typ);
+                const name = try self.varName(base.slot + 1 + field_index);
                 try self.emit("  store {s} {s}, ptr {s}, align {d}\n", .{ ty, value.text, name, align_value });
             },
 
@@ -315,6 +356,59 @@ const FnEmitter = struct {
             .binary => |binary| return self.emitBinary(binary),
 
             .call => |call| return self.emitCall(call),
+
+            .field_access => |access| {
+                const base = self.symbolAt(access.base.resolved orelse return error.MiscompiledAst);
+                if (base.typ != .aggregate) return error.MiscompiledAst;
+                const field_index = access.field_index orelse return error.MiscompiledAst;
+                if (base.struct_id >= self.checked.structs.len) return error.MiscompiledAst;
+                const field_type = self.checked.structs[base.struct_id].fields[field_index].typ;
+
+                const ty = try llvmType(field_type);
+                const align_value = try typeAlign(field_type);
+                const name = try self.varName(base.slot + 1 + field_index);
+                const result = try self.newTemp();
+                try self.emit("  {s} = load {s}, ptr {s}, align {d}\n", .{ result, ty, name, align_value });
+                return .{ .text = result, .typ = field_type };
+            },
+
+            // Struct completo não é um operando: `let`/atribuição o tratam
+            // campo a campo em `emitStructStore`.
+            .struct_literal => return error.UnsupportedNode,
+        }
+    }
+
+    /// Copia um struct para os slots de `dst` (literal ou outra variável).
+    fn emitStructStore(self: *FnEmitter, dst: *const sema.Symbol, value: *ast.Expr) Error!void {
+        if (dst.struct_id >= self.checked.structs.len) return error.MiscompiledAst;
+        const info = &self.checked.structs[dst.struct_id];
+
+        switch (value.kind) {
+            .struct_literal => |lit| {
+                for (info.fields, 0..) |field, i| {
+                    const init_value = findFieldInit(lit.fields, field.name) orelse return error.MiscompiledAst;
+                    const operand = try self.emitExpr(init_value);
+                    const ty = try llvmType(field.typ);
+                    const align_value = try typeAlign(field.typ);
+                    const name = try self.varName(dst.slot + 1 + @as(u32, @intCast(i)));
+                    try self.emit("  store {s} {s}, ptr {s}, align {d}\n", .{ ty, operand.text, name, align_value });
+                }
+            },
+            .identifier => {
+                const src = self.symbolAt(value.resolved orelse return error.MiscompiledAst);
+                if (src.typ != .aggregate) return error.MiscompiledAst;
+                for (info.fields, 0..) |field, i| {
+                    const index: u32 = @intCast(i);
+                    const ty = try llvmType(field.typ);
+                    const align_value = try typeAlign(field.typ);
+                    const src_name = try self.varName(src.slot + 1 + index);
+                    const dst_name = try self.varName(dst.slot + 1 + index);
+                    const tmp = try self.newTemp();
+                    try self.emit("  {s} = load {s}, ptr {s}, align {d}\n", .{ tmp, ty, src_name, align_value });
+                    try self.emit("  store {s} {s}, ptr {s}, align {d}\n", .{ ty, tmp, dst_name, align_value });
+                }
+            },
+            else => return error.MiscompiledAst,
         }
     }
 
@@ -548,4 +642,52 @@ test "llvm: código após return não é emitido" {
     const ir = try emitFixture(&f);
     try testing.expect(std.mem.indexOf(u8, ir, "ret i32 2") == null);
     try support.expectAllBlocksTerminated(ir);
+}
+
+test "llvm: struct vira um alloca por campo (substituição escalar)" {
+    var f = try support.Fixture.build(
+        \\struct Ponto { x: i32, y: bool }
+        \\fn main() -> i32 {
+        \\    var p: Ponto = Ponto { x: 7, y: true };
+        \\    p.x = p.x + 1;
+        \\    if p.y { return p.x; }
+        \\    return 0;
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+
+    try support.expectContains(ir, "%v1 = alloca i32, align 4");
+    try support.expectContains(ir, "%v2 = alloca i1, align 1");
+    try support.expectContains(ir, "store i32 7, ptr %v1, align 4");
+    try support.expectContains(ir, "store i1 true, ptr %v2, align 1");
+    try support.expectContains(ir, "load i32, ptr %v1, align 4");
+    try support.expectContains(ir, "ret i32");
+    // Sem tipos agregados: struct nunca aparece como tipo LLVM.
+    try std.testing.expect(std.mem.indexOf(u8, ir, "alloca %") == null);
+}
+
+test "llvm: cópia de struct carrega e grava cada campo" {
+    var f = try support.Fixture.build(
+        \\struct P { a: i32, b: i32 }
+        \\fn main() -> i32 {
+        \\    let src: P = P { a: 1, b: 2 };
+        \\    let dst: P = src;
+        \\    return dst.a + dst.b;
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+    try support.expectContains(ir, "%v1 = alloca i32, align 4");
+    try support.expectContains(ir, "%v4 = alloca i32, align 4");
+    try support.expectContains(ir, "store i32 1, ptr %v1, align 4");
+    try support.expectContains(ir, "ptr %v4, align 4");
+}
+
+/// Valor inicial de um campo dentro de um literal de struct, por nome.
+fn findFieldInit(inits: []ast.Expr.FieldInit, name: []const u8) ?*ast.Expr {
+    for (inits) |init| {
+        if (std.mem.eql(u8, init.name, name)) return init.value;
+    }
+    return null;
 }

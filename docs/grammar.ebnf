@@ -21,14 +21,14 @@ string_literal = '"', { any_char - ( '"' | "\n" | "\r" ) }, '"' ;
 
 keyword    = "fn" | "let" | "var" | "return"
            | "if" | "else" | "while"
-           | "import" | "true" | "false" ;
+           | "import" | "struct" | "true" | "false" ;
 
 operator   = "->"
            | "==" | "!=" | "<" | "<=" | ">" | ">="
            | "=" | "+" | "-" | "*" | "/" | "%" | "!"
            | "&&" | "||" ;
 
-punctuation = "(" | ")" | "{" | "}" | ":" | ";" | "," ;
+punctuation = "(" | ")" | "{" | "}" | ":" | ";" | "," | "." ;
 
 whitespace = " " | "\t" | "\r" | "\n" ;          (* descartado *)
 comment    = "//", { any_char - "\n" } ;         (* descartado *)

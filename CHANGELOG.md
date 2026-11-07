@@ -10,6 +10,41 @@ Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
 > e testes, está em [docs/status.md](docs/status.md). O versionamento será
 > reconciliado antes de qualquer release pública.
 
+## [v0.3.3-alpha.1] — 2026-11-07
+
+Structs com valor: declaração, literais, campos e layout nos dois backends.
+
+- **Lexer:** palavra-chave `struct` e pontuação `.` (ponto, usada em `p.campo`).
+- **Parser:** `struct Nome { campo: tipo, ... }` no nível superior (ordem livre em
+  relação a `fn`, vírgula final opcional, erros com span); literais
+  `Nome { campo: valor }`; acesso `p.campo` encadeável na gramática; nova
+  atribuição `p.campo = valor`. Condições de `if`/`while` desativam o literal de
+  struct, porque `Nome {` ali inicia o bloco.
+- **AST:** `Program.structs`, `ast.StructDecl`/`ast.Field`,
+  `Expr.field_access`, `Expr.struct_literal`/`FieldInit` e
+  `Stmt.field_assign`, com índices resolvidos pela semântica.
+- **Semântica:** `Type.aggregate` + `Checked.structs` (duas passadas: nomes e
+  depois campos), resolução de campo, validação de literais (todos os campos,
+  uma vez cada), atribuição imutável, tipos incompatíveis e structs diferentes
+  na anotação. Restrições diagnosticadas: struct por valor em
+  parâmetro/retorno/argumento, campo de tipo struct, struct vazio, struct em
+  condição/comparação e literal como expressão solta.
+- **Layout:** variável de struct reserva `1 + n` slots (base + um por campo).
+  x86-64 usa `movl` nos offsets dos slots; o backend LLVM aplica substituição
+  escalar (um `alloca` por campo, sem tipos agregados). Struct nunca escapa da
+  função nesta etapa, então não há cópia parcial nem estado não inicializado.
+- **Driver:** structs dos módulos importados entram no programa achatado em
+  pré-ordem, com `file_id` para atribuição correta dos diagnósticos.
+- **Testes:** 132 testes do compilador (16 novos: lexer, parser, semântica,
+  driver multi-arquivo e estrutura de IR/assembly) e 7 da std; 3 fixtures e2e
+  novas com `struct` executadas (saídas 14, 10 e 21), 1 módulo com struct
+  (saída 42) e 3 fixtures negativas de struct — 77/77 casos.
+- **Docs:** `docs/syntax.ebnf` e `docs/grammar.ebnf` descrevem `struct`,
+  literais e acesso a campo; `docs/architecture.md` documenta o layout;
+  `docs/status.md`, `docs/development.md`, `docs/language_reference.md`,
+  `README.md`, `ROADMAP.md` e `DEVELOPMENT_STATE.md` atualizados.
+- **Versão:** `0.3.3-alpha.1` (derivada de `build.zig.zon`).
+
 ## [v0.3.2-alpha.1] — 2026-11-07
 
 Módulos: `import` com caminhos relativos e compilação multi-arquivo.

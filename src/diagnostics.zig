@@ -22,6 +22,10 @@ pub const Kind = enum {
     invalid_condition,
     invalid_return,
     invalid_call,
+    /// Campo inexistente em struct.
+    undefined_field,
+    /// Literal de struct incompleto ou com campo repetido.
+    invalid_struct_literal,
     missing_main,
     invalid_main,
     // módulos

@@ -1,0 +1,13 @@
+// Struct com literais, mutação de campo e cópia por valor.
+// expect-exit: 14
+struct Ponto {
+    x: i32,
+    y: i32,
+}
+
+fn main() -> i32 {
+    var p: Ponto = Ponto { x: 3, y: 4 };
+    p.x = p.x + p.y;
+    let q: Ponto = p;
+    return q.x * 2;
+}

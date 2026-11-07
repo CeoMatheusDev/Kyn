@@ -37,12 +37,13 @@ interpretados como garantias de recursos completos.
 | Lexer | `src/lexer/lexer.zig` com tokens tipados e spans | Funcional, testado |
 | Parser e AST | `src/parser/`, `src/ast/` para o subconjunto documentado | Funcional, testado |
 | Módulos | `src/driver.zig` (`compilePath`): `import "arquivo.kyn";` resolvido no disco | Funcional; caminhos relativos ao arquivo importador |
+| Structs | `struct`, literais `Nome { campo: valor }`, acesso e atribuição a campo | Funcional em variáveis locais (sem passagem por valor) |
 | Análise semântica | `src/sema/` com escopos, tipos e mutabilidade | Funcional para `i32`/`bool`/`void` |
-| Backend LLVM IR | `src/codegen/llvm.zig` derivado da AST | Aceito por `llvm-as` no CI (62/62 módulos) |
+| Backend LLVM IR | `src/codegen/llvm.zig` derivado da AST | Aceito por `llvm-as` no CI (66/66 módulos) |
 | Backend x86-64 | `src/codegen/x86_64.zig` (asm + `as`/`ld`) | Validado por execução |
 | Implementação em Kyn | `src/kyn/`, `src/compiler/` | Esqueleto / placeholders |
 | Biblioteca padrão | `std/` | Experimental |
-| Testes | Unitários (`zig build test`), e2e (`zig build e2e`) e IR (`zig build validate-ir`) | 115 testes unitários (108 do compilador + 7 da std); 70 casos e2e; IR validado por `llvm-as` no CI |
+| Testes | Unitários (`zig build test`), e2e (`zig build e2e`) e IR (`zig build validate-ir`) | 139 testes unitários (132 do compilador + 7 da std); 77 casos e2e; IR validado por `llvm-as` no CI |
 
 Consulte [o estado detalhado](docs/status.md) e o
 [subconjunto aceito hoje](docs/syntax.ebnf) antes de depender de qualquer
@@ -109,6 +110,28 @@ zig-out/bin/kync emit --asm app.kyn -o app.s
 
 Ciclos, arquivos ausentes e funções repetidas entre arquivos são diagnosticados
 com `arquivo:linha:coluna` do arquivo de origem.
+
+Structs guardam campos escalares e são manipulados por valor em variáveis
+locais (`let`/`var`), com literais, leitura e escrita de campo:
+
+```sh
+cat > ponto.kyn <<'KYN'
+struct Ponto {
+    x: i32,
+    y: i32,
+}
+
+fn main() -> i32 {
+    var p: Ponto = Ponto { x: 3, y: 4 };
+    p.x = p.x + p.y;
+    return p.x;   // 7
+}
+KYN
+zig-out/bin/kync emit --asm ponto.kyn -o ponto.s
+```
+
+Struct por valor em parâmetros/retorno, campo de tipo struct e `struct` vazio são
+rejeitados com diagnóstico explícito.
 
 `kync` retorna `0` em sucesso, `1` para erros de compilação, `2` para uso
 inválido e `3` para falhas de E/S. Detalhes em

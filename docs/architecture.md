@@ -25,7 +25,7 @@ Código-fonte .kyn
    Parser (programa completo; falha no primeiro erro sintático)
       |
       v
-   AST    (funções, statements, expressões; slices da entrada)
+   AST    (structs, funções, statements, expressões; slices da entrada)
       |
       v
  Semântica (escopos, tipos i32/bool/void, mutabilidade, slots de pilha)
@@ -49,8 +49,10 @@ backend; `Result.deinit()` libera tudo.
   anota índices de resolução (`Expr.resolved`, `Stmt.decl_symbol`,
   `Stmt.Assign.resolved`, `Expr.Call.callee_fn`) sem alterar a estrutura.
 - **Semântica**: produz `Checked` com assinaturas de funções, tipos de retorno,
-  contagem de slots e uma tabela plana de símbolos. Erros não abortam a análise:
-  são acumulados e o tipo `unknown` interrompe cascatas de diagnóstico.
+  structs (campos e tipos), contagem de slots e uma tabela plana de símbolos.
+  Erros não abortam a análise: são acumulados e o tipo `unknown` interrompe
+  cascatas de diagnóstico. Structs entram em duas passadas (nomes, depois
+  campos), para permitir referência em qualquer ordem.
 - **Módulos**: `driver.compilePath` carrega o arquivo raiz e resolve cada
   `import` com `std.fs.path.resolveAlloc` a partir do diretório do arquivo
   importador; caminhos normalizados funcionam como chave de deduplicação. O
@@ -83,6 +85,22 @@ caminhos já carregados e a lista de módulos na ordem de carregamento. Cada
 módulo é lexado e parseado com o `current_file` correto nos diagnósticos; se
 algum arquivo falhar, a compilação para com os diagnósticos já atribuídos. Não
 há estado global: toda a memória vem da arena do `Result`.
+
+### Structs (layout) — `src/sema/sema.zig` + backends
+
+Um valor de struct é **nominal** (`Symbol.struct_id` → `Checked.structs`) e vive
+apenas em variáveis locais: não há passagem por valor em parâmetros/retorno nem
+campo de tipo struct nesta etapa, então um struct nunca escapa da função.
+
+- `Symbol.typ == .aggregate` reserva `1 + n` slots: o primeiro é a base
+  (reservado) e cada campo usa `slot + 1 + índice`, na ordem da declaração.
+- x86-64: cada slot tem 8 bytes; leitura/escrita de campo é `movl` no offset do
+  slot, e a cópia de struct percorre os campos.
+- LLVM IR: substituição escalar — um `alloca` por campo, com o tipo do campo
+  (`i32`/`i1`). Não há tipos agregados nem `getelementptr`, e um struct que
+  nunca escapa tem a mesma semântica observável.
+- Literais exigem todos os campos exatamente uma vez, o que garante struct
+  sempre inicializado (sem estado parcialmente construído).
 
 ### Semântica — `src/sema/sema.zig`
 
@@ -127,8 +145,11 @@ APIs.
    ou backend nativo próprio) e definir critérios de aceitação para ele.
 2. Ampliar o contrato de módulos (visibilidade, imports qualificados, pacotes);
    hoje a resolução é por caminho relativo e os símbolos são achatados.
-3. Adicionar à AST os nós hoje ausentes (`struct`, `enum`, `impl`, `unsafe`,
-   atributos) e conectar `src/sema/unsafe.zig`.
-4. Definir o modelo de memória executável (ownership, lifetimes, slices) antes
+3. Definir o contrato de struct por valor entre funções (ABI SysV para
+   agregados pequenos ou convenção própria) antes de `impl`/métodos.
+4. Adicionar à AST os nós hoje ausentes (`enum`, `impl`, `unsafe`, atributos) e
+   conectar `src/sema/unsafe.zig`.
+5. Definir o modelo de memória executável (ownership, lifetimes, slices) antes
    de expandir a std.
-5. Estabelecer CI com `zig build test` e `zig build e2e`.
+6. Definir a representação de `str` e a saída de texto (`write`/libc) para que
+   a validação observe conteúdo, não apenas código de saída.
