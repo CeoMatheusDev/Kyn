@@ -1,0 +1,7 @@
+// Importa uma função de outro arquivo no mesmo diretório.
+// expect-exit: 42
+import "lib.kyn";
+
+fn main() -> i32 {
+    return dobro(21);
+}

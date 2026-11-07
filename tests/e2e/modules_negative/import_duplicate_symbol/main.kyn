@@ -1,0 +1,10 @@
+// Erro esperado: mesma função declarada na raiz e no módulo importado.
+import "lib.kyn";
+
+fn dup() -> i32 {
+    return 1;
+}
+
+fn main() -> i32 {
+    return dup();
+}

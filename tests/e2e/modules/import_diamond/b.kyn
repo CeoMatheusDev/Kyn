@@ -1,0 +1,5 @@
+import "base.kyn";
+
+fn dois() -> i32 {
+    return ident(2);
+}

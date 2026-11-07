@@ -19,9 +19,12 @@ pub const Tag = enum {
     // literais e nome
     identifier,
     integer,
+    /// Conteúdo de um literal de string (sem as aspas, sem interpretar escapes).
+    string,
 
     // palavras-chave
     kw_fn,
+    kw_import,
     kw_let,
     kw_var,
     kw_return,
@@ -58,6 +61,9 @@ pub const Tag = enum {
     amp_amp, // &&
     pipe_pipe, // ||
 
+    /// Literal de string sem aspas de fechamento (até o fim da linha/arquivo).
+    string_unterminated,
+
     /// Caractere não reconhecido pelo lexer.
     invalid,
     eof,
@@ -77,7 +83,9 @@ pub const Token = struct {
         return switch (self.tag) {
             .identifier => "identificador",
             .integer => "número inteiro",
+            .string => "literal de string",
             .kw_fn => "'fn'",
+            .kw_import => "'import'",
             .kw_let => "'let'",
             .kw_var => "'var'",
             .kw_return => "'return'",
@@ -109,6 +117,7 @@ pub const Token = struct {
             .bang => "'!'",
             .amp_amp => "'&&'",
             .pipe_pipe => "'||'",
+            .string_unterminated => "literal de string não terminado",
             .invalid => "caractere inválido",
             .eof => "fim do arquivo",
         };
@@ -125,6 +134,7 @@ pub const Token = struct {
 fn keywordTag(text: []const u8) ?Tag {
     const map = std.StaticStringMap(Tag).initComptime(.{
         .{ "fn", .kw_fn },
+        .{ "import", .kw_import },
         .{ "let", .kw_let },
         .{ "var", .kw_var },
         .{ "return", .kw_return },
@@ -213,6 +223,8 @@ pub const Lexer = struct {
             }, "");
         };
 
+        if (ch == '"') return self.scanString(start, start_line, start_column);
+
         if (isIdentStart(ch)) {
             self.bump();
             while (self.peek()) |c| {
@@ -256,6 +268,30 @@ pub const Lexer = struct {
             else => .invalid,
         };
         return Token.init(tag, self.makeSpan(start, start_line, start_column), self.source[start..self.pos]);
+    }
+
+    /// Literal de string: `"conteúdo"`. Sem interpretação de escapes e sem
+    /// quebra de linha; aspas não podem ser escapadas nesta etapa.
+    /// `text` contém apenas o conteúdo, sem as aspas; o span cobre as aspas.
+    fn scanString(self: *Lexer, start: usize, start_line: u32, start_column: u32) Token {
+        self.bump(); // aspa de abertura
+        const content_start = self.pos;
+
+        while (self.peek()) |c| {
+            if (c == '"') {
+                const content = self.source[content_start..self.pos];
+                self.bump(); // aspa de fechamento
+                return Token.init(.string, self.makeSpan(start, start_line, start_column), content);
+            }
+            if (c == '\n') break; // strings não atravessam linhas
+            self.bump();
+        }
+
+        return Token.init(
+            .string_unterminated,
+            self.makeSpan(start, start_line, start_column),
+            self.source[start..self.pos],
+        );
     }
 
     fn eat(self: *Lexer, expected: u8) bool {
@@ -380,4 +416,42 @@ test "lexer: tokenize aloca e encerra com eof" {
     defer gpa.free(toks);
     try std.testing.expectEqual(@as(usize, 6), toks.len);
     try std.testing.expectEqual(Tag.eof, toks[toks.len - 1].tag);
+}
+
+test "lexer: literal de string guarda o conteúdo sem as aspas" {
+    var lex = Lexer.init("import \"lib/math.kyn\";");
+    const import_tok = lex.next();
+    try std.testing.expectEqual(Tag.kw_import, import_tok.tag);
+
+    const str = lex.next();
+    try std.testing.expectEqual(Tag.string, str.tag);
+    try std.testing.expectEqualStrings("lib/math.kyn", str.text);
+    // O span cobre as aspas, para o marcador apontar o literal inteiro.
+    try std.testing.expectEqual(@as(u32, 7), str.span.start);
+    try std.testing.expectEqual(@as(u32, 21), str.span.end);
+
+    try std.testing.expectEqual(Tag.semicolon, lex.next().tag);
+    try std.testing.expectEqual(Tag.eof, lex.next().tag);
+}
+
+test "lexer: string vazia é válida" {
+    var lex = Lexer.init("\"\"");
+    const tok = lex.next();
+    try std.testing.expectEqual(Tag.string, tok.tag);
+    try std.testing.expectEqualStrings("", tok.text);
+}
+
+test "lexer: string não terminada é tokenizada sem panic" {
+    var lex = Lexer.init("import \"lib/math;");
+    _ = lex.next();
+    const tok = lex.next();
+    try std.testing.expectEqual(Tag.string_unterminated, tok.tag);
+    try std.testing.expectEqual(Tag.eof, lex.next().tag);
+}
+
+test "lexer: string não atravessa linha" {
+    var lex = Lexer.init("\"ab\ncd\"");
+    const tok = lex.next();
+    try std.testing.expectEqual(Tag.string_unterminated, tok.tag);
+    try std.testing.expectEqual(@as(u32, 1), tok.span.line);
 }

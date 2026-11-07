@@ -1,0 +1,6 @@
+// Importa de um subdiretório; o caminho é relativo a este arquivo.
+import "sub/b.kyn";
+
+fn passo(x: i32) -> i32 {
+    return dez(x);
+}

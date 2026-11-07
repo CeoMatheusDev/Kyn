@@ -92,30 +92,77 @@ pub const Parser = struct {
         return self.take();
     }
 
-    /// programa = { função } EOF
+    /// programa = { import }, { função } EOF
     pub fn parseProgram(self: *Parser) Error!*ast.Program {
         const start_span = self.current().span;
+        var imports: std.ArrayList(ast.Import) = .empty;
         var functions: std.ArrayList(*ast.Function) = .empty;
+        var seen_function = false;
 
         while (!self.at(.eof)) {
-            if (!self.at(.kw_fn)) {
-                const tok = self.current();
-                return self.fail(
-                    .syntax,
-                    tok.span,
-                    "esperado declaração 'fn' no nível superior, encontrado {s}",
-                    .{tok.describe()},
-                );
+            switch (self.current().tag) {
+                .kw_import => {
+                    if (seen_function) {
+                        const tok = self.current();
+                        return self.fail(
+                            .syntax,
+                            tok.span,
+                            "'import' deve vir antes das declarações de função",
+                            .{},
+                        );
+                    }
+                    try imports.append(self.arena, try self.parseImport());
+                },
+                .kw_fn => {
+                    seen_function = true;
+                    try functions.append(self.arena, try self.parseFunction());
+                },
+                else => {
+                    const tok = self.current();
+                    return self.fail(
+                        .syntax,
+                        tok.span,
+                        "esperado 'import' ou declaração 'fn' no nível superior, encontrado {s}",
+                        .{tok.describe()},
+                    );
+                },
             }
-            try functions.append(self.arena, try self.parseFunction());
         }
 
         const program = try self.arena.create(ast.Program);
         program.* = .{
+            .imports = try imports.toOwnedSlice(self.arena),
             .functions = try functions.toOwnedSlice(self.arena),
             .span = start_span.merge(self.current().span),
         };
         return program;
+    }
+
+    /// import = "import", string, ";" ;
+    fn parseImport(self: *Parser) Error!ast.Import {
+        const kw_tok = try self.expect(.kw_import, "'import'");
+
+        const path_tok = self.current();
+        if (path_tok.tag == .string_unterminated) {
+            return self.fail(.syntax, path_tok.span, "literal de string não terminado no caminho de importação", .{});
+        }
+        if (path_tok.tag != .string) {
+            return self.fail(
+                .syntax,
+                path_tok.span,
+                "esperado caminho de importação entre aspas, encontrado {s}",
+                .{path_tok.describe()},
+            );
+        }
+        self.advance();
+
+        const semi = try self.expect(.semicolon, "';' após o caminho de importação");
+
+        return .{
+            .path = path_tok.text,
+            .path_span = path_tok.span,
+            .span = kw_tok.span.merge(semi.span),
+        };
     }
 
     fn parseFunction(self: *Parser) Error!*ast.Function {
@@ -680,4 +727,52 @@ test "parser: literal fora de 64 bits é diagnosticado" {
     defer parsed.deinit();
     try testing.expectEqual(@as(usize, 1), parsed.diags.count());
     try testing.expectEqual(diagnostics.Kind.integer_overflow, parsed.diags.last().?.kind);
+}
+
+test "parser: imports antes das funções" {
+    var parsed = try Parsed.parse(
+        \\import "lib/math";
+        \\import "util.kyn";
+        \\fn main() -> i32 { return 0; }
+    );
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 0), parsed.diags.count());
+    const imports = parsed.program.?.imports;
+    try testing.expectEqual(@as(usize, 2), imports.len);
+    try testing.expectEqualStrings("lib/math", imports[0].path);
+    try testing.expectEqualStrings("util.kyn", imports[1].path);
+    try testing.expectEqual(@as(u32, 1), imports[0].path_span.line);
+    try testing.expectEqual(@as(usize, 1), parsed.program.?.functions.len);
+}
+
+test "parser: import depois de função é rejeitado" {
+    var parsed = try Parsed.parse(
+        \\fn main() -> i32 { return 0; }
+        \\import "lib/math";
+    );
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 1), parsed.diags.count());
+    try testing.expectEqual(diagnostics.Kind.syntax, parsed.diags.last().?.kind);
+    try testing.expect(std.mem.indexOf(u8, parsed.diags.last().?.message, "antes das declarações") != null);
+}
+
+test "parser: import exige string entre aspas" {
+    var parsed = try Parsed.parse("import lib;");
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 1), parsed.diags.count());
+    try testing.expectEqual(diagnostics.Kind.syntax, parsed.diags.last().?.kind);
+}
+
+test "parser: import exige ponto e vírgula" {
+    var parsed = try Parsed.parse("import \"lib/math\"");
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 1), parsed.diags.count());
+    try testing.expectEqual(diagnostics.Kind.syntax, parsed.diags.last().?.kind);
+}
+
+test "parser: string não terminada em import gera diagnóstico específico" {
+    var parsed = try Parsed.parse("import \"lib/math;");
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 1), parsed.diags.count());
+    try testing.expect(std.mem.indexOf(u8, parsed.diags.last().?.message, "não terminado") != null);
 }

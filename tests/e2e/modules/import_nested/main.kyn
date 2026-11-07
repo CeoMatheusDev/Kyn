@@ -1,0 +1,7 @@
+// Cadeia de importações relativa a cada arquivo importador.
+// expect-exit: 70
+import "a.kyn";
+
+fn main() -> i32 {
+    return passo(7);
+}

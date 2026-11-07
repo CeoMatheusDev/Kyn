@@ -1,14 +1,14 @@
 # DEVELOPMENT_STATE — Kyn
 
 **Mantido por:** agente de continuidade (Arena)
-**Branch ativa:** `arena/599599bc-kyn` (a partir de `5217796375ee4a6dbcd83036a3b3c7d4afee3eff` de `main`)
-**Integração:** PR #8 mesclado em `main` como `837d4edb1fa64cf48ba7efe2d30735b087d92945`
-(2026-11-07); CI em `main` verde (run `42414408475`) e suíte local retestada
-após o merge.
-**Versão do projeto:** `0.3.1-alpha.1`
-**Última validação:** 2026-11-07 — local (Zig 0.17.0 + GNU as/ld, Debian 12 /
-x86-64) e CI (run `42414049577`, ubuntu-24.04, 2m05s, verde, com
-`validate-ir-strict`)
+**Branch ativa:** `arena/7663d1de-kyn` (a partir de `449f78b1dbdd9dc63de176c7e0dfb41b4a7291be` de `main`)
+**Integração:** PRs #7 (`5217796`), #8 (`837d4ed`) e #9 (`449f78b`) mesclados em
+`main` (2026-11-07). O ciclo atual (módulos/`import`) foi integrado pelo PR #10 —
+ver §6 para os SHAs e runs verificados.
+**Versão do projeto:** `0.3.2-alpha.1`
+**Última validação:** 2026-11-07 — local (Zig 0.17.0 + GNU `as`/`ld`, Linux
+x86-64): `zig build`, `zig build test` (115 testes), `zig build e2e` (70/70) e
+`zig fmt --check`; IR validado por `llvm-as` no CI
 **Estado do working tree:** verificar com `git status` antes de agir
 
 ---
@@ -47,50 +47,59 @@ Neste ciclo o pipeline do frontend foi **integrado e validado por execução**:
 |---|---|---|
 | Build | `build.zig`, `build.zig.zon` | Fonte única; `zig build`, `zig build test`, `zig build e2e` |
 | CLI | `src/main.zig` | `check`/`emit` (`--llvm`, `--asm`, `-o`, `--lib`), códigos 0/1/2/3 |
-| Lexer | `src/lexer/lexer.zig` | Tokens tipados, keywords, operadores 1–2 chars, spans; descarta trivia |
+| Lexer | `src/lexer/lexer.zig` | Tokens tipados, keywords (inclui `import`), operadores 1–2 chars, literal de string sem escapes, spans; descarta trivia |
 | Spans | `src/span.zig` | offset + linha/coluna 1-based; sem cópia de texto |
-| Diagnósticos | `src/diagnostics.zig` | categoria estável + mensagem + linha/caret |
-| AST | `src/ast/ast.zig` | funções, params, let/var, assign, return, if/else, while, blocos, expressões |
-| Parser | `src/parser/parser.zig` | programa completo, precedência/associatividade, erro no primeiro token inválido |
+| Diagnósticos | `src/diagnostics.zig` | categoria estável + mensagem + linha/caret + `file` (arquivo de origem) |
+| AST | `src/ast/ast.zig` | programa com `imports`, funções (`file_id`), params, let/var, assign, return, if/else, while, blocos, expressões |
+| Parser | `src/parser/parser.zig` | programa completo, `import` antes das funções, precedência/associatividade, erro no primeiro token inválido |
 | Semântica | `src/sema/sema.zig` | escopos, resolução, `i32`/`bool`/`void`, mutabilidade, chamadas, slots, `main`, `alwaysReturns` |
 | Backend LLVM | `src/codegen/llvm.zig` | IR derivado da AST; validado só estruturalmente |
 | Backend nativo | `src/codegen/x86_64.zig` | System V sem libc; validado executando binários |
-| Driver | `src/driver.zig` | arena por compilação; `Result.deinit()` |
+| Driver | `src/driver.zig` | arena por compilação; `compile` (buffer único) e `compilePath` (grafo de imports, dedupe, ciclos, flatten); `Result.deinit()` |
 | `unsafe`/`repr(C)` | `src/sema/unsafe.zig` | política isolada e testada; sem nós na AST ainda |
 | Self-hosting | `src/kyn/*.kyn`, `src/compiler/*.kyn` | placeholders; não executados |
 | Std | `std/core/*`, `std/os/*` | stubs experimentais; compilam nos testes |
-| Fixtures | `tests/` | 50 `integration/case_N.kyn` (suportadas) + 14 em `tests/e2e`; demais ainda não suportadas |
+| Fixtures | `tests/` | 50 `integration/case_N.kyn` (suportadas) + 17 em `tests/e2e` (9 positivas, 3 módulos, 5 negativas, 3 módulos negativos); demais ainda não suportadas |
 | CI | `.github/workflows/ci.yml` | ubuntu-24.04: fmt + test + e2e + validação de IR estrita |
-| Validação de IR | `tools/validate-ir.sh` | `llvm-as`/`clang` sobre 59 módulos; estrito no CI |
+| Validação de IR | `tools/validate-ir.sh` | `llvm-as`/`clang` sobre 62 módulos (inclui os multi-arquivo); estrito no CI |
 
 ### Subconjunto aceito hoje
 
+`import "caminho.kyn";` antes das funções (caminho relativo ao arquivo
+importador, cada arquivo carregado uma vez, símbolos achatados em escopo único),
 `fn`, `let`/`var` (inicializador obrigatório), inferência ou anotação
 (`i32`/`bool`/`void`), atribuição só em `var`, `return`, `if`/`else`/`else if`,
 `while`, blocos, aritmética, comparações, `&&`/`||` com curto-circuito, `-`/`!`,
-literais inteiros/booleanos e chamadas a funções do próprio programa (≤ 6 args).
+literais inteiros/booleanos e chamadas a funções do programa (≤ 6 args).
 
-Fora do subconjunto: `import`, `struct`, `enum`, `impl`, `unsafe`, atributos,
-strings, `f32`/`f64`, slices, ponteiros, generics, `Result`/`?`, closures, `for`.
+Fora do subconjunto: `struct`, `enum`, `impl`, `unsafe`, atributos, strings em
+expressões (só o literal do `import` é léxico), `f32`/`f64`, slices, ponteiros,
+generics, `Result`/`?`, closures, `for`, `pub`, imports qualificados/seletivos e
+pacotes.
 
-### Validação executada nesta sessão
+### Validação executada neste ciclo
 
 - `zig build` — sucesso (gera `zig-out/bin/kync`).
-- `zig build test` — **96 testes** (89 do compilador + 7 da std), todos passando.
-- `zig build e2e` — **64/64** casos: 9 fixtures comportamentais executadas,
-  50 fixtures `case_N.kyn` com código de saída `N`, 5 fixtures negativas
-  (código 1 + mensagem `erro:`).
+- `zig build test` — **115 testes** (108 do compilador + 7 da std), todos
+  passando. Inclui 21 novos: lexer de strings (conteúdo/span, vazio, não
+  terminado, sem quebra de linha), parser de `import` (dois imports, import após
+  função, caminho sem aspas, falta de `;`, string aberta) e driver multi-arquivo
+  (import simples, subdiretório, diamante sem duplicação, ciclo, arquivo
+  ausente, raiz ausente, símbolo duplicado, erro semântico em módulo importado,
+  erro de sintaxe em módulo importado, `import` não resolvido em `compile`).
+- `zig build e2e` — **70/70** casos: 9 fixtures comportamentais executadas,
+  3 programas multi-arquivo (`modules/import_basic`, `import_nested`,
+  `import_diamond`) compilados, montados, ligados e executados com código de
+  saída conferido, 50 fixtures `case_N.kyn`, 5 fixtures negativas e 3 módulos
+  negativos (ciclo, arquivo ausente, símbolo duplicado) com trecho de mensagem
+  esperado (`expect-error.txt`).
 - `zig fmt --check build.zig src std` — sem diferenças.
 - `zig build validate-ir` sem LLVM — avisa e sai 0 (skip documentado);
-  `--require-tool` (passo estrito) — sai 1, como esperado.
-- Script de validação testado com stubs de `llvm-as`: aceitação (59/59),
-  rejeição (59 falhas, exit 1) e descoberta de `llvm-as-18`.
-- **CI real (GitHub Actions, run `42414049577`)**: verde em 2m05s, incluindo
-  `zig build test`, `zig build e2e` e `zig build validate-ir-strict` (o
-  `llvm-as` do runner aceitou o IR das 59 fixtures; o passo estrito falharia se
-  o verificador faltasse ou rejeitasse algum módulo).
-- CLI exercitada manualmente: sem args (2), arquivo inexistente (3), opção
-  inválida (2), diagnóstico (1), `-o` com `check` (2), `emit` llvm/asm (0).
+  o script agora também percorre os 3 programas multi-arquivo (62 módulos no
+  total quando há `llvm-as`/`clang`).
+- CLI exercitada: `check` em `tests/e2e/modules/import_nested/main.kyn`
+  (código 0), `emit --llvm/--asm` em programas multi-arquivo, diagnóstico com
+  `arquivo:linha:coluna` do módulo importado, arquivo raiz ausente (código 3).
 
 ## 3. Decisões técnicas registradas
 
@@ -117,64 +126,87 @@ strings, `f32`/`f64`, slices, ponteiros, generics, `Result`/`?`, closures, `for`
    O `target triple` é fixo em `x86_64-unknown-linux-gnu`.
 9. **Limites documentados do backend nativo:** ≤ 6 parâmetros/argumentos
    (diagnosticados pela semântica), sem chamadas externas, sem otimização.
-10. **Versionamento:** `0.3.1-alpha.1`; entradas antigas do CHANGELOG (até
+10. **Módulos sem runtime:** `import "caminho";` é resolvido em tempo de
+    compilação por `driver.compilePath`, relativo ao arquivo importador; o grafo
+    é percorrido em pré-ordem de DFS, deduplicado por caminho normalizado
+    (`std.fs.path.resolveAlloc`, sem syscalls) e achatado em um único
+    `ast.Program` antes da semântica — por isso nenhum backend mudou. Ciclos
+    (`.import_cycle`), arquivos ausentes (`.import_not_found`) e símbolos
+    repetidos (`.duplicate_declaration`) são diagnosticados. Visibilidade,
+    imports qualificados/seletivos e pacotes não existem.
+11. **Atribuição de diagnósticos por arquivo:** cada `ast.Function` carrega
+    `file_id`, `Diagnostic.file` indexa `Result.sources` e a CLI imprime o
+    `arquivo:linha:coluna` correto mesmo para erros em módulos importados.
+12. **Versionamento:** `0.3.2-alpha.1`; entradas antigas do CHANGELOG (até
     `v2.3.0`) marcadas como não comprovadas.
-11. **CI:** GitHub Actions em `ubuntu-24.04`; a toolchain Zig vem do wheel
+13. **CI:** GitHub Actions em `ubuntu-24.04`; a toolchain Zig vem do wheel
     oficial do PyPI (`ziglang==0.17.0.post0`) em um venv, o mesmo caminho
     documentado para o desenvolvimento local — o CI valida a própria receita.
     Ações fixadas em major (`actions/checkout@v7`).
-12. **Validação nunca silenciosa:** qualquer passo de validação opcional tem
+14. **Validação nunca silenciosa:** qualquer passo de validação opcional tem
     variante estrita usada no CI.
 
 ## 4. Pendências (priorizadas)
 
-1. **Linguagem:** sem `import`/módulos, `struct`, `enum`, `impl`, `unsafe`,
-   atributos, strings, tipos numéricos além de `i32`, slices e ponteiros.
-2. **Tipos:** sem `i64`/`u32`/`f32`/`f64`, sem checagem de fluxo completa
+1. **Linguagem:** sem `struct`, `enum`, `impl`, `unsafe`, atributos, strings em
+   expressões, tipos numéricos além de `i32`, slices e ponteiros.
+2. **Módulos:** escopo único achatado (nomes de função precisam ser únicos no
+   programa), sem `pub`/visibilidade, imports qualificados/seletivos, aliases,
+   pacotes ou manifesto; deduplicação é por caminho normalizado (não por
+   inode/realpath), então symlinks podem carregar o mesmo arquivo duas vezes.
+3. **Tipos:** sem `i64`/`u32`/`f32`/`f64`, sem checagem de fluxo completa
    (só `alwaysReturns` estrutural), sem casts/conversões.
-3. **Std experimental** com APIs que não fazem E/S real; `kyn:core` × `kyn:std`
+4. **Std experimental** com APIs que não fazem E/S real; `kyn:core` × `kyn:std`
    ainda não separados em módulos de build distintos.
-4. **Self-hosting:** `src/kyn/` e `src/compiler/` continuam placeholders.
-5. **Runner de fixtures** cobre apenas sucesso/negativo genérico; não confere
+5. **Self-hosting:** `src/kyn/` e `src/compiler/` continuam placeholders.
+6. **Runner de fixtures** cobre apenas sucesso/negativo genérico; não confere
    mensagem/posição esperada por arquivo.
-6. **Fuzz/edge cases** de `tests/fuzz/` não são executados por nenhum runner.
-7. **`tests/diagnostics/*.kyn`** não são verificados pelo e2e (só
+7. **Fuzz/edge cases** de `tests/fuzz/` não são executados por nenhum runner.
+8. **`tests/diagnostics/*.kyn`** não são verificados pelo e2e (só
    `tests/e2e/negative`).
-8. **Backend nativo** restrito a Linux x86-64, ≤ 6 argumentos, sem libc e sem
+9. **Backend nativo** restrito a Linux x86-64, ≤ 6 argumentos, sem libc e sem
    otimização; sem testes de regressão com IR/asm completos (golden files).
-9. **CI** roda apenas em `ubuntu-24.04` (sem matriz de SO, sem cache de build,
+10. **CI** roda apenas em `ubuntu-24.04` (sem matriz de SO, sem cache de build,
    sem artefatos publicados); `target triple` do IR é fixo.
-10. **Cobertura de testes do compiler** concentrada em exemplos; sem medição de
+11. **Cobertura de testes do compiler** concentrada em exemplos; sem medição de
     cobertura nem testes de estresse de entradas grandes.
 
 ## 5. Próxima etapa prioritária
 
-**Implementar `import` e compilação multi-arquivo.**
+**`struct` com valor (layout, campos e acesso) no subconjunto compilável.**
 
-- Por quê: é o primeiro item aberto do ROADMAP e desbloqueia organização de
-  projetos; hoje o parser rejeita `import` no nível superior, então nenhuma
-  fixture com módulos compila. Também é pré-requisito para separar `kyn:core`
-  de `kyn:std` no build.
+- Por quê: com módulos resolvidos, o próximo limitador é não haver tipos
+  compostos — qualquer organização de dados exige variáveis soltas. `struct` é
+  o primeiro nó de tipo que aparece no ROADMAP e destrava `impl`/métodos depois.
+  Também força a primeira decisão de layout entre os dois backends, que precisa
+  ser documentada e testada por execução.
 - Escopo mínimo proposto (incremental e testável):
-  1. Lexer/parser: literal de string e `import "caminho";` no nível superior.
-  2. Driver: resolver caminhos relativos ao arquivo de entrada, carregar cada
-     arquivo uma vez, detectar ciclos e importações duplicadas com diagnóstico
-     por span.
-  3. Semântica: tabela de funções por módulo com resolução documentada
-     (qualificação ou *flattening*), proibindo colisões de nome.
-  4. CLI: `kync check/emit` com arquivo raiz cujos imports são carregados.
-  5. Testes: unitários do resolver + fixtures e2e com 2–3 arquivos; casos
-     negativos para ciclo, arquivo ausente e símbolo duplicado.
-  6. Docs: `docs/syntax.ebnf`, `docs/status.md`, `docs/development.md`,
-     `CHANGELOG.md` e este arquivo.
+  1. AST/parser: `struct Nome { campo: tipo, ... }` no nível superior, campo com
+     tipo `i32`/`bool` e span próprio; erro para corpo vazio na primeira versão
+     ou documentar permitido, e para tipo de campo desconhecido.
+  2. Semântica: tabela de structs, layout com offsets alinhados (i32 4 bytes,
+     bool 1 byte com padding documentado), resolução `let p: Ponto = ...`,
+     acesso `p.x` como lvalue/rvalue, diagnóstico de campo inexistente,
+     duplicado e de atribuição a campo de `let`.
+  3. Restrições da primeira versão (diagnosticadas, não silenciosas): struct só
+     como variável local e campo de struct; sem parâmetros/retornos por valor,
+     sem struct dentro de struct e sem literal composto até a etapa seguinte.
+  4. Backends: x86-64 com slots na pilha (offsets fixos, `mov` por tamanho);
+     LLVM IR com `alloca` do tipo struct e `getelementptr` para campos.
+  5. Testes: unitários de parser/sema (offsets e diagnósticos) e fixtures e2e
+     novas com execução real (soma/mutação de campos, `if` sobre campo) + IR
+     das mesmas fixtures aceito por `llvm-as` no CI.
+  6. Docs: `docs/syntax.ebnf`, `docs/architecture.md` (layout), `docs/status.md`,
+     `README.md`, `CHANGELOG.md` e este arquivo; versão `0.3.3-alpha.1`.
 - Critérios de conclusão: `zig build test`, `zig build e2e` e
-  `validate-ir-strict` verdes **no CI**; fixtures multi-arquivo executadas com
+  `validate-ir-strict` verdes **no CI**; fixtures com `struct` executadas com
   código de saída conferido; nenhuma alegação sem log.
 
-**Depois disso (ordem sugerida):** `struct`/`enum`/`impl` na AST e semântica →
-conectar `unsafe`/`repr(C)` → ampliar tipos numéricos (`i64`, `u8`, `f32`...) →
-runner de fixtures com diagnóstico esperado → `target triple` configurável →
-início do self-hosting em Kyn.
+**Depois disso (ordem sugerida):** literais compostos e `struct` por
+parâmetro/retorno → `enum`/`impl` (métodos com `self`) → strings + `print` via
+syscall `write` (validação por saída de texto, não só exit code) → ampliar tipos
+numéricos (`i64`, `u8`, `f32`...) → conectar `unsafe`/`repr(C)` → `target triple`
+configurável → início do self-hosting em Kyn.
 
 ## 6. Histórico dos ciclos
 

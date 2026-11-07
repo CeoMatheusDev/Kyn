@@ -3,8 +3,11 @@
 //! Exposta pelo módulo `kyn` no `build.zig`; a CLI `kync` e os testes importam
 //! esta biblioteca em vez de arquivos individuais.
 
-/// Versão do compilador/linguagem (pré-1.0: ver CHANGELOG.md).
-pub const version = "0.3.1-alpha.1";
+const build_options = @import("build_options");
+
+/// Versão do compilador/linguagem (pré-1.0: ver CHANGELOG.md). Vem de
+/// `build.zig.zon` via opções de build.
+pub const version = build_options.version;
 
 /// Versão mínima do Zig declarada em `build.zig.zon`.
 pub const zig_version = "0.17.0";

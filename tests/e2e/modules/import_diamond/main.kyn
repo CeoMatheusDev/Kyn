@@ -1,0 +1,10 @@
+// Importação em diamante: 'base.kyn' é carregado uma única vez.
+// expect-exit: 6
+import "a.kyn";
+import "b.kyn";
+import "base.kyn";
+import "triplo.kyn";
+
+fn main() -> i32 {
+    return um() + dois() + triplo();
+}

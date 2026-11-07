@@ -144,6 +144,12 @@ for src in "$ROOT"/tests/integration/case_*.kyn; do
     validate_one "$src" "$(basename "$src" .kyn)"
 done
 
+echo "validate-ir: módulos importados (tests/e2e/modules/<caso>/main.kyn)"
+for src in "$ROOT"/tests/e2e/modules/*/main.kyn; do
+    [ -e "$src" ] || continue
+    validate_one "$src" "mod_$(basename "$(dirname "$src")")"
+done
+
 echo
 echo "validate-ir: $passed/$total módulos aceitos pelo verificador LLVM, $failed rejeitados"
 

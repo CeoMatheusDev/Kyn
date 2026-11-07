@@ -6,6 +6,7 @@ program    = { token } ;
 
 token      = identifier
            | integer
+           | string_literal
            | keyword
            | operator
            | punctuation ;
@@ -13,9 +14,14 @@ token      = identifier
 identifier = ( letter | "_" ), { letter | digit | "_" } ;
 integer    = digit, { digit } ;   (* valor convertido para i64 pelo parser *)
 
+(* Literal de string: conteúdo entre aspas duplas, sem escapes e sem quebra de
+   linha. O token guarda o texto sem as aspas; um literal aberto vira
+   "string_unterminated" e o parser reporta erro com a posição. *)
+string_literal = '"', { any_char - ( '"' | "\n" | "\r" ) }, '"' ;
+
 keyword    = "fn" | "let" | "var" | "return"
            | "if" | "else" | "while"
-           | "true" | "false" ;
+           | "import" | "true" | "false" ;
 
 operator   = "->"
            | "==" | "!=" | "<" | "<=" | ">" | ">="
