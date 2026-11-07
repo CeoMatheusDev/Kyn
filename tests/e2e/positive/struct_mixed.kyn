@@ -1,0 +1,18 @@
+// Campos de tipos diferentes e atribuição inteira de struct.
+// expect-exit: 21
+struct Estado {
+    total: i32,
+    ligado: bool,
+}
+
+fn main() -> i32 {
+    var e: Estado = Estado { total: 5, ligado: true };
+    e.total = e.total * 4;
+    e.ligado = false;
+    var f: Estado = Estado { total: 1, ligado: true };
+    f = e;
+    if !f.ligado {
+        return f.total + 1;
+    }
+    return 0;
+}

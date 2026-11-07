@@ -20,6 +20,9 @@ pub const Type = enum {
     i32,
     bool,
     void,
+    /// Valor de struct (identidade nominal em `Symbol.struct_id`). Não é
+    /// escalar: não participa de operadores, condições nem chamadas por valor.
+    aggregate,
     /// Tipo desconhecido: evita cascata de diagnósticos após um erro.
     unknown,
 
@@ -28,6 +31,7 @@ pub const Type = enum {
             .i32 => "i32",
             .bool => "bool",
             .void => "void",
+            .aggregate => "struct",
             .unknown => "desconhecido",
         };
     }
@@ -51,10 +55,25 @@ pub const Symbol = struct {
     name: []const u8,
     typ: Type,
     mutable: bool,
-    /// Slot de pilha relativo à função (parâmetros primeiro).
+    /// Slot de pilha relativo à função (parâmetros primeiro). Em variáveis de
+    /// struct, os campos ocupam `slot + 1 .. slot + 1 + n`.
     slot: u32,
     kind: SymbolKind,
     decl_span: Span,
+    /// Índice em `Checked.structs` quando `typ == .aggregate`.
+    struct_id: u32 = 0,
+};
+
+/// Campo de um struct já validado: tipo escalar e índice na declaração.
+pub const FieldInfo = struct {
+    name: []const u8,
+    typ: Type,
+    span: Span,
+};
+
+pub const StructInfo = struct {
+    decl: *const ast.StructDecl,
+    fields: []FieldInfo,
 };
 
 pub const FunctionInfo = struct {
@@ -73,6 +92,15 @@ pub const Checked = struct {
     functions: []FunctionInfo,
     /// Tabela plana; `Expr.resolved` e `Stmt.decl_symbol` indexam este slice.
     symbols: []Symbol,
+    /// Structs declarados, na ordem da fonte (achatados entre módulos).
+    structs: []StructInfo,
+
+    pub fn findStruct(self: *const Checked, name: []const u8) ?u32 {
+        for (self.structs, 0..) |info, i| {
+            if (std.mem.eql(u8, info.decl.name, name)) return @intCast(i);
+        }
+        return null;
+    }
 
     pub fn findFunction(self: *const Checked, name: []const u8) ?u32 {
         for (self.functions, 0..) |f, i| {
@@ -100,6 +128,7 @@ pub const Checker = struct {
 
     symbols: std.ArrayList(Symbol) = .empty,
     functions: std.ArrayList(FunctionInfo) = .empty,
+    structs: std.ArrayList(StructInfo) = .empty,
     /// Início (índice em `symbols`) do escopo atual.
     scopes: std.ArrayList(usize) = .empty,
 
@@ -113,6 +142,16 @@ pub const Checker = struct {
     }
 
     pub fn checkProgram(self: *Checker, program: *const ast.Program) std.mem.Allocator.Error!Checked {
+        // Passo 0: nomes de struct antes de qualquer tipo ser resolvido.
+        for (program.structs) |decl| {
+            self.diags.current_file = decl.file_id;
+            try self.registerStructName(decl);
+        }
+        for (program.structs) |decl| {
+            self.diags.current_file = decl.file_id;
+            try self.registerStructFields(decl);
+        }
+
         // Passo 1: registrar assinaturas (permite chamadas antes da declaração
         // e recursão).
         for (program.functions) |func| {
@@ -134,7 +173,96 @@ pub const Checker = struct {
         return .{
             .functions = try self.functions.toOwnedSlice(self.arena),
             .symbols = try self.symbols.toOwnedSlice(self.arena),
+            .structs = try self.structs.toOwnedSlice(self.arena),
         };
+    }
+
+    fn findStructIndex(self: *const Checker, name: []const u8) ?u32 {
+        for (self.structs.items, 0..) |info, i| {
+            if (std.mem.eql(u8, info.decl.name, name)) return @intCast(i);
+        }
+        return null;
+    }
+
+    /// Primeiro passo dos structs: garante nomes únicos para que qualquer
+    /// declaração possa ser referenciada por tipos resolvidos depois.
+    fn registerStructName(self: *Checker, decl: *const ast.StructDecl) std.mem.Allocator.Error!void {
+        for (self.structs.items) |existing| {
+            if (std.mem.eql(u8, existing.decl.name, decl.name)) {
+                if (self.fileName(existing.decl.file_id)) |path| {
+                    try self.diags.add(
+                        .duplicate_declaration,
+                        decl.name_span,
+                        "struct '{s}' já declarado em '{s}' (linha {d})",
+                        .{ decl.name, path, existing.decl.name_span.line },
+                    );
+                } else {
+                    try self.diags.add(
+                        .duplicate_declaration,
+                        decl.name_span,
+                        "struct '{s}' já declarado (primeira declaração na linha {d})",
+                        .{ decl.name, existing.decl.name_span.line },
+                    );
+                }
+                return;
+            }
+        }
+
+        try self.structs.append(self.arena, .{ .decl = decl, .fields = &.{} });
+    }
+
+    /// Segundo passo: resolve os tipos dos campos (somente escalares nesta
+    /// etapa) e valida duplicidade.
+    fn registerStructFields(self: *Checker, decl: *const ast.StructDecl) std.mem.Allocator.Error!void {
+        const index = self.findStructIndex(decl.name) orelse return;
+        // Declaração duplicada (já diagnosticada) compartilha o nome com a
+        // primeira; não sobrescreve os campos dela.
+        if (self.structs.items[index].decl != decl) return;
+
+        if (decl.fields.len == 0) {
+            try self.diags.add(
+                .unsupported,
+                decl.name_span,
+                "struct '{s}' sem campos não é suportado nesta etapa",
+                .{decl.name},
+            );
+        }
+
+        const fields = try self.arena.alloc(FieldInfo, decl.fields.len);
+        for (decl.fields, 0..) |field, i| {
+            for (decl.fields[0..i]) |previous| {
+                if (std.mem.eql(u8, previous.name, field.name)) {
+                    try self.diags.add(
+                        .duplicate_declaration,
+                        field.name_span,
+                        "campo '{s}' já declarado no struct '{s}' (linha {d})",
+                        .{ field.name, decl.name, previous.name_span.line },
+                    );
+                    break;
+                }
+            }
+
+            const typ = try self.resolveTypeName(field.type_name);
+            if (typ == .aggregate) {
+                try self.diags.add(
+                    .unsupported,
+                    field.type_name.span,
+                    "campo '{s}' de '{s}': struct com campo struct ainda não é suportado",
+                    .{ field.name, decl.name },
+                );
+            } else if (typ == .void) {
+                try self.diags.add(
+                    .type_mismatch,
+                    field.type_name.span,
+                    "campo '{s}' de '{s}' não pode ser 'void'",
+                    .{ field.name, decl.name },
+                );
+            }
+
+            fields[i] = .{ .name = field.name, .typ = typ, .span = field.span };
+        }
+
+        self.structs.items[index].fields = fields;
     }
 
     /// Caminho do arquivo de um símbolo, quando conhecido e diferente do
@@ -180,12 +308,28 @@ pub const Checker = struct {
         // Índice provisório: as assinaturas são anexadas na ordem da fonte.
         for (func.params, 0..) |param, i| {
             params[i] = try self.resolveTypeName(param.type_name);
+            if (params[i] == .aggregate) {
+                try self.diags.add(
+                    .unsupported,
+                    param.type_name.span,
+                    "parâmetro '{s}' de '{s}': passagem de struct por valor ainda não é suportada",
+                    .{ param.name, func.name },
+                );
+            }
         }
 
         const return_type: Type = if (func.return_type) |tn|
             try self.resolveTypeName(tn)
         else
             .void;
+        if (return_type == .aggregate) {
+            try self.diags.add(
+                .unsupported,
+                func.return_type.?.span,
+                "função '{s}': retorno de struct por valor ainda não é suportado",
+                .{func.name},
+            );
+        }
 
         try self.functions.append(self.arena, .{
             .decl = func,
@@ -237,13 +381,31 @@ pub const Checker = struct {
 
     fn resolveTypeName(self: *Checker, tn: ast.TypeName) std.mem.Allocator.Error!Type {
         if (Type.fromName(tn.name)) |typ| return typ;
+        if (self.findStructIndex(tn.name) != null) return .aggregate;
         try self.diags.add(
             .unknown_type,
             tn.span,
-            "tipo '{s}' não suportado (disponíveis: i32, bool, void)",
+            "tipo '{s}' não suportado (disponíveis: i32, bool, void e structs declarados)",
             .{tn.name},
         );
         return .unknown;
+    }
+
+    /// Struct associado ao tipo anotado, quando houver.
+    fn structIdOfTypeName(self: *const Checker, tn: ast.TypeName) ?u32 {
+        return self.findStructIndex(tn.name);
+    }
+
+    /// Struct associado a uma expressão que produz valor de struct.
+    fn structIdOfExpr(self: *const Checker, expr: *const ast.Expr) ?u32 {
+        return switch (expr.kind) {
+            .struct_literal => |lit| lit.resolved_struct,
+            .identifier => if (expr.resolved) |idx| blk: {
+                const sym = self.symbols.items[idx];
+                break :blk if (sym.typ == .aggregate) sym.struct_id else null;
+            } else null,
+            else => null,
+        };
     }
 
     fn checkFunctionBody(self: *Checker, func: *const ast.Function, index: u32) std.mem.Allocator.Error!void {
@@ -259,7 +421,8 @@ pub const Checker = struct {
 
         for (func.params) |param| {
             const typ = try self.resolveTypeName(param.type_name);
-            _ = try self.declare(param.name, param.span, typ, false, .param);
+            const struct_id = self.structIdOfTypeName(param.type_name) orelse 0;
+            _ = try self.declare(param.name, param.span, typ, false, .param, struct_id);
         }
 
         try self.checkStatements(func.body);
@@ -299,6 +462,7 @@ pub const Checker = struct {
         typ: Type,
         mutable: bool,
         kind: SymbolKind,
+        struct_id: u32,
     ) !?u32 {
         if (self.scopes.items.len > 0) {
             const start = self.scopes.items[self.scopes.items.len - 1];
@@ -315,8 +479,15 @@ pub const Checker = struct {
             }
         }
 
+        // Valor de struct ocupa um slot de base (não usado) e um slot por
+        // campo, na ordem da declaração — o mesmo mapeamento nos dois backends.
+        const extra_slots: u32 = if (typ == .aggregate and struct_id < self.structs.items.len)
+            @intCast(self.structs.items[struct_id].fields.len)
+        else
+            0;
+
         const slot = self.next_slot;
-        self.next_slot += 1;
+        self.next_slot += 1 + extra_slots;
         try self.symbols.append(self.arena, .{
             .name = name,
             .typ = typ,
@@ -324,8 +495,54 @@ pub const Checker = struct {
             .slot = slot,
             .kind = kind,
             .decl_span = span,
+            .struct_id = struct_id,
         });
         return @intCast(self.symbols.items.len - 1);
+    }
+
+    /// Resolve a base de um acesso a campo (hoje só um identificador simples).
+    fn resolveFieldBase(self: *Checker, base: *ast.Expr) std.mem.Allocator.Error!?u32 {
+        switch (base.kind) {
+            .identifier => |name| {
+                const index = self.lookup(name) orelse {
+                    try self.diags.add(
+                        .undefined_variable,
+                        base.span,
+                        "variável '{s}' não declarada",
+                        .{name},
+                    );
+                    return null;
+                };
+                base.resolved = index;
+                return index;
+            },
+            else => {
+                try self.diags.add(
+                    .unsupported,
+                    base.span,
+                    "acesso a campo encadeado (struct com campo struct) ainda não é suportado",
+                    .{},
+                );
+                return null;
+            },
+        }
+    }
+
+    /// Rótulo de tipo para mensagens: nome do struct quando aplicável.
+    fn typeLabel(self: *const Checker, typ: Type, struct_id: u32) []const u8 {
+        if (typ == .aggregate and struct_id < self.structs.items.len) {
+            return self.structs.items[struct_id].decl.name;
+        }
+        return typ.name();
+    }
+
+    /// Texto curto da expressão usado em mensagens (bases de campo são nomes).
+    fn exprText(self: *const Checker, expr: *const ast.Expr) []const u8 {
+        _ = self;
+        return switch (expr.kind) {
+            .identifier => |name| name,
+            else => "<expressão>",
+        };
     }
 
     fn lookup(self: *const Checker, name: []const u8) ?u32 {
@@ -352,17 +569,35 @@ pub const Checker = struct {
             .let_decl => |*decl| {
                 const init_type = try self.checkExpr(decl.init);
                 var declared_type: Type = init_type;
+                var declared_struct: u32 = 0;
                 if (decl.type_name) |tn| {
                     declared_type = try self.resolveTypeName(tn);
-                    if (declared_type != .unknown and init_type != .unknown) {
-                        if (declared_type != init_type) {
-                            try self.diags.add(
-                                .type_mismatch,
-                                decl.init.span,
-                                "inicializador de '{s}' tem tipo '{s}', mas a anotação é '{s}'",
-                                .{ decl.name, init_type.name(), declared_type.name() },
-                            );
-                        }
+                    declared_struct = self.structIdOfTypeName(tn) orelse 0;
+                }
+                const init_struct = self.structIdOfExpr(decl.init) orelse 0;
+
+                if (declared_type != .unknown and init_type != .unknown and declared_type != init_type) {
+                    try self.diags.add(
+                        .type_mismatch,
+                        decl.init.span,
+                        "inicializador de '{s}' tem tipo '{s}', mas a anotação é '{s}'",
+                        .{ decl.name, self.typeLabel(init_type, init_struct), self.typeLabel(declared_type, declared_struct) },
+                    );
+                }
+
+                // Mesmo tipo `struct`, structs diferentes.
+                if (decl.type_name != null and declared_type == .aggregate and init_type == .aggregate) {
+                    if (init_struct != declared_struct) {
+                        try self.diags.add(
+                            .type_mismatch,
+                            decl.init.span,
+                            "inicializador de '{s}' é do struct '{s}', mas a anotação é '{s}'",
+                            .{
+                                decl.name,
+                                self.structs.items[init_struct].decl.name,
+                                self.structs.items[declared_struct].decl.name,
+                            },
+                        );
                     }
                 }
 
@@ -375,7 +610,17 @@ pub const Checker = struct {
                     );
                 }
 
-                stmt.decl_symbol = try self.declare(decl.name, decl.name_span, declared_type, decl.mutable, .local);
+                // Variável de struct sem anotação: o struct vem do inicializador.
+                const struct_id: u32 = if (declared_type == .aggregate) declared_struct else 0;
+
+                stmt.decl_symbol = try self.declare(
+                    decl.name,
+                    decl.name_span,
+                    declared_type,
+                    decl.mutable,
+                    .local,
+                    struct_id,
+                );
             },
 
             .assign => |*assign| {
@@ -404,7 +649,75 @@ pub const Checker = struct {
                         .type_mismatch,
                         assign.value.span,
                         "'{s}' é do tipo '{s}', mas o valor atribuído é '{s}'",
-                        .{ assign.name, sym.typ.name(), value_type.name() },
+                        .{
+                            assign.name,
+                            self.typeLabel(sym.typ, sym.struct_id),
+                            self.typeLabel(value_type, self.structIdOfExpr(assign.value) orelse 0),
+                        },
+                    );
+                }
+                if (sym.typ == .aggregate and value_type == .aggregate) {
+                    const got = self.structIdOfExpr(assign.value);
+                    if (got != null and got.? != sym.struct_id) {
+                        try self.diags.add(
+                            .type_mismatch,
+                            assign.value.span,
+                            "'{s}' é do struct '{s}', mas o valor atribuído é do struct '{s}'",
+                            .{
+                                assign.name,
+                                self.structs.items[sym.struct_id].decl.name,
+                                self.structs.items[got.?].decl.name,
+                            },
+                        );
+                    }
+                }
+            },
+
+            .field_assign => |*fa| {
+                const value_type = try self.checkExpr(fa.value);
+
+                const base_index = try self.resolveFieldBase(fa.base);
+                if (base_index == null) return;
+                const sym = self.symbols.items[base_index.?];
+                if (sym.typ != .aggregate) {
+                    try self.diags.add(
+                        .type_mismatch,
+                        fa.name_span,
+                        "acesso a campo '{s}' exige um struct, mas '{s}' é do tipo '{s}'",
+                        .{ fa.name, self.exprText(fa.base), self.typeLabel(sym.typ, sym.struct_id) },
+                    );
+                    return;
+                }
+
+                const info = &self.structs.items[sym.struct_id];
+                const field_index = findField(info, fa.name) orelse {
+                    try self.diags.add(
+                        .undefined_field,
+                        fa.name_span,
+                        "struct '{s}' não tem o campo '{s}'",
+                        .{ info.decl.name, fa.name },
+                    );
+                    return;
+                };
+                fa.field_index = field_index;
+
+                if (!sym.mutable) {
+                    try self.diags.add(
+                        .immutable_assignment,
+                        fa.name_span,
+                        "'{s}.{s}' não pode ser atribuído: '{s}' foi declarado com 'let'",
+                        .{ self.exprText(fa.base), fa.name, self.exprText(fa.base) },
+                    );
+                    return;
+                }
+
+                const field_type = info.fields[field_index].typ;
+                if (field_type != .unknown and value_type != .unknown and field_type != value_type) {
+                    try self.diags.add(
+                        .type_mismatch,
+                        fa.value.span,
+                        "campo '{s}.{s}' é do tipo '{s}', mas o valor atribuído é '{s}'",
+                        .{ self.exprText(fa.base), fa.name, field_type.name(), value_type.name() },
                     );
                 }
             },
@@ -439,7 +752,15 @@ pub const Checker = struct {
             },
 
             .expr_stmt => |expr| {
-                _ = try self.checkExpr(expr);
+                const typ = try self.checkExpr(expr);
+                if (typ == .aggregate) {
+                    try self.diags.add(
+                        .unsupported,
+                        expr.span,
+                        "valor de struct só pode inicializar ou ser atribuído a uma variável",
+                        .{},
+                    );
+                }
             },
 
             .if_stmt => |*if_stmt| {
@@ -546,6 +867,100 @@ pub const Checker = struct {
             },
 
             .call => |*call| return self.checkCall(expr.span, call),
+
+            .field_access => |*access| {
+                const base_index = try self.resolveFieldBase(access.base);
+                if (base_index == null) return .unknown;
+
+                const sym = self.symbols.items[base_index.?];
+                if (sym.typ != .aggregate) {
+                    try self.diags.add(
+                        .type_mismatch,
+                        access.name_span,
+                        "acesso a campo '{s}' exige um struct, mas '{s}' é do tipo '{s}'",
+                        .{ access.name, self.exprText(access.base), self.typeLabel(sym.typ, sym.struct_id) },
+                    );
+                    return .unknown;
+                }
+
+                const info = &self.structs.items[sym.struct_id];
+                const field_index = findField(info, access.name) orelse {
+                    try self.diags.add(
+                        .undefined_field,
+                        access.name_span,
+                        "struct '{s}' não tem o campo '{s}'",
+                        .{ info.decl.name, access.name },
+                    );
+                    return .unknown;
+                };
+                access.field_index = field_index;
+                return info.fields[field_index].typ;
+            },
+
+            .struct_literal => |*lit| {
+                const struct_id = self.findStructIndex(lit.type_name.name) orelse {
+                    try self.diags.add(
+                        .unknown_type,
+                        lit.type_name.span,
+                        "struct '{s}' não declarado",
+                        .{lit.type_name.name},
+                    );
+                    return .unknown;
+                };
+                lit.resolved_struct = struct_id;
+                const info = &self.structs.items[struct_id];
+
+                const seen = try self.arena.alloc(bool, info.fields.len);
+                @memset(seen, false);
+
+                for (lit.fields) |field_init| {
+                    const field_index = findField(info, field_init.name) orelse {
+                        try self.diags.add(
+                            .undefined_field,
+                            field_init.name_span,
+                            "struct '{s}' não tem o campo '{s}'",
+                            .{ info.decl.name, field_init.name },
+                        );
+                        _ = try self.checkExpr(field_init.value);
+                        continue;
+                    };
+                    if (seen[field_index]) {
+                        try self.diags.add(
+                            .invalid_struct_literal,
+                            field_init.name_span,
+                            "campo '{s}' repetido no literal de '{s}'",
+                            .{ field_init.name, info.decl.name },
+                        );
+                        _ = try self.checkExpr(field_init.value);
+                        continue;
+                    }
+                    seen[field_index] = true;
+
+                    const value_type = try self.checkExpr(field_init.value);
+                    const field_type = info.fields[field_index].typ;
+                    if (value_type != .unknown and field_type != .unknown and value_type != field_type) {
+                        try self.diags.add(
+                            .type_mismatch,
+                            field_init.value.span,
+                            "campo '{s}.{s}' é do tipo '{s}', mas o valor é '{s}'",
+                            .{ info.decl.name, field_init.name, field_type.name(), value_type.name() },
+                        );
+                    }
+                }
+
+                for (info.fields, 0..) |field, i| {
+                    if (!seen[i]) {
+                        try self.diags.add(
+                            .invalid_struct_literal,
+                            lit.type_name.span,
+                            "literal de '{s}' não inicializa o campo '{s}'",
+                            .{ info.decl.name, field.name },
+                        );
+                    }
+                }
+
+                return .aggregate;
+            },
         }
     }
 
@@ -655,6 +1070,15 @@ pub const Checker = struct {
         }
 
         for (arg_types.items, func.params, 0..) |actual, expected, i| {
+            if (actual == .aggregate) {
+                try self.diags.add(
+                    .unsupported,
+                    call.args[i].span,
+                    "argumento {d} de '{s}': passagem de struct por valor ainda não é suportada",
+                    .{ i + 1, call.callee },
+                );
+                continue;
+            }
             if (actual == .unknown or expected == .unknown) continue;
             if (actual != expected) {
                 try self.diags.add(
@@ -676,6 +1100,14 @@ pub const Checker = struct {
         return null;
     }
 };
+
+/// Índice do campo `name` na declaração do struct.
+fn findField(info: *const StructInfo, name: []const u8) ?u32 {
+    for (info.fields, 0..) |field, i| {
+        if (std.mem.eql(u8, field.name, name)) return @intCast(i);
+    }
+    return null;
+}
 
 /// Verificação estrutural simples: o bloco sempre termina executando `return`?
 /// Cobre `return` direto, blocos aninhados e `if` com ambos os ramos
@@ -1012,4 +1444,197 @@ test "sema: limite de argumentos do backend é diagnosticado" {
         if (d.kind == .unsupported) found_unsupported = true;
     }
     try testing.expect(found_unsupported);
+}
+
+test "sema: struct com literal, acesso e layout de slots" {
+    var f = try Fixture.check(
+        \\struct Ponto { x: i32, y: bool }
+        \\fn main() -> i32 {
+        \\    var p: Ponto = Ponto { x: 1, y: true };
+        \\    p.x = p.x + 2;
+        \\    let q: Ponto = p;
+        \\    if q.y { return q.x; }
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 0), f.diags.count());
+    const checked = f.checked.?;
+
+    try testing.expectEqual(@as(usize, 1), checked.structs.len);
+    try testing.expectEqualStrings("Ponto", checked.structs[0].decl.name);
+    try testing.expectEqual(@as(usize, 2), checked.structs[0].fields.len);
+    try testing.expectEqual(Type.i32, checked.structs[0].fields[0].typ);
+    try testing.expectEqual(Type.bool, checked.structs[0].fields[1].typ);
+
+    // Struct ocupa um slot de base + um slot por campo: p, q = 2 * 3 slots.
+    try testing.expectEqual(@as(u32, 6), checked.functions[0].slot_count);
+    try testing.expectEqual(Type.aggregate, checked.symbols[0].typ);
+    try testing.expectEqual(@as(u32, 0), checked.symbols[0].struct_id);
+    try testing.expectEqual(@as(u32, 0), checked.symbols[0].slot);
+    try testing.expectEqual(@as(u32, 3), checked.symbols[1].slot);
+}
+
+test "sema: campo inexistente na leitura e na escrita" {
+    var f = try Fixture.check(
+        \\struct P { x: i32 }
+        \\fn main() -> i32 {
+        \\    var p: P = P { x: 1 };
+        \\    p.y = 2;
+        \\    return p.z;
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 2), f.diags.count());
+    try testing.expectEqual(diagnostics.Kind.undefined_field, f.diags.items.items[0].kind);
+    try testing.expectEqual(diagnostics.Kind.undefined_field, f.diags.items.items[1].kind);
+}
+
+test "sema: literal de struct incompleto e com campo repetido" {
+    var f = try Fixture.check(
+        \\struct P { x: i32, y: i32 }
+        \\fn main() -> i32 {
+        \\    let a: P = P { x: 1 };
+        \\    let b: P = P { x: 1, x: 2, y: 3 };
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 2), f.diags.count());
+    try testing.expectEqual(diagnostics.Kind.invalid_struct_literal, f.diags.items.items[0].kind);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "não inicializa o campo 'y'") != null);
+    try testing.expectEqual(diagnostics.Kind.invalid_struct_literal, f.diags.items.items[1].kind);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[1].message, "repetido") != null);
+}
+
+test "sema: atribuição a campo de variável imutável" {
+    var f = try Fixture.check(
+        \\struct P { x: i32 }
+        \\fn main() -> i32 {
+        \\    let p: P = P { x: 1 };
+        \\    p.x = 2;
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .immutable_assignment);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "declarado com 'let'") != null);
+}
+
+test "sema: struct por valor em parâmetro, retorno e argumento é rejeitado" {
+    var f = try Fixture.check(
+        \\struct P { x: i32 }
+        \\fn id(p: P) -> P { return p; }
+        \\fn main() -> i32 {
+        \\    let a: P = P { x: 1 };
+        \\    let b: P = id(a);
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 3), f.diags.count());
+    try testing.expectEqual(diagnostics.Kind.unsupported, f.diags.items.items[0].kind); // parâmetro
+    try testing.expectEqual(diagnostics.Kind.unsupported, f.diags.items.items[1].kind); // retorno
+    try testing.expectEqual(diagnostics.Kind.unsupported, f.diags.items.items[2].kind); // argumento
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "parâmetro 'p'") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[2].message, "argumento 1") != null);
+}
+
+test "sema: struct aninhado, vazio e duplicado são diagnosticados" {
+    var f = try Fixture.check(
+        \\struct Vazio {}
+        \\struct Interno { v: i32 }
+        \\struct Externo { i: Interno }
+        \\struct Interno { v: i32 }
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer f.deinit();
+    try testing.expect(f.diags.count() >= 3);
+    var saw_empty = false;
+    var saw_nested = false;
+    var saw_dup = false;
+    for (f.diags.items.items) |d| {
+        switch (d.kind) {
+            .unsupported => if (std.mem.indexOf(u8, d.message, "sem campos") != null) {
+                saw_empty = true;
+            } else if (std.mem.indexOf(u8, d.message, "campo struct") != null) {
+                saw_nested = true;
+            },
+            .duplicate_declaration => saw_dup = true,
+            else => {},
+        }
+    }
+    try testing.expect(saw_empty);
+    try testing.expect(saw_nested);
+    try testing.expect(saw_dup);
+}
+
+test "sema: struct desconhecido e campo com tipo errado" {
+    var f = try Fixture.check(
+        \\struct P { x: i32 }
+        \\fn main() -> i32 {
+        \\    let a: Q = Q { x: 1 };
+        \\    let b: P = P { x: true };
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expect(f.diags.count() >= 3);
+    try testing.expectEqual(diagnostics.Kind.unknown_type, f.diags.items.items[0].kind); // anotação 'Q'
+    var saw_unknown_struct = false;
+    var saw_mismatch = false;
+    for (f.diags.items.items) |d| {
+        switch (d.kind) {
+            .unknown_type => if (std.mem.indexOf(u8, d.message, "struct 'Q' não declarado") != null) {
+                saw_unknown_struct = true;
+            },
+            .type_mismatch => saw_mismatch = true,
+            else => {},
+        }
+    }
+    try testing.expect(saw_unknown_struct);
+    try testing.expect(saw_mismatch);
+}
+
+test "sema: struct usado como condição ou em comparação" {
+    var f = try Fixture.check(
+        \\struct P { x: i32 }
+        \\fn main() -> i32 {
+        \\    let a: P = P { x: 1 };
+        \\    let b: P = P { x: 1 };
+        \\    if a == b { return 1; }
+        \\    if a { return 2; }
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 2), f.diags.count());
+    try testing.expectEqual(diagnostics.Kind.type_mismatch, f.diags.items.items[0].kind);
+    try testing.expectEqual(diagnostics.Kind.invalid_condition, f.diags.items.items[1].kind);
+}
+
+test "sema: literal de struct como expressão solta é rejeitado" {
+    var f = try Fixture.check(
+        \\struct P { x: i32 }
+        \\fn main() -> i32 {
+        \\    P { x: 1 };
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .unsupported);
+}
+
+test "sema: struct diferente na anotação e no inicializador" {
+    var f = try Fixture.check(
+        \\struct A { x: i32 }
+        \\struct B { x: i32 }
+        \\fn main() -> i32 {
+        \\    let a: A = B { x: 1 };
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .type_mismatch);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "struct 'B'") != null);
 }

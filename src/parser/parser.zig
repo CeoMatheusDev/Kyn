@@ -26,6 +26,10 @@ pub const Parser = struct {
     tokens: []const lexer.Token,
     diags: *diagnostics.List,
     pos: usize = 0,
+    /// `Nome { ... }` só é literal de struct com esta flag ativa. Condições de
+    /// `if`/`while` a desativam, porque `if cond {` e `while cond {` usariam o
+    /// mesmo prefixo (identificador seguido de `{`).
+    allow_struct_literal: bool = true,
 
     pub fn init(arena: std.mem.Allocator, tokens: []const lexer.Token, diags: *diagnostics.List) Parser {
         return .{ .arena = arena, .tokens = tokens, .diags = diags };
@@ -92,29 +96,34 @@ pub const Parser = struct {
         return self.take();
     }
 
-    /// programa = { import }, { função } EOF
+    /// programa = { import }, { struct_decl | function_decl }, EOF
     pub fn parseProgram(self: *Parser) Error!*ast.Program {
         const start_span = self.current().span;
         var imports: std.ArrayList(ast.Import) = .empty;
+        var structs: std.ArrayList(*ast.StructDecl) = .empty;
         var functions: std.ArrayList(*ast.Function) = .empty;
-        var seen_function = false;
+        var seen_decl = false;
 
         while (!self.at(.eof)) {
             switch (self.current().tag) {
                 .kw_import => {
-                    if (seen_function) {
+                    if (seen_decl) {
                         const tok = self.current();
                         return self.fail(
                             .syntax,
                             tok.span,
-                            "'import' deve vir antes das declarações de função",
+                            "'import' deve vir antes das declarações de 'struct' e 'fn'",
                             .{},
                         );
                     }
                     try imports.append(self.arena, try self.parseImport());
                 },
+                .kw_struct => {
+                    seen_decl = true;
+                    try structs.append(self.arena, try self.parseStruct());
+                },
                 .kw_fn => {
-                    seen_function = true;
+                    seen_decl = true;
                     try functions.append(self.arena, try self.parseFunction());
                 },
                 else => {
@@ -122,7 +131,7 @@ pub const Parser = struct {
                     return self.fail(
                         .syntax,
                         tok.span,
-                        "esperado 'import' ou declaração 'fn' no nível superior, encontrado {s}",
+                        "esperado 'import', declaração 'struct' ou 'fn' no nível superior, encontrado {s}",
                         .{tok.describe()},
                     );
                 },
@@ -132,10 +141,63 @@ pub const Parser = struct {
         const program = try self.arena.create(ast.Program);
         program.* = .{
             .imports = try imports.toOwnedSlice(self.arena),
+            .structs = try structs.toOwnedSlice(self.arena),
             .functions = try functions.toOwnedSlice(self.arena),
             .span = start_span.merge(self.current().span),
         };
         return program;
+    }
+
+    /// struct_decl = "struct", identifier, "{", { field, "," }, "}" ;
+    /// Campos exigem tipo explícito; a vírgula final é opcional.
+    fn parseStruct(self: *Parser) Error!*ast.StructDecl {
+        const kw_tok = try self.expect(.kw_struct, "'struct'");
+        const name_tok = try self.expectIdentifier("nome do struct após 'struct'");
+        _ = try self.expect(.lbrace, "'{' para iniciar os campos do struct");
+
+        var fields: std.ArrayList(ast.Field) = .empty;
+        while (!self.at(.rbrace)) {
+            if (self.at(.eof)) {
+                return self.fail(
+                    .syntax,
+                    self.current().span,
+                    "struct '{s}' não fechado: falta '}}' antes do fim do arquivo",
+                    .{name_tok.text},
+                );
+            }
+            const field_name = try self.expectIdentifier("nome do campo");
+            _ = try self.expect(.colon, "':' e o tipo do campo");
+            const type_name = try self.parseTypeName("tipo do campo");
+            try fields.append(self.arena, .{
+                .name = field_name.text,
+                .name_span = field_name.span,
+                .type_name = type_name,
+                .span = field_name.span.merge(type_name.span),
+            });
+            if (self.at(.comma)) {
+                self.advance();
+                continue;
+            }
+            if (!self.at(.rbrace)) {
+                const tok = self.current();
+                return self.fail(
+                    .syntax,
+                    tok.span,
+                    "esperado ',' entre campos do struct ou '}}' para fechar, encontrado {s}",
+                    .{tok.describe()},
+                );
+            }
+        }
+        const close = try self.expect(.rbrace, "'}' para fechar o struct");
+
+        const decl = try self.arena.create(ast.StructDecl);
+        decl.* = .{
+            .name = name_tok.text,
+            .name_span = name_tok.span,
+            .fields = try fields.toOwnedSlice(self.arena),
+            .span = kw_tok.span.merge(close.span),
+        };
+        return decl;
     }
 
     /// import = "import", string, ";" ;
@@ -254,6 +316,7 @@ pub const Parser = struct {
             },
             .identifier => blk: {
                 if (self.peekTag(1) == .assign) break :blk try self.parseAssign();
+                if (self.peekTag(1) == .dot) break :blk try self.parseFieldAssignOrExpr();
                 break :blk try self.parseExprStatement();
             },
             else => self.parseExprStatement(),
@@ -323,7 +386,7 @@ pub const Parser = struct {
 
     fn parseIf(self: *Parser) Error!*ast.Stmt {
         const kw_tok = try self.expect(.kw_if, "'if'");
-        const cond = try self.parseExpression();
+        const cond = try self.parseCondition();
         const then_block = try self.parseBlock("'{' para iniciar o bloco do 'if'");
 
         var else_body: ?ast.Stmt.ElseBranch = null;
@@ -352,7 +415,7 @@ pub const Parser = struct {
 
     fn parseWhile(self: *Parser) Error!*ast.Stmt {
         const kw_tok = try self.expect(.kw_while, "'while'");
-        const cond = try self.parseExpression();
+        const cond = try self.parseCondition();
         const block = try self.parseBlock("'{' para iniciar o bloco do 'while'");
         return ast.Stmt.create(self.arena, kw_tok.span.merge(block.span), .{
             .while_stmt = .{ .cond = cond, .body = block.stmts },
@@ -367,6 +430,15 @@ pub const Parser = struct {
 
     pub fn parseExpression(self: *Parser) Error!*ast.Expr {
         return self.parseBinary(1);
+    }
+
+    /// Expressão de condição: sem `Nome { ... }` para não consumir o `{` do
+    /// bloco que segue.
+    fn parseCondition(self: *Parser) Error!*ast.Expr {
+        const saved = self.allow_struct_literal;
+        self.allow_struct_literal = false;
+        defer self.allow_struct_literal = saved;
+        return self.parseExpression();
     }
 
     const BinaryInfo = struct {
@@ -454,7 +526,11 @@ pub const Parser = struct {
                     const call = try self.parseCall(tok);
                     return call;
                 }
-                return ast.Expr.create(self.arena, tok.span, .{ .identifier = tok.text });
+                if (self.at(.lbrace) and self.allow_struct_literal) {
+                    return self.parseStructLiteral(tok);
+                }
+                const base = try ast.Expr.create(self.arena, tok.span, .{ .identifier = tok.text });
+                return self.parseFieldChain(base);
             },
             .lparen => {
                 self.advance();
@@ -496,6 +572,98 @@ pub const Parser = struct {
                 .callee = callee.text,
                 .callee_span = callee.span,
                 .args = try args.toOwnedSlice(self.arena),
+            },
+        });
+    }
+
+    /// Consome `.campo` encadeados sobre `base` e devolve o nó mais externo.
+    fn parseFieldChain(self: *Parser, base: *ast.Expr) Error!*ast.Expr {
+        var expr = base;
+        while (self.at(.dot)) {
+            self.advance();
+            const field_tok = try self.expectIdentifier("nome do campo após '.'");
+            const node = try ast.Expr.create(self.arena, expr.span.merge(field_tok.span), .{
+                .field_access = .{
+                    .base = expr,
+                    .name = field_tok.text,
+                    .name_span = field_tok.span,
+                },
+            });
+            expr = node;
+        }
+        return expr;
+    }
+
+    /// `Nome { campo: valor, ... }` — a vírgula final é opcional.
+    fn parseStructLiteral(self: *Parser, name_tok: lexer.Token) Error!*ast.Expr {
+        _ = try self.expect(.lbrace, "'{' para iniciar o literal de struct");
+        var fields: std.ArrayList(ast.Expr.FieldInit) = .empty;
+        while (!self.at(.rbrace)) {
+            if (self.at(.eof)) {
+                return self.fail(
+                    .syntax,
+                    self.current().span,
+                    "literal de struct não fechado: falta '}}' antes do fim do arquivo",
+                    .{},
+                );
+            }
+            const field_name = try self.expectIdentifier("nome do campo no literal");
+            _ = try self.expect(.colon, "':' e o valor do campo");
+            const value = try self.parseExpression();
+            try fields.append(self.arena, .{
+                .name = field_name.text,
+                .name_span = field_name.span,
+                .value = value,
+            });
+            if (self.at(.comma)) {
+                self.advance();
+                continue;
+            }
+            if (!self.at(.rbrace)) {
+                const tok = self.current();
+                return self.fail(
+                    .syntax,
+                    tok.span,
+                    "esperado ',' entre campos do literal ou '}}' para fechar, encontrado {s}",
+                    .{tok.describe()},
+                );
+            }
+        }
+        const close = try self.expect(.rbrace, "'}' para fechar o literal de struct");
+        return ast.Expr.create(self.arena, name_tok.span.merge(close.span), .{
+            .struct_literal = .{
+                .type_name = .{ .name = name_tok.text, .span = name_tok.span },
+                .fields = try fields.toOwnedSlice(self.arena),
+            },
+        });
+    }
+
+    /// `base.campo = valor;` ou expressão iniciada por acesso a campo.
+    fn parseFieldAssignOrExpr(self: *Parser) Error!*ast.Stmt {
+        const name_tok = try self.expectIdentifier("nome da variável");
+        const base = try ast.Expr.create(self.arena, name_tok.span, .{ .identifier = name_tok.text });
+        const target = try self.parseFieldChain(base);
+
+        if (!self.at(.assign)) {
+            const semi = try self.expect(.semicolon, "';' após a expressão");
+            return ast.Stmt.create(self.arena, target.span.merge(semi.span), .{ .expr_stmt = target });
+        }
+
+        // Só `alvo.campo = valor` é aceito; cadeias mais profundas ficam para a
+        // semântica diagnosticar (struct com campo struct ainda não existe).
+        const access = switch (target.kind) {
+            .field_access => |access| access,
+            else => return self.fail(.syntax, target.span, "atribuição inválida", .{}),
+        };
+        self.advance(); // =
+        const value = try self.parseExpression();
+        const semi = try self.expect(.semicolon, "';' após a atribuição");
+        return ast.Stmt.create(self.arena, name_tok.span.merge(semi.span), .{
+            .field_assign = .{
+                .base = access.base,
+                .name = access.name,
+                .name_span = access.name_span,
+                .value = value,
             },
         });
     }
@@ -775,4 +943,103 @@ test "parser: string não terminada em import gera diagnóstico específico" {
     defer parsed.deinit();
     try testing.expectEqual(@as(usize, 1), parsed.diags.count());
     try testing.expect(std.mem.indexOf(u8, parsed.diags.last().?.message, "não terminado") != null);
+}
+
+test "parser: declaração de struct com campos e vírgula final" {
+    var parsed = try Parsed.parse(
+        \\struct Ponto {
+        \\    x: i32,
+        \\    y: bool,
+        \\}
+        \\fn main() -> i32 { return 0; }
+    );
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 0), parsed.diags.count());
+    const program = parsed.program.?;
+    try testing.expectEqual(@as(usize, 1), program.structs.len);
+    try testing.expectEqualStrings("Ponto", program.structs[0].name);
+    try testing.expectEqual(@as(usize, 2), program.structs[0].fields.len);
+    try testing.expectEqualStrings("x", program.structs[0].fields[0].name);
+    try testing.expectEqualStrings("i32", program.structs[0].fields[0].type_name.name);
+    try testing.expectEqual(@as(u32, 3), program.structs[0].fields[1].name_span.line);
+}
+
+test "parser: struct depois de função é aceito (ordem livre)" {
+    var parsed = try Parsed.parse(
+        \\fn main() -> i32 { return 0; }
+        \\struct Tardio { v: i32 }
+    );
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 0), parsed.diags.count());
+    try testing.expectEqual(@as(usize, 1), parsed.program.?.structs.len);
+}
+
+test "parser: struct sem fechamento gera diagnóstico" {
+    var parsed = try Parsed.parse("struct P { x: i32 ");
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 1), parsed.diags.count());
+    try testing.expectEqual(diagnostics.Kind.syntax, parsed.diags.last().?.kind);
+}
+
+test "parser: campo sem tipo é rejeitado" {
+    var parsed = try Parsed.parse("struct P { x }");
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 1), parsed.diags.count());
+    try testing.expectEqual(diagnostics.Kind.syntax, parsed.diags.last().?.kind);
+}
+
+test "parser: literal de struct e acesso a campo" {
+    var parsed = try Parsed.parse(
+        \\struct Ponto { x: i32, y: i32 }
+        \\fn main() -> i32 {
+        \\    var p: Ponto = Ponto { x: 1, y: 2 };
+        \\    p.x = p.y;
+        \\    return p.x;
+        \\}
+    );
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 0), parsed.diags.count());
+
+    const body = parsed.program.?.functions[0].body;
+    try testing.expectEqual(@as(usize, 3), body.len);
+
+    const lit = body[0].kind.let_decl.init.kind.struct_literal;
+    try testing.expectEqualStrings("Ponto", lit.type_name.name);
+    try testing.expectEqual(@as(usize, 2), lit.fields.len);
+    try testing.expectEqualStrings("y", lit.fields[1].name);
+
+    const assign = body[1].kind.field_assign;
+    try testing.expectEqualStrings("x", assign.name);
+    try testing.expectEqualStrings("p", assign.base.kind.identifier);
+
+    const ret = body[2].kind.return_stmt.?.kind.field_access;
+    try testing.expectEqualStrings("x", ret.name);
+    try testing.expectEqualStrings("p", ret.base.kind.identifier);
+}
+
+test "parser: condições de if/while aceitam acesso a campo sem virar literal" {
+    var parsed = try Parsed.parse(
+        \\struct C { v: i32 }
+        \\fn main() -> i32 {
+        \\    var c: C = C { v: 0 };
+        \\    while c.v < 3 { c.v = c.v + 1; }
+        \\    if c.v == 3 { return 1; }
+        \\    return 0;
+        \\}
+    );
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 0), parsed.diags.count());
+    const body = parsed.program.?.functions[0].body;
+    const while_stmt = body[1].kind.while_stmt;
+    try testing.expectEqualStrings("v", while_stmt.cond.kind.binary.lhs.kind.field_access.name);
+}
+
+test "parser: 'import' depois de struct é rejeitado" {
+    var parsed = try Parsed.parse(
+        \\struct P { x: i32 }
+        \\import "lib.kyn";
+    );
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 1), parsed.diags.count());
+    try testing.expect(std.mem.indexOf(u8, parsed.diags.last().?.message, "antes das declarações") != null);
 }

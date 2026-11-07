@@ -3,6 +3,10 @@
 //! Estratégia:
 //! - cada variável (parâmetro ou local) recebe um slot de 8 bytes no frame;
 //!   `i32`/`bool` ocupam 4 bytes no slot e são carregados em 32 bits;
+//! - variável de struct ocupa um slot de base (reservado) seguido de um slot
+//!   por campo, na ordem da declaração (`slot + 1 + índice`); structs nunca
+//!   escapam da função (sem parâmetros/retorno por valor), então cabe em
+//!   variáveis locais;
 //! - expressões são avaliadas em `%eax` com pilha de temporários;
 //! - `_start` chama `kyn_main` e encerra via syscall `exit` (60) com o valor
 //!   retornado por `main` (`0` quando `main` é `void`).
@@ -142,14 +146,32 @@ const FnEmitter = struct {
         switch (stmt.kind) {
             .let_decl => |decl| {
                 const symbol = self.symbolAt(stmt.decl_symbol orelse return error.MiscompiledAst);
-                try self.emitExpr(decl.init);
-                try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
+                if (symbol.typ == .aggregate) {
+                    try self.emitStructStore(symbol, decl.init);
+                } else {
+                    try self.emitExpr(decl.init);
+                    try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
+                }
             },
 
             .assign => |assign| {
                 const symbol = self.symbolAt(assign.resolved orelse return error.MiscompiledAst);
-                try self.emitExpr(assign.value);
-                try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
+                if (symbol.typ == .aggregate) {
+                    try self.emitStructStore(symbol, assign.value);
+                } else {
+                    try self.emitExpr(assign.value);
+                    try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
+                }
+            },
+
+            .field_assign => |field_assign| {
+                const base = self.symbolAt(field_assign.base.resolved orelse return error.MiscompiledAst);
+                if (base.typ != .aggregate) return error.MiscompiledAst;
+                const field_index = field_assign.field_index orelse return error.MiscompiledAst;
+                try self.emitExpr(field_assign.value);
+                try self.print("    movl %eax, -{d}(%rbp)\n", .{
+                    slotOffset(base.slot + 1 + field_index),
+                });
             },
 
             .return_stmt => |maybe_expr| {
@@ -253,6 +275,53 @@ const FnEmitter = struct {
             },
 
             .call => |call| try self.emitCall(call),
+
+            .field_access => |access| {
+                const base = self.symbolAt(access.base.resolved orelse return error.MiscompiledAst);
+                if (base.typ != .aggregate) return error.MiscompiledAst;
+                const field_index = access.field_index orelse return error.MiscompiledAst;
+                try self.print("    movl -{d}(%rbp), %eax\n", .{
+                    slotOffset(base.slot + 1 + field_index),
+                });
+            },
+
+            // Valor de struct não cabe em `%eax`: `let`/atribuição tratam o
+            // literal campo a campo em `emitStructStore`.
+            .struct_literal => return error.UnsupportedNode,
+        }
+    }
+
+    /// Copia um valor de struct para os slots de `dst`: literal (cada campo
+    /// avaliado e gravado) ou variável de struct (cópia campo a campo).
+    fn emitStructStore(self: *FnEmitter, dst: *const sema.Symbol, value: *ast.Expr) Error!void {
+        if (dst.struct_id >= self.checked.structs.len) return error.MiscompiledAst;
+        const info = &self.checked.structs[dst.struct_id];
+
+        switch (value.kind) {
+            .struct_literal => |lit| {
+                for (info.fields, 0..) |field, i| {
+                    const init_value = findFieldInit(lit.fields, field.name) orelse return error.MiscompiledAst;
+                    const index: u32 = @intCast(i);
+                    try self.emitExpr(init_value);
+                    try self.print("    movl %eax, -{d}(%rbp)\n", .{
+                        slotOffset(dst.slot + 1 + index),
+                    });
+                }
+            },
+            .identifier => {
+                const src = self.symbolAt(value.resolved orelse return error.MiscompiledAst);
+                if (src.typ != .aggregate) return error.MiscompiledAst;
+                for (info.fields, 0..) |_, i| {
+                    const index: u32 = @intCast(i);
+                    try self.print("    movl -{d}(%rbp), %eax\n", .{
+                        slotOffset(src.slot + 1 + index),
+                    });
+                    try self.print("    movl %eax, -{d}(%rbp)\n", .{
+                        slotOffset(dst.slot + 1 + index),
+                    });
+                }
+            },
+            else => return error.MiscompiledAst,
         }
     }
 
@@ -463,4 +532,51 @@ test "x86_64: and/or têm curto-circuito" {
     const asm_text = try emitFixture(&f);
     try support.expectContains(asm_text, ".Lmain_and_false_");
     try support.expectContains(asm_text, ".Lmain_and_end_");
+}
+
+test "x86_64: struct grava campos em slots consecutivos" {
+    var f = try support.Fixture.build(
+        \\struct Ponto { x: i32, y: i32 }
+        \\fn main() -> i32 {
+        \\    var p: Ponto = Ponto { x: 3, y: 4 };
+        \\    p.x = p.x + p.y;
+        \\    return p.x;
+        \\}
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+
+    // p ocupa o slot 0 (base) e os campos os slots 1 e 2 => offsets -16 e -24.
+    try support.expectContains(asm_text, "movl %eax, -16(%rbp)");
+    try support.expectContains(asm_text, "movl %eax, -24(%rbp)");
+    try support.expectContains(asm_text, "movl -16(%rbp), %eax");
+    try support.expectContains(asm_text, "movl -24(%rbp), %eax");
+    // frame: 3 slots de 8 bytes arredondados para 16 => 32 bytes.
+    try support.expectContains(asm_text, "subq $32, %rsp");
+}
+
+test "x86_64: atribuição de struct copia campo a campo" {
+    var f = try support.Fixture.build(
+        \\struct P { v: i32, w: bool }
+        \\fn main() -> i32 {
+        \\    var a: P = P { v: 1, w: false };
+        \\    var b: P = a;
+        \\    b.w = true;
+        \\    if b.w { return b.v; }
+        \\    return 0;
+        \\}
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+    // a: slots 1,2 ; b: slots 4,5 ; cópia lê de a e grava em b.
+    try support.expectContains(asm_text, "movl -16(%rbp), %eax");
+    try support.expectContains(asm_text, "movl %eax, -40(%rbp)");
+}
+
+/// Valor inicial de um campo dentro de um literal de struct, por nome.
+fn findFieldInit(inits: []ast.Expr.FieldInit, name: []const u8) ?*ast.Expr {
+    for (inits) |init| {
+        if (std.mem.eql(u8, init.name, name)) return init.value;
+    }
+    return null;
 }

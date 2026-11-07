@@ -25,6 +25,7 @@ pub const Tag = enum {
     // palavras-chave
     kw_fn,
     kw_import,
+    kw_struct,
     kw_let,
     kw_var,
     kw_return,
@@ -42,6 +43,7 @@ pub const Tag = enum {
     colon,
     semicolon,
     comma,
+    dot, // .
     arrow, // ->
 
     // operadores
@@ -86,6 +88,7 @@ pub const Token = struct {
             .string => "literal de string",
             .kw_fn => "'fn'",
             .kw_import => "'import'",
+            .kw_struct => "'struct'",
             .kw_let => "'let'",
             .kw_var => "'var'",
             .kw_return => "'return'",
@@ -101,6 +104,7 @@ pub const Token = struct {
             .colon => "':'",
             .semicolon => "';'",
             .comma => "','",
+            .dot => "'.'",
             .arrow => "'->'",
             .assign => "'='",
             .eq => "'=='",
@@ -125,7 +129,7 @@ pub const Token = struct {
 
     pub fn isKeyword(self: Token) bool {
         return switch (self.tag) {
-            .kw_fn, .kw_let, .kw_var, .kw_return, .kw_if, .kw_else, .kw_while, .kw_true, .kw_false => true,
+            .kw_fn, .kw_struct, .kw_let, .kw_var, .kw_return, .kw_if, .kw_else, .kw_while, .kw_true, .kw_false => true,
             else => false,
         };
     }
@@ -135,6 +139,7 @@ fn keywordTag(text: []const u8) ?Tag {
     const map = std.StaticStringMap(Tag).initComptime(.{
         .{ "fn", .kw_fn },
         .{ "import", .kw_import },
+        .{ "struct", .kw_struct },
         .{ "let", .kw_let },
         .{ "var", .kw_var },
         .{ "return", .kw_return },
@@ -254,6 +259,7 @@ pub const Lexer = struct {
             ':' => .colon,
             ';' => .semicolon,
             ',' => .comma,
+            '.' => .dot,
             '+' => .plus,
             '*' => .star,
             '/' => .slash,
@@ -454,4 +460,19 @@ test "lexer: string não atravessa linha" {
     const tok = lex.next();
     try std.testing.expectEqual(Tag.string_unterminated, tok.tag);
     try std.testing.expectEqual(@as(u32, 1), tok.span.line);
+}
+
+test "lexer: 'struct' é palavra-chave e '.' é pontuação" {
+    var lex = Lexer.init("struct Ponto { x: i32 }");
+    try std.testing.expectEqual(Tag.kw_struct, lex.next().tag);
+    try std.testing.expectEqual(Tag.identifier, lex.next().tag);
+    try std.testing.expectEqual(Tag.lbrace, lex.next().tag);
+
+    var fields = Lexer.init("p.x = 1;");
+    try std.testing.expectEqual(Tag.identifier, fields.next().tag);
+    const dot = fields.next();
+    try std.testing.expectEqual(Tag.dot, dot.tag);
+    try std.testing.expectEqualStrings(".", dot.text);
+    try std.testing.expectEqual(Tag.identifier, fields.next().tag);
+    try std.testing.expectEqual(Tag.assign, fields.next().tag);
 }

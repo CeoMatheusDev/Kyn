@@ -135,8 +135,10 @@ pub fn compilePath(
     // completa para a semântica e a CLI só precisa renderizar os diagnósticos.
     if (result.diags.hasErrors()) return result;
 
+    var structs: std.ArrayList(*ast.StructDecl) = .empty;
     var functions: std.ArrayList(*ast.Function) = .empty;
     for (modules) |module| {
+        for (module.program.?.structs) |decl| try structs.append(a, decl);
         for (module.program.?.functions) |func| try functions.append(a, func);
     }
 
@@ -145,6 +147,7 @@ pub fn compilePath(
     const program = try a.create(ast.Program);
     program.* = .{
         .imports = &.{},
+        .structs = try structs.toOwnedSlice(a),
         .functions = try functions.toOwnedSlice(a),
         .span = modules[0].program.?.span,
     };
@@ -201,6 +204,7 @@ const Loader = struct {
 
         const program = try parseSource(self.a, text, self.diags) orelse return;
         for (program.functions) |func| func.file_id = file_id;
+        for (program.structs) |decl| decl.file_id = file_id;
         self.modules.items[file_id].program = program;
 
         const dir = std.fs.path.dirname(key) orelse ".";
@@ -621,4 +625,56 @@ test "driver: import não resolvido em `compile` (buffer único) é diagnosticad
     defer result.deinit();
     try expectKinds(result, &.{.unsupported});
     try testing.expect(std.mem.indexOf(u8, result.diags.last().?.message, "caminho de arquivo") != null);
+}
+
+test "driver: struct declarado em módulo importado" {
+    var fx = Fixtures.init();
+    defer fx.deinit();
+    try fx.write("ponto.kyn",
+        \\struct Ponto {
+        \\    x: i32,
+        \\    y: i32,
+        \\}
+    );
+    try fx.write("main.kyn",
+        \\import "ponto.kyn";
+        \\
+        \\fn main() -> i32 {
+        \\    var p: Ponto = Ponto { x: 6, y: 7 };
+        \\    p.x = p.x * 2;
+        \\    return p.x - p.y;
+        \\}
+    );
+
+    var result = try fx.compile("main.kyn", .{ .action = .emit });
+    defer result.deinit();
+    try expectKinds(result, &.{});
+    const ir = result.output.?;
+    try testing.expect(std.mem.indexOf(u8, ir, "alloca i32, align 4") != null);
+    try testing.expect(std.mem.indexOf(u8, ir, "store i32 6, ptr") != null);
+}
+
+test "driver: struct duplicado entre módulos cita o arquivo de origem" {
+    var fx = Fixtures.init();
+    defer fx.deinit();
+    try fx.write("a.kyn", "struct P { x: i32 }\nfn a() -> i32 { return 1; }\n");
+    try fx.write("main.kyn",
+        \\import "a.kyn";
+        \\
+        \\struct P {
+        \\    y: i32,
+        \\}
+        \\
+        \\fn main() -> i32 {
+        \\    let p: P = P { y: 1 };
+        \\    return p.y;
+        \\}
+    );
+
+    var result = try fx.compile("main.kyn", .{});
+    defer result.deinit();
+    try expectKinds(result, &.{.duplicate_declaration});
+    const diag = result.diags.last().?;
+    try testing.expectEqual(@as(u32, 1), diag.file); // o módulo importado repete 'P'
+    try testing.expect(std.mem.indexOf(u8, diag.message, "struct 'P' já declarado em 'main.kyn'") != null);
 }

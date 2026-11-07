@@ -1,0 +1,13 @@
+// Erro esperado: struct por valor como parâmetro ainda não é suportado.
+struct P {
+    x: i32,
+}
+
+fn ler(p: P) -> i32 {
+    return p.x;
+}
+
+fn main() -> i32 {
+    let a: P = P { x: 1 };
+    return ler(a);
+}

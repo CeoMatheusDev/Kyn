@@ -1,14 +1,20 @@
 (* Kyn — gramática sintática do subconjunto implementado.
    Este arquivo descreve exatamente o que o parser em src/parser/parser.zig
-   aceita hoje. Construções da visão de linguagem (struct, enum, impl, generics,
+   aceita hoje. Construções da visão de linguagem (enum, impl, generics,
    slices, ponteiros, unsafe, atributos) ainda NÃO fazem parte deste
    subconjunto; ver docs/language_reference.md e docs/status.md. *)
 
-(* Importações vêm antes de qualquer função; o caminho é literal de string e é
-   resolvido em relação ao diretório do arquivo que importa. *)
-program          = { import_decl }, { function_decl }, EOF ;
+(* Importações vêm antes de qualquer declaração; o caminho é literal de string
+   e é resolvido em relação ao diretório do arquivo que importa. *)
+program          = { import_decl }, { struct_decl | function_decl }, EOF ;
 
 import_decl      = "import", string_literal, ";" ;
+
+(* Struct: campos com tipo explícito, vírgula final opcional.
+   Restrições verificadas pela semântica: sem campos de tipo struct, sem struct
+   por valor em parâmetros/retorno/argumentos. *)
+struct_decl      = "struct", identifier, "{", [ field, { ",", field }, [ "," ] ], "}" ;
+field            = identifier, ":", type_expr ;
 
 function_decl    = "fn", identifier, "(", [ parameters ], ")",
                    [ "->", type_expr ], block ;
@@ -16,7 +22,7 @@ function_decl    = "fn", identifier, "(", [ parameters ], ")",
 parameters       = parameter, { ",", parameter } ;
 parameter        = identifier, ":", type_expr ;
 
-(* Somente i32, bool e void são aceitos pela semântica nesta etapa. *)
+(* Aceitos pela semântica: i32, bool, void e nomes de struct declarados. *)
 type_expr        = identifier ;
 
 block            = "{", { statement }, "}" ;
@@ -24,6 +30,7 @@ block            = "{", { statement }, "}" ;
 statement        = let_decl
                  | var_decl
                  | assignment
+                 | field_assignment
                  | return_stmt
                  | if_stmt
                  | while_stmt
@@ -36,9 +43,12 @@ let_decl         = "let", identifier, [ ":", type_expr ], "=", expression, ";" ;
 var_decl         = "var", identifier, [ ":", type_expr ], "=", expression, ";" ;
 
 assignment       = identifier, "=", expression, ";" ;
+field_assignment = identifier, ".", identifier, "=", expression, ";" ;
 return_stmt      = "return", [ expression ], ";" ;
-if_stmt          = "if", expression, block, [ "else", ( block | if_stmt ) ] ;
-while_stmt       = "while", expression, block ;
+(* Em condições, `Nome { ... }` não é literal de struct: o `{` inicia o bloco. *)
+if_stmt          = "if", condition, block, [ "else", ( block | if_stmt ) ] ;
+condition        = expression ;
+while_stmt       = "while", condition, block ;
 expression_stmt  = expression, ";" ;
 
 (* Precedência, do menor para o maior:
@@ -58,12 +68,22 @@ equality         = comparison, { ( "==" | "!=" ), comparison } ;
 comparison       = additive, { ( "<" | "<=" | ">" | ">=" ), additive } ;
 additive         = multiplicative, { ( "+" | "-" ), multiplicative } ;
 multiplicative   = unary, { ( "*" | "/" | "%" ), unary } ;
-unary            = ( "-" | "!" ), unary | primary ;
+unary            = ( "-" | "!" ), unary | postfix ;
+
+(* Acesso a campo: a base precisa ser um identificador (struct com campo
+   struct ainda não existe na semântica). *)
+postfix          = primary, { ".", identifier } ;
 
 primary          = integer
                  | "true" | "false"
                  | identifier, [ "(", [ arguments ], ")" ]
+                 | struct_literal
                  | "(", expression, ")" ;
+
+(* `Nome { ... }` só é literal fora de condições de if/while, onde `{` inicia
+   o bloco. Todos os campos precisam aparecer exatamente uma vez. *)
+struct_literal   = identifier, "{", [ field_init, { ",", field_init }, [ "," ] ], "}" ;
+field_init       = identifier, ":", expression ;
 
 arguments        = expression, { ",", expression } ;
 

@@ -17,10 +17,14 @@ implementação integrada e testes reproduzíveis.
 - [x] Compilação multi-arquivo com `import "caminho";` (resolução relativa ao
       arquivo importador, deduplicação, ciclos/arquivos ausentes/símbolos
       duplicados diagnosticados) e fixtures e2e executadas.
+- [x] `struct` com campos escalares: declaração, literais, acesso e atribuição
+      a campo, cópia por valor, layout documentado nos dois backends e
+      restrições diagnosticadas (sem passagem por valor ainda).
 - [ ] Completar o parser e a AST para a linguagem-alvo. Subconjunto atual:
       `fn`, `let`/`var`, atribuição, `return`, `if`/`else`, `while`, blocos,
-      expressões com precedência e `import`. Faltam `struct`, `enum`, `impl`,
-      `unsafe`, atributos, strings em expressões, slices, ponteiros e generics.
+      expressões com precedência, `import` e `struct`. Faltam struct por valor
+      entre funções, `enum`, `impl`, `unsafe`, atributos, strings em expressões,
+      slices, ponteiros e generics.
 - [ ] Completar a análise semântica e o sistema de tipos além de
       `i32`/`bool`/`void` (inteiros de outras larguras, `f32`/`f64`, `str`,
       ownership, lifetimes, checagem de fluxo).
