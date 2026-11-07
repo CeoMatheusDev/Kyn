@@ -4,7 +4,7 @@
 //! esta biblioteca em vez de arquivos individuais.
 
 /// Versão do compilador/linguagem (pré-1.0: ver CHANGELOG.md).
-pub const version = "0.3.0-alpha.1";
+pub const version = "0.3.1-alpha.1";
 
 /// Versão mínima do Zig declarada em `build.zig.zon`.
 pub const zig_version = "0.17.0";

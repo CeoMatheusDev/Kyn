@@ -1,9 +1,11 @@
 # DEVELOPMENT_STATE — Kyn
 
 **Mantido por:** agente de continuidade (Arena)
-**Branch ativa:** `arena/06084568-kyn` (a partir de `46b0a949f99efc9318f9f378afbb50684d358f73` de `main`)
-**Versão do projeto:** `0.3.0-alpha.1`
-**Última validação:** 2026-11-07, Zig 0.17.0 + GNU as/ld, Debian 12 / x86-64
+**Branch ativa:** `arena/599599bc-kyn` (a partir de `5217796375ee4a6dbcd83036a3b3c7d4afee3eff` de `main`)
+**Versão do projeto:** `0.3.1-alpha.1`
+**Última validação:** 2026-11-07 — local (Zig 0.17.0 + GNU as/ld, Debian 12 /
+x86-64) e CI (run `42414049577`, ubuntu-24.04, 2m05s, verde, com
+`validate-ir-strict`)
 **Estado do working tree:** verificar com `git status` antes de agir
 
 ---
@@ -55,6 +57,8 @@ Neste ciclo o pipeline do frontend foi **integrado e validado por execução**:
 | Self-hosting | `src/kyn/*.kyn`, `src/compiler/*.kyn` | placeholders; não executados |
 | Std | `std/core/*`, `std/os/*` | stubs experimentais; compilam nos testes |
 | Fixtures | `tests/` | 50 `integration/case_N.kyn` (suportadas) + 14 em `tests/e2e`; demais ainda não suportadas |
+| CI | `.github/workflows/ci.yml` | ubuntu-24.04: fmt + test + e2e + validação de IR estrita |
+| Validação de IR | `tools/validate-ir.sh` | `llvm-as`/`clang` sobre 59 módulos; estrito no CI |
 
 ### Subconjunto aceito hoje
 
@@ -74,6 +78,14 @@ strings, `f32`/`f64`, slices, ponteiros, generics, `Result`/`?`, closures, `for`
   50 fixtures `case_N.kyn` com código de saída `N`, 5 fixtures negativas
   (código 1 + mensagem `erro:`).
 - `zig fmt --check build.zig src std` — sem diferenças.
+- `zig build validate-ir` sem LLVM — avisa e sai 0 (skip documentado);
+  `--require-tool` (passo estrito) — sai 1, como esperado.
+- Script de validação testado com stubs de `llvm-as`: aceitação (59/59),
+  rejeição (59 falhas, exit 1) e descoberta de `llvm-as-18`.
+- **CI real (GitHub Actions, run `42414049577`)**: verde em 2m05s, incluindo
+  `zig build test`, `zig build e2e` e `zig build validate-ir-strict` (o
+  `llvm-as` do runner aceitou o IR das 59 fixtures; o passo estrito falharia se
+  o verificador faltasse ou rejeitasse algum módulo).
 - CLI exercitada manualmente: sem args (2), arquivo inexistente (3), opção
   inválida (2), diagnóstico (1), `-o` com `check` (2), `emit` llvm/asm (0).
 
@@ -95,55 +107,70 @@ strings, `f32`/`f64`, slices, ponteiros, generics, `Result`/`?`, closures, `for`
 7. **x86-64 como caminho de validação executável:** sem libc, `_start` chama
    `kyn_main` e encerra por syscall `exit`; frame de 8 bytes por slot; `bool`
    materializado em 32 bits (diferença conhecida em relação ao IR, que usa i1).
-8. **LLVM IR continua sendo o alvo declarado,** mas não é verificado por
-   ferramenta LLVM neste ambiente; a validação é estrutural (todo bloco termina
-   com `ret`/`br`/`unreachable`).
+8. **LLVM IR é validado por ferramenta no CI:** testes locais verificam
+   estrutura (todo bloco termina com `ret`/`br`/`unreachable`); `llvm-as`
+   (ou `clang -x ir`) valida os módulos de fato. Sem LLVM local, o passo
+   `validate-ir` faz skip; o CI usa `validate-ir-strict`, que falha.
+   O `target triple` é fixo em `x86_64-unknown-linux-gnu`.
 9. **Limites documentados do backend nativo:** ≤ 6 parâmetros/argumentos
    (diagnosticados pela semântica), sem chamadas externas, sem otimização.
-10. **Versionamento:** `0.3.0-alpha.1`; entradas antigas do CHANGELOG (até
+10. **Versionamento:** `0.3.1-alpha.1`; entradas antigas do CHANGELOG (até
     `v2.3.0`) marcadas como não comprovadas.
+11. **CI:** GitHub Actions em `ubuntu-24.04`; a toolchain Zig vem do wheel
+    oficial do PyPI (`ziglang==0.17.0.post0`) em um venv, o mesmo caminho
+    documentado para o desenvolvimento local — o CI valida a própria receita.
+    Ações fixadas em major (`actions/checkout@v7`).
+12. **Validação nunca silenciosa:** qualquer passo de validação opcional tem
+    variante estrita usada no CI.
 
 ## 4. Pendências (priorizadas)
 
-1. **CI inexistente** (Fase 3): nenhum workflow roda `zig build test`/`e2e`/
-   `fmt --check`; o LLVM IR nunca é validado por ferramenta LLVM.
-2. **Linguagem:** sem `import`/módulos, `struct`, `enum`, `impl`, `unsafe`,
+1. **Linguagem:** sem `import`/módulos, `struct`, `enum`, `impl`, `unsafe`,
    atributos, strings, tipos numéricos além de `i32`, slices e ponteiros.
-3. **Tipos:** sem `i64`/`u32`/`f32`/`f64`, sem checagem de fluxo completa
+2. **Tipos:** sem `i64`/`u32`/`f32`/`f64`, sem checagem de fluxo completa
    (só `alwaysReturns` estrutural), sem casts/conversões.
-4. **Std experimental** com APIs que não fazem E/S real; `kyn:core` × `kyn:std`
+3. **Std experimental** com APIs que não fazem E/S real; `kyn:core` × `kyn:std`
    ainda não separados em módulos de build distintos.
-5. **Self-hosting:** `src/kyn/` e `src/compiler/` continuam placeholders.
-6. **Runner de fixtures** cobre apenas sucesso/negativo genérico; não confere
+4. **Self-hosting:** `src/kyn/` e `src/compiler/` continuam placeholders.
+5. **Runner de fixtures** cobre apenas sucesso/negativo genérico; não confere
    mensagem/posição esperada por arquivo.
-7. **Fuzz/edge cases** de `tests/fuzz/` não são executados por nenhum runner.
-8. **`tests/diagnostics/*.kyn`** não são verificados pelo e2e (só
+6. **Fuzz/edge cases** de `tests/fuzz/` não são executados por nenhum runner.
+7. **`tests/diagnostics/*.kyn`** não são verificados pelo e2e (só
    `tests/e2e/negative`).
-9. **Backend nativo** não suporta alinhamento ABI estrito para libc, nem
-   plataformas diferentes de Linux x86-64; `codegen` não tem testes de regressão
-   com IR/asm completos (golden files).
+8. **Backend nativo** restrito a Linux x86-64, ≤ 6 argumentos, sem libc e sem
+   otimização; sem testes de regressão com IR/asm completos (golden files).
+9. **CI** roda apenas em `ubuntu-24.04` (sem matriz de SO, sem cache de build,
+   sem artefatos publicados); `target triple` do IR é fixo.
+10. **Cobertura de testes do compiler** concentrada em exemplos; sem medição de
+    cobertura nem testes de estresse de entradas grandes.
 
 ## 5. Próxima etapa prioritária
 
-**Criar CI (GitHub Actions) com `zig build test`, `zig build e2e` e
-`zig fmt --check`, e validação do LLVM IR por ferramenta (`llvm-as`/`clang`)
-quando disponível no runner.**
+**Implementar `import` e compilação multi-arquivo.**
 
-- Por quê: o projeto declara LLVM IR como alvo, mas hoje só há validação
-  estrutural; CI com LLVM disponível fecha a lacuna entre "emitimos IR" e "o IR
-  é aceito por uma ferramenta LLVM". Ao mesmo tempo, garante que build/testes
-  não regridam.
-- Arquivos envolvidos: `.github/workflows/ci.yml` (novo), `build.zig`
-  (possível passo `validate-ir`), `tools/validate-ir.sh` (novo, com skip quando
-  não houver LLVM), `docs/development.md`, `README.md`.
-- Critérios de conclusão: workflow versionado; `zig build test` e
-  `zig build e2e` verdes no runner; `llvm-as` aceita o IR das fixtures
-  positivas; documentação descrevendo como reproduzir localmente; nenhuma
-  alegação sem log/artefato correspondente.
+- Por quê: é o primeiro item aberto do ROADMAP e desbloqueia organização de
+  projetos; hoje o parser rejeita `import` no nível superior, então nenhuma
+  fixture com módulos compila. Também é pré-requisito para separar `kyn:core`
+  de `kyn:std` no build.
+- Escopo mínimo proposto (incremental e testável):
+  1. Lexer/parser: literal de string e `import "caminho";` no nível superior.
+  2. Driver: resolver caminhos relativos ao arquivo de entrada, carregar cada
+     arquivo uma vez, detectar ciclos e importações duplicadas com diagnóstico
+     por span.
+  3. Semântica: tabela de funções por módulo com resolução documentada
+     (qualificação ou *flattening*), proibindo colisões de nome.
+  4. CLI: `kync check/emit` com arquivo raiz cujos imports são carregados.
+  5. Testes: unitários do resolver + fixtures e2e com 2–3 arquivos; casos
+     negativos para ciclo, arquivo ausente e símbolo duplicado.
+  6. Docs: `docs/syntax.ebnf`, `docs/status.md`, `docs/development.md`,
+     `CHANGELOG.md` e este arquivo.
+- Critérios de conclusão: `zig build test`, `zig build e2e` e
+  `validate-ir-strict` verdes **no CI**; fixtures multi-arquivo executadas com
+  código de saída conferido; nenhuma alegação sem log.
 
-**Depois disso (ordem sugerida):** `import` + compilação multi-arquivo →
-`struct`/`enum`/`impl` na AST e semântica → conectar `unsafe`/`repr(C)` →
-ampliar tipos numéricos → runner de fixtures com diagnóstico esperado →
+**Depois disso (ordem sugerida):** `struct`/`enum`/`impl` na AST e semântica →
+conectar `unsafe`/`repr(C)` → ampliar tipos numéricos (`i64`, `u8`, `f32`...) →
+runner de fixtures com diagnóstico esperado → `target triple` configurável →
 início do self-hosting em Kyn.
 
 ## 6. Histórico dos ciclos
@@ -151,7 +178,8 @@ início do self-hosting em Kyn.
 | Ciclo | O que foi feito | Validado? |
 |---|---|---|
 | Anterior | Análise do repositório; declarado bloqueio de toolchain (Zig 0.17.0 "indisponível") | Não (nenhum build/teste) |
-| Atual (2026-11-07) | Toolchain obtida via PyPI; `build.zig`+`.zon`; lexer/AST/parser/semântica reescritos com spans e diagnósticos; backends LLVM IR e x86-64; CLI `kync`; driver; 96 testes unitários; suíte e2e com 64 casos; documentação reconciliada; testes antigos consolidados | Sim: `zig build`, `zig build test`, `zig build e2e`, `zig fmt --check` |
+| Ciclo 1 (2026-11-07) | Toolchain obtida via PyPI; `build.zig`+`.zon`; lexer/AST/parser/semântica reescritos com spans e diagnósticos; backends LLVM IR e x86-64; CLI `kync`; driver; 96 testes unitários; suíte e2e com 64 casos; documentação reconciliada; testes antigos consolidados. Integrado via PR #7 (`5217796`). | Sim: `zig build`, `zig build test`, `zig build e2e`, `zig fmt --check`; retestado após o merge |
+| Ciclo 2 — atual (2026-11-07) | CI no GitHub Actions (venv Python + wheel PyPI da toolchain; LLVM instalado no runner); `tools/validate-ir.sh` validando o IR de 59 fixtures com `llvm-as`, em modo estrito; passos `zig build validate-ir` e `validate-ir-strict`; versão `0.3.1-alpha.1`; docs atualizadas com a evidência do run | Sim: runs `42413779278` e `42414049577` verdes (fmt + 96 testes + 64 e2e + IR estrito); suíte local reproduzida do zero antes e depois |
 
 ---
 
