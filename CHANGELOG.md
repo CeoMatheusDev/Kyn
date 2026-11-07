@@ -48,6 +48,8 @@ Saída de texto: `str` como fatia estática e `print(...)` embutido.
   `docs/development.md`, `docs/language_reference.md`, `README.md`,
   `ROADMAP.md` e `DEVELOPMENT_STATE.md` atualizados.
 - **Versão:** `0.3.4-alpha.1` (derivada de `build.zig.zon`).
+- **Integração:** PR #15; CI verde (run `42420648098`) com `zig fmt --check`,
+  testes, e2e (com stdout conferido) e `validate-ir-strict` sobre 71 módulos.
 
 ## [v0.3.3-alpha.1] — 2026-11-07
 
