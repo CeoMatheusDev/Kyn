@@ -286,14 +286,14 @@ pub const Checker = struct {
     }
 
     fn registerFunction(self: *Checker, func: *const ast.Function) std.mem.Allocator.Error!void {
-        // `print` é uma função embutida; declarar outra com o mesmo nome
-        // criaria duas regras de resolução para a mesma chamada.
-        if (std.mem.eql(u8, func.name, "print")) {
+        // Nomes de funções embutidas são reservados: declarar outra com o
+        // mesmo nome criaria duas regras de resolução para a mesma chamada.
+        if (builtinByName(func.name) != null) {
             try self.diags.add(
                 .unsupported,
                 func.name_span,
-                "nome 'print' é reservado para a função embutida",
-                .{},
+                "nome '{s}' é reservado para a função embutida",
+                .{func.name},
             );
         }
 
@@ -1109,24 +1109,25 @@ pub const Checker = struct {
             try arg_types.append(self.arena, try self.checkExpr(arg));
         }
 
-        if (std.mem.eql(u8, call.callee, "print")) {
-            call.builtin = .print;
+        if (builtinByName(call.callee)) |builtin| {
+            call.builtin = builtin;
+            const expected = builtinParamType(builtin);
             if (arg_types.items.len != 1) {
                 try self.diags.add(
                     .invalid_call,
                     span,
-                    "'print' espera 1 argumento do tipo 'str', recebeu {d}",
-                    .{arg_types.items.len},
+                    "'{s}' espera 1 argumento do tipo '{s}', recebeu {d}",
+                    .{ @tagName(builtin), expected.name(), arg_types.items.len },
                 );
                 return .void;
             }
             const arg_type = arg_types.items[0];
-            if (arg_type != .unknown and arg_type != .str) {
+            if (arg_type != .unknown and arg_type != expected) {
                 try self.diags.add(
                     .type_mismatch,
                     call.args[0].span,
-                    "'print' espera 'str', encontrado '{s}'",
-                    .{arg_type.name()},
+                    "'{s}' espera '{s}', encontrado '{s}'",
+                    .{ @tagName(builtin), expected.name(), arg_type.name() },
                 );
             }
             return .void;
@@ -1196,6 +1197,22 @@ pub const Checker = struct {
         return null;
     }
 };
+
+/// Função embutida com esse identificador, quando houver. O nome do campo do
+/// enum é o próprio identificador aceito na fonte.
+fn builtinByName(name: []const u8) ?ast.Expr.Builtin {
+    if (std.mem.eql(u8, name, "print")) return .print;
+    if (std.mem.eql(u8, name, "print_i32")) return .print_i32;
+    return null;
+}
+
+/// Tipo do único parâmetro exigido por cada função embutida.
+fn builtinParamType(builtin: ast.Expr.Builtin) Type {
+    return switch (builtin) {
+        .print => .str,
+        .print_i32 => .i32,
+    };
+}
 
 /// Índice do campo `name` na declaração do struct.
 fn findField(info: *const StructInfo, name: []const u8) ?u32 {
@@ -1943,6 +1960,76 @@ test "sema: 'print' não produz valor para inicializar variável" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    let x = print("a");
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .type_mismatch);
+}
+
+test "sema: 'print_i32' aceita expressão i32" {
+    var f = try Fixture.check(
+        \\fn main() -> i32 {
+        \\    let x = 6 * 7;
+        \\    print_i32(x);
+        \\    print_i32(0 - 1);
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 0), f.diags.count());
+}
+
+test "sema: 'print_i32' com tipo errado é diagnosticado" {
+    var f = try Fixture.check(
+        \\fn main() -> i32 {
+        \\    print_i32("texto");
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .type_mismatch);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "'print_i32' espera 'i32'") != null);
+}
+
+test "sema: 'print_i32' exige exatamente um argumento" {
+    var f = try Fixture.check(
+        \\fn main() -> i32 {
+        \\    print_i32();
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .invalid_call);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "recebeu 0") != null);
+}
+
+test "sema: 'print_i32' com dois argumentos é diagnosticado" {
+    var f = try Fixture.check(
+        \\fn main() -> i32 {
+        \\    print_i32(1, 2);
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .invalid_call);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "recebeu 2") != null);
+}
+
+test "sema: nome 'print_i32' também é reservado" {
+    var f = try Fixture.check(
+        \\fn print_i32(n: i32) -> void { }
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .unsupported);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "reservado") != null);
+}
+
+test "sema: 'print_i32' não produz valor para inicializar variável" {
+    var f = try Fixture.check(
+        \\fn main() -> i32 {
+        \\    let x = print_i32(1);
         \\    return 0;
         \\}
     , .{});

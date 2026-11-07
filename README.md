@@ -38,13 +38,13 @@ interpretados como garantias de recursos completos.
 | Parser e AST | `src/parser/`, `src/ast/` para o subconjunto documentado | Funcional, testado |
 | Módulos | `src/driver.zig` (`compilePath`): `import "arquivo.kyn";` resolvido no disco | Funcional; caminhos relativos ao arquivo importador |
 | Structs | `struct`, literais `Nome { campo: valor }`, acesso e atribuição a campo | Funcional em variáveis locais (sem passagem por valor) |
-| Texto | `str` como fatia estática e `print(...)` embutido (texto + quebra de linha) | Funcional localmente e com módulos; stdout conferido no e2e |
+| Texto e números | `str` como fatia estática, `print(...)` e `print_i32(...)` embutidos (texto/decimais + quebra de linha) | Funcional localmente e com módulos; stdout conferido no e2e |
 | Análise semântica | `src/sema/` com escopos, tipos e mutabilidade | Funcional para `i32`/`bool`/`str`/`void` e structs |
-| Backend LLVM IR | `src/codegen/llvm.zig` derivado da AST | Aceito por `llvm-as` no CI (71/71 módulos) |
+| Backend LLVM IR | `src/codegen/llvm.zig` derivado da AST | Aceito por `llvm-as` no CI (75/75 módulos) |
 | Backend x86-64 | `src/codegen/x86_64.zig` (asm + `as`/`ld`) | Validado por execução |
 | Implementação em Kyn | `src/kyn/`, `src/compiler/` | Esqueleto / placeholders |
 | Biblioteca padrão | `std/` | Experimental |
-| Testes | Unitários (`zig build test`), e2e (`zig build e2e`) e IR (`zig build validate-ir`) | 169 testes unitários (162 do compilador + 7 da std); 86 casos e2e (com stdout conferido); IR validado por `llvm-as` no CI |
+| Testes | Unitários (`zig build test`), e2e (`zig build e2e`) e IR (`zig build validate-ir`) | 181 testes unitários (174 do compilador + 7 da std); 92 casos e2e (com stdout conferido); IR validado por `llvm-as` no CI |
 
 Consulte [o estado detalhado](docs/status.md) e o
 [subconjunto aceito hoje](docs/syntax.ebnf) antes de depender de qualquer
@@ -150,8 +150,28 @@ zig-out/bin/kync emit --asm ola.kyn -o ola.s
 as ola.s -o ola.o && ld ola.o -o ola && ./ola
 ```
 
-`str` em parâmetro/retorno/campo, comparação (`==`/`!=`), concatenação e
-formatação ainda não são suportados e são diagnosticados.
+`print_i32` fecha o outro lado da saída: valores calculados aparecem em decimal
+(0, positivos, negativos e os limites de `i32`), com a conversão feita por uma
+rotina própria em cada backend — `write` por syscall no backend nativo e
+`@kyn_print_i32` invocando `write` da libc no IR:
+
+```sh
+cat > conta.kyn <<'KYN'
+fn main() -> i32 {
+    let a = 20;
+    let b = 22;
+    print("soma");
+    print_i32(a + b);
+    print_i32(0 - a);
+    return 0;
+}
+KYN
+zig-out/bin/kync emit --asm conta.kyn -o conta.s
+as conta.s -o conta.o && ld conta.o -o conta && ./conta
+```
+
+`str` em parâmetro/retorno/campo, comparação (`==`/`!=`) e concatenação ainda
+não são suportados e são diagnosticados.
 
 `kync` retorna `0` em sucesso, `1` para erros de compilação, `2` para uso
 inválido e `3` para falhas de E/S. Detalhes em

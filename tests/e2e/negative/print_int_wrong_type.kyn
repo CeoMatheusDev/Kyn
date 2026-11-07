@@ -1,0 +1,5 @@
+// Erro esperado: 'print_i32' espera 'i32'.
+fn main() -> i32 {
+    print_i32("texto");
+    return 0;
+}

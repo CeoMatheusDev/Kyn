@@ -94,10 +94,14 @@ arguments        = expression, { ",", expression } ;
    condição e em `==`/`!=` (comparação de bytes ainda não existe), além de
    literal de string usado como expressão solta. *)
 
-(* `print` é uma função embutida, não uma palavra-chave nem uma declaração:
-   `print(expr)` exige exatamente um argumento `str`, devolve `void` e escreve o
-   texto seguido de quebra de linha. O nome `print` é reservado para funções
-   declaradas na fonte. *)
+(* Funções embutidas, não palavras-chave nem declarações:
+   - `print(expr)` exige exatamente um argumento `str`, devolve `void` e
+     escreve o texto seguido de quebra de linha;
+   - `print_i32(expr)` exige exatamente um argumento `i32`, devolve `void` e
+     escreve o número em decimal (com '-' quando negativo) e a quebra de linha.
+   Os nomes `print` e `print_i32` são reservados para funções declaradas na
+   fonte. *)
+builtin_call     = ( "print" | "print_i32" ), "(", expression, ")" ;
 
 (* Limites do backend nativo atual (documentados como pendência de projeto):
    até 6 parâmetros/argumentos por função; sem chamadas externas; `str` ainda

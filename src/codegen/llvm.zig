@@ -38,10 +38,19 @@ pub fn emit(
         try out.append(arena, '\n');
     }
 
-    // `print` usa `write` da libc: o IR declara o símbolo e cada string vira
-    // uma constante privada em lista de bytes (sem escapes de aspas).
-    if (state.strs.texts.items.len > 0 or state.used_print) {
+    // `print`/`print_i32` usam `write` da libc: o IR declara o símbolo e cada
+    // string vira uma constante privada em lista de bytes (sem escapes).
+    const needs_write = state.strs.texts.items.len > 0 or state.used_print or state.used_print_i32;
+    if (needs_write) {
         try out.print(arena, "declare i64 @write(i32, ptr, i64)\n\n", .{});
+    }
+
+    // Formatação decimal: função interna emitida uma única vez por módulo.
+    if (state.used_print_i32) {
+        try out.appendSlice(arena, kyn_print_i32_ir);
+    }
+
+    if (state.strs.texts.items.len > 0 or state.used_print or state.used_print_i32) {
         for (state.strs.texts.items, 0..) |text, index| {
             if (text.len == 0) {
                 try out.print(arena, "@.str{d} = private unnamed_addr constant [0 x i8] zeroinitializer, align 1\n", .{index});
@@ -54,7 +63,7 @@ pub fn emit(
             }
             try out.print(arena, "], align 1\n", .{});
         }
-        if (state.used_print) {
+        if (state.used_print or state.used_print_i32) {
             try out.print(arena, "@.nl = private unnamed_addr constant [1 x i8] [i8 10], align 1\n", .{});
         }
     }
@@ -596,9 +605,20 @@ const FnEmitter = struct {
         return .{ .text = result, .typ = .bool };
     }
 
+    /// `print_i32(n)`: chama a rotina interna de formatação decimal.
+    fn emitPrintI32(self: *FnEmitter, call: ast.Expr.Call) Error!Operand {
+        if (call.args.len != 1) return error.MiscompiledAst;
+        const value = try self.emitExpr(call.args[0]);
+        if (value.typ != .i32) return error.UnsupportedNode;
+        try self.emit("  call void @kyn_print_i32(i32 {s})\n", .{value.text});
+        self.state.used_print_i32 = true;
+        return .{ .text = "", .typ = .void };
+    }
+
     fn emitCall(self: *FnEmitter, call: ast.Expr.Call) Error!Operand {
         if (call.builtin) |builtin| switch (builtin) {
             .print => return self.emitPrint(call),
+            .print_i32 => return self.emitPrintI32(call),
         };
 
         const fn_index = call.callee_fn orelse return error.MiscompiledAst;
@@ -624,6 +644,52 @@ const FnEmitter = struct {
         return .{ .text = result, .typ = callee.return_type };
     }
 };
+
+/// Corpo de `@kyn_print_i32`, emitido quando `print_i32` é usado.
+///
+/// Buffer de 12 bytes escrito de trás para frente: no máximo 10 dígitos mais o
+/// sinal. `sub i32 0, %arg0` é aritmética modular (sem `nsw`), então INT_MIN
+/// vira 0x80000000 e `udiv` produz 2147483648 — o texto sai como
+/// `-2147483648`, correto.
+const kyn_print_i32_ir =
+    \\define internal void @kyn_print_i32(i32 %arg0) {
+    \\entry:
+    \\  %buf = alloca [12 x i8], align 1
+    \\  %isneg = icmp slt i32 %arg0, 0
+    \\  %negated = sub i32 0, %arg0
+    \\  %mag = select i1 %isneg, i32 %negated, i32 %arg0
+    \\  br label %loop
+    \\loop:
+    \\  %n = phi i32 [ %mag, %entry ], [ %q, %loop ]
+    \\  %pos = phi i32 [ 12, %entry ], [ %posnext, %loop ]
+    \\  %digit = urem i32 %n, 10
+    \\  %ascii = add i32 %digit, 48
+    \\  %byte = trunc i32 %ascii to i8
+    \\  %posnext = sub i32 %pos, 1
+    \\  %digitptr = getelementptr inbounds [12 x i8], ptr %buf, i64 0, i32 %posnext
+    \\  store i8 %byte, ptr %digitptr, align 1
+    \\  %q = udiv i32 %n, 10
+    \\  %done = icmp eq i32 %q, 0
+    \\  br i1 %done, label %sign, label %loop
+    \\sign:
+    \\  %negpos = sub i32 %posnext, 1
+    \\  %negptr = getelementptr inbounds [12 x i8], ptr %buf, i64 0, i32 %negpos
+    \\  br i1 %isneg, label %sign_store, label %write
+    \\sign_store:
+    \\  store i8 45, ptr %negptr, align 1
+    \\  br label %write
+    \\write:
+    \\  %start = phi i32 [ %posnext, %sign ], [ %negpos, %sign_store ]
+    \\  %len = sub i32 12, %start
+    \\  %len64 = zext i32 %len to i64
+    \\  %start64 = zext i32 %start to i64
+    \\  %text = getelementptr inbounds [12 x i8], ptr %buf, i64 0, i64 %start64
+    \\  call i64 @write(i32 1, ptr %text, i64 %len64)
+    \\  call i64 @write(i32 1, ptr @.nl, i64 1)
+    \\  ret void
+    \\}
+    \\
+;
 
 fn appendIndented(out: *std.ArrayList(u8), arena: std.mem.Allocator, text: []const u8) !void {
     var it = std.mem.splitScalar(u8, text, '\n');
@@ -872,4 +938,41 @@ test "llvm: string vazia usa zeroinitializer" {
 
     try support.expectContains(ir, "@.str0 = private unnamed_addr constant [0 x i8] zeroinitializer, align 1");
     try support.expectContains(ir, "call i64 @write(i32 1, ptr @.str0, i64 0)");
+}
+
+test "llvm: print_i32 emite a rotina decimal interna uma única vez" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    let x = 6 * 7;
+        \\    print_i32(x);
+        \\    print_i32(0 - 1);
+        \\    return 0;
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+
+    try testing.expectEqual(@as(usize, 1), std.mem.count(u8, ir, "define internal void @kyn_print_i32(i32 %arg0) {"));
+    try testing.expectEqual(@as(usize, 2), std.mem.count(u8, ir, "call void @kyn_print_i32(i32 "));
+    // Conversão: resto/divisão unsigned, sinal, buffer e escrita.
+    try support.expectContains(ir, "urem i32 %n, 10");
+    try support.expectContains(ir, "udiv i32 %n, 10");
+    try support.expectContains(ir, "store i8 45, ptr %negptr, align 1");
+    try support.expectContains(ir, "%text = getelementptr inbounds [12 x i8]");
+    try support.expectContains(ir, "call i64 @write(i32 1, ptr %text, i64 %len64)");
+    try support.expectContains(ir, "declare i64 @write(i32, ptr, i64)");
+    try support.expectContains(ir, "@.nl = private unnamed_addr constant [1 x i8] [i8 10], align 1");
+    try support.expectAllBlocksTerminated(ir);
+}
+
+test "llvm: programa sem print_i32 não emite a rotina decimal" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    print("ok");
+        \\    return 1;
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+    try testing.expect(std.mem.indexOf(u8, ir, "kyn_print_i32") == null);
 }

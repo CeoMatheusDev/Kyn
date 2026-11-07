@@ -88,6 +88,10 @@ as /tmp/fib.s -o /tmp/fib.o && ld /tmp/fib.o -o /tmp/fib && /tmp/fib; echo $?
 # saída de texto: `print` escreve a string e a quebra de linha
 zig-out/bin/kync emit --asm tests/e2e/positive/print_basic.kyn -o /tmp/p.s
 as /tmp/p.s -o /tmp/p.o && ld /tmp/p.o -o /tmp/p && /tmp/p       # kyn / bootstrap
+
+# valores calculados: `print_i32` formata em decimal (com sinal)
+zig-out/bin/kync emit --asm tests/e2e/positive/print_int_extremos.kyn -o /tmp/n.s
+as /tmp/n.s -o /tmp/n.o && ld /tmp/n.o -o /tmp/n && /tmp/n       # 2147483647 / -2147483648 / 214748364
 ```
 
 ## Validação
@@ -99,7 +103,8 @@ O projeto só declara uma etapa concluída quando existe teste executável:
 2. **Ponta a ponta** (`zig build e2e`): cada fixture positiva vira binário
    nativo; o código de saída é comparado com `// expect-exit: N` e o stdout com
    as linhas `// expect-stdout: ...` (na ordem, uma diretiva por linha — é assim
-   que as fixtures de `str`/`print` são validadas). O mesmo vale para programas
+   que as fixtures de `str`/`print`/`print_i32` são validadas). O mesmo vale
+   para programas
    multi-arquivo em `tests/e2e/modules/<caso>/main.kyn`; as
    fixtures de `tests/integration/case_N.kyn` devem terminar com código `N`;
    cada fixture negativa deve falhar com código `1` e mensagem `erro:`; em
@@ -109,8 +114,8 @@ O projeto só declara uma etapa concluída quando existe teste executável:
 
 3. **LLVM IR** (`zig build validate-ir-strict`): roda `llvm-as` (ou `clang`)
    sobre o IR de todas as fixtures suportadas, incluindo os programas
-   multi-arquivo e as fixtures de `struct`/`print` (71 módulos). Não há LLVM
-   instalado no ambiente
+   multi-arquivo e as fixtures de `struct`/`print`/`print_i32` (75 módulos).
+   Não há LLVM instalado no ambiente
    de desenvolvimento padrão, então localmente o passo `validate-ir` apenas
    avisa; o CI instala LLVM e usa a variante **estrita**, que falha se o
    verificador estiver ausente ou rejeitar qualquer módulo.
@@ -128,8 +133,8 @@ manualmente. Em `ubuntu-24.04` o workflow:
 2. instala Zig 0.17.0 a partir do wheel oficial do PyPI (o mesmo caminho
    descrito acima) e o expõe no `PATH`;
 3. executa `zig fmt --check build.zig src std`;
-4. executa `zig build test` (169 testes) e `zig build e2e` (86 casos);
-5. executa `zig build validate-ir-strict` (IR de 71 módulos aceito por
+4. executa `zig build test` (181 testes) e `zig build e2e` (92 casos);
+5. executa `zig build validate-ir-strict` (IR de 75 módulos aceito por
    `llvm-as`).
 
 A ausência de LLVM no CI **falha** o build, por isso a validação do IR não pode

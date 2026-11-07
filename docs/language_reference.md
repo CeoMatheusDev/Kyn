@@ -125,7 +125,21 @@ fn main() -> i32 {
 
 `print` é uma função embutida (`print(expr)` exige exatamente um `str`, devolve
 `void`, escreve o texto e a quebra de linha); o nome é reservado para funções
-declaradas na fonte. Limites atuais, todos diagnosticados: `str` em
+declaradas na fonte. `print_i32(expr)` segue a mesma regra com um argumento
+`i32` e escreve o número em decimal, inclusive `-2147483648`:
+
+```kyn
+fn main() -> i32 {
+    let a = 20;
+    let b = 22;
+    print("soma");     // "soma"
+    print_i32(a + b);  // "42"
+    print_i32(0 - a);  // "-20"
+    return 0;
+}
+```
+
+Limites atuais, todos diagnosticados: `str` em
 parâmetro/retorno/argumento, campo de struct de tipo `str`, `str` em aritmética,
 condição ou `==`/`!=` (comparar exigiria comparar bytes), concatenação e
 formatação, e literal de string como expressão solta.

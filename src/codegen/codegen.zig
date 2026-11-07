@@ -82,6 +82,9 @@ pub const ProgramState = struct {
     /// Alguma chamada a `print` foi emitida? Controla a constante de quebra de
     /// linha no rodapé do artefato.
     used_print: bool = false,
+    /// Alguma chamada a `print_i32` foi emitida? Controla a rotina de
+    /// conversão decimal no rodapé do artefato (emitida uma única vez).
+    used_print_i32: bool = false,
 };
 
 pub const Error = error{

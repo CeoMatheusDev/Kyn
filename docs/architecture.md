@@ -118,9 +118,17 @@ escalar; existe para dar ao programa uma saída observável (texto) e preparar
 - LLVM IR: cada texto vira `@.strN = private unnamed_addr constant [N x i8]`,
   `print` vira `call i64 @write(i32 1, ptr @.strN, i64 N)` com
   `declare i64 @write(i32, ptr, i64)`; o verificador do LLVM no CI aceita o IR.
-- `print` é embutida (`ast.Expr.Call.builtin`): exige exatamente um `str`,
-  devolve `void` e escreve sempre com quebra de linha. O nome é reservado para
-  funções declaradas na fonte.
+- `print` e `print_i32` são embutidas (`ast.Expr.Call.builtin`), com a mesma
+  regra: exatamente um argumento (`str`/`i32`), resultado `void` e quebra de
+  linha ao final. Os nomes são reservados para funções declaradas na fonte, e
+  um `let`/`var` com o resultado delas é diagnosticado (`void` não é
+  armazenável).
+- `print_i32` formata em decimal: no backend nativo a rotina `kyn_print_i32`
+  (emitida uma única vez, em `.text`) divide por 10 com `divl` **unsigned** —
+  depois de `negl`, INT_MIN vira `0x80000000` e o texto sai `-2147483648`;
+  no IR, `@kyn_print_i32` faz o mesmo com `urem`/`udiv`, `select` para o módulo
+  e um buffer `[12 x i8]` escrito de trás para frente. Nenhum dos dois usa
+  `itoa`/libc no backend nativo nem estado global.
 - Restrições desta etapa, todas diagnosticadas: `str` em
   parâmetro/retorno/argumento, campo de struct de tipo `str`, `str` em
   aritmética/condição/`==`/`!=` (comparar exigiria comparar bytes) e literal
