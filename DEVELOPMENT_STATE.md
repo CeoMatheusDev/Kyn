@@ -3,14 +3,16 @@
 **Mantido por:** agente de continuidade (Arena)
 **Branch ativa:** `arena/b8209933-kyn` (a partir de `ebc58b3` de `main`)
 **Integração:** PRs #7–#11 (módulos/`import`), PR #13 (`struct` com valor,
-`4234c07`) e PR #15 (`str`/`print`, este ciclo) integrados em `main`
-(2026-11-07); CI do PR #15 verde (run `42420648098`).
+`4234c07`) e PR #15 (`str`/`print`, `89ca6ce`) mesclados em `main`
+(2026-11-07); CI verde no PR #15 (run `42420648098`) e no merge
+(`42421025867`).
 **Versão do projeto:** `0.3.4-alpha.1`
 **Última validação:** 2026-11-07 — local (Zig 0.17.0 + GNU `as`/`ld`, Linux
 x86-64): `zig build`, `zig build test` (169 testes), `zig build e2e` (86/86,
 com stdout conferido), `zig fmt --check` e `kync --version`
-(`0.3.4-alpha.1`); no CI do PR #15 (run `42420648098`) fmt, testes, e2e e
-`llvm-as` estrito sobre 71 módulos passaram
+(`0.3.4-alpha.1`); CI verde no PR #15 (run `42420648098`) e em `main` após o
+merge (run `42421025867`) com fmt, testes, e2e e `llvm-as` estrito sobre
+71 módulos; suíte local retestada em `main`
 **Estado do working tree:** verificar com `git status` antes de agir
 
 ---
@@ -257,7 +259,7 @@ self-hosting em Kyn.
 | Ciclo 3 (2026-11-07) | Registro da integração do CI no estado do projeto (`DEVELOPMENT_STATE.md`, badge no README, entradas do CHANGELOG). Integrado via PR #9 (`449f78b`). | Sim: run `42414846887` (main) verde |
 | Ciclo 4 (2026-11-07) | `import` e compilação multi-arquivo: lexer de strings + `import`; parser com `import` no topo; `driver.compilePath` com DFS pré-ordem, dedupe por caminho normalizado, `.import_cycle`/`.import_not_found`; `Diagnostic.file`/`addInFile` e mensagens citando o arquivo; CLI multi-arquivo; 21 testes novos (115 no total); 3 fixtures e2e multi-arquivo executadas + 3 negativas com mensagem esperada; `validate-ir` cobre 62 módulos; versão `0.3.2-alpha.1` (agora derivada de `build.zig.zon`). Integrado via PR #10 (`1c149dd`). | Sim: local (108 testes do compilador, 70/70 e2e, `fmt --check`) e CI runs `42415765698` (PR) e `42415945385` (main), ambos verdes com IR estrito; suíte local retestada em `main` após o merge |
 | Ciclo 5 (2026-11-07) | `struct` com valor: lexer (`struct`, `.`), parser (declaração, literal, acesso e atribuição a campo, condição sem ambiguidade), AST (`structs`, `field_access`, `struct_literal`, `field_assign`), semântica (`Type.aggregate`, `Checked.structs` em duas passadas, literais validados e restrições diagnosticadas), layout `1 + n` slots com substituição escalar no LLVM, driver propagando structs entre módulos, 16 testes novos (139 no total), 3 fixtures e2e com `struct` executadas + 1 módulo + 3 negativas (77/77), `validate-ir` com 66 módulos; versão `0.3.3-alpha.1`. Integrado via PR #13 (`4234c07`). | Sim: local (132 testes do compilador, 77/77 e2e, `fmt --check`) e CI runs `42417725687` (PR) e `42417878774` (main), ambos verdes com IR estrito; suíte local retestada em `main` após o merge |
-| Ciclo 6 (2026-11-07, atual) | `str` e `print`: literal de string como expressão, `ast.Expr.Call.builtin`, `Type.str` em dois slots (ponteiro + tamanho), `codegen.StrPool` deduplicando literais, texto em `.rodata` com syscall `write` no backend nativo e `@.strN` + `declare i64 @write` no IR; `print` embutido (um `str`, saída `void`, nome reservado) e restrições diagnosticadas (parâmetro/retorno/campo `str`, aritmética, condição, `==`/`!=`, literal solto); correção de contrato em `let`/`var` com `void`; `tools/e2e.sh` compara `// expect-stdout:`; 29 testes novos (169 no total), 4 fixtures com `print` + 1 módulo + 4 negativas (86/86), `validate-ir` com 71 módulos; versão `0.3.4-alpha.1`. Integrado via PR #15. | Sim: local (162 testes do compilador, 86/86 e2e com stdout, `fmt --check`, saída de binário via `as`/`ld`) e CI do PR #15 (run `42420648098`) verde com IR estrito; suíte local retestada em `main` após o merge |
+| Ciclo 6 (2026-11-07, atual) | `str` e `print`: literal de string como expressão, `ast.Expr.Call.builtin`, `Type.str` em dois slots (ponteiro + tamanho), `codegen.StrPool` deduplicando literais, texto em `.rodata` com syscall `write` no backend nativo e `@.strN` + `declare i64 @write` no IR; `print` embutido (um `str`, saída `void`, nome reservado) e restrições diagnosticadas (parâmetro/retorno/campo `str`, aritmética, condição, `==`/`!=`, literal solto); correção de contrato em `let`/`var` com `void`; `tools/e2e.sh` compara `// expect-stdout:`; 29 testes novos (169 no total), 4 fixtures com `print` + 1 módulo + 4 negativas (86/86), `validate-ir` com 71 módulos; versão `0.3.4-alpha.1`. Integrado via PR #15 (`89ca6ce`). | Sim: local (162 testes do compilador, 86/86 e2e com stdout, `fmt --check`, saída de binário via `as`/`ld`) e CI runs `42420648098` (PR) e `42421025867` (`main`), ambos verdes com IR estrito; suíte local retestada em `main` após o merge |
 
 ---
 

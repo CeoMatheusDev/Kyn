@@ -103,7 +103,8 @@ visibilidade (`pub`), imports qualificados/seletivos e pacotes.
 - `zig build validate-ir` (local, sem LLVM) — avisa e ignora, como documentado
   no ambiente de desenvolvimento; o mesmo script cobre 71 módulos quando há
   `llvm-as`/`clang`.
-- CI (`.github/workflows/ci.yml`) — run `42420648098` (PR #15) verde com
+- CI (`.github/workflows/ci.yml`) — runs `42420648098` (PR #15) e
+  `42421025867` (`main` pós-merge) verdes com
   `zig fmt --check`, `zig build test` (169 testes), `zig build e2e` (86 casos,
   com stdout conferido) e `zig build validate-ir-strict` (71 módulos aceitos
   pelo `llvm-as`, incluindo os de `str`/`print`). O passo estrito falha se o
