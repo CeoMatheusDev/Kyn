@@ -62,4 +62,12 @@ pub fn build(b: *std.Build) void {
     e2e_cmd.step.dependOn(b.getInstallStep());
     const e2e_step = b.step("e2e", "Executa o pipeline completo até binário nativo e verifica o código de saída");
     e2e_step.dependOn(&e2e_cmd.step);
+
+    // Validação do LLVM IR por ferramenta LLVM (llvm-as ou clang). Sem LLVM no
+    // ambiente, o script avisa e sai com código 0.
+    const validate_ir_cmd = b.addSystemCommand(&.{ "bash", "tools/validate-ir.sh" });
+    validate_ir_cmd.addArtifactArg(exe);
+    validate_ir_cmd.step.dependOn(b.getInstallStep());
+    const validate_ir_step = b.step("validate-ir", "Valida o LLVM IR emitido com llvm-as/clang (quando disponível)");
+    validate_ir_step.dependOn(&validate_ir_cmd.step);
 }
