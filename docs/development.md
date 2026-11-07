@@ -42,6 +42,8 @@ zig build run -- --help
 | `zig build` | Compila e instala `zig-out/bin/kync`. |
 | `zig build test` | Executa os testes unitários do compilador e da std experimental. |
 | `zig build e2e` | Compila fixtures, monta com `as`, liga com `ld` e confere códigos de saída. |
+| `zig build validate-ir` | Valida o LLVM IR com `llvm-as`/`clang`; sem LLVM, avisa e ignora. |
+| `zig build validate-ir-strict` | Igual ao anterior, mas falha se não houver LLVM (usado no CI). |
 | `zig build run -- <args>` | Executa o `kync` recém-compilado com os argumentos informados. |
 
 ## CLI `kync`
@@ -89,9 +91,31 @@ O projeto só declara uma etapa concluída quando existe teste executável:
    de `tests/integration/case_N.kyn` devem terminar com código `N`; cada fixture
    negativa deve falhar com código `1` e mensagem `erro:`.
 
-O backend LLVM IR **não** é validado por ferramenta LLVM (`llc`/`clang`) neste
-ambiente: os testes verificam estrutura (blocos terminados, instruções, tipos).
-Não trate o IR emitido como comprovado por um montador LLVM.
+3. **LLVM IR** (`zig build validate-ir-strict`): roda `llvm-as` (ou `clang`)
+   sobre o IR de todas as fixtures suportadas. Não há LLVM instalado no ambiente
+   de desenvolvimento padrão, então localmente o passo `validate-ir` apenas
+   avisa; o CI instala LLVM e usa a variante **estrita**, que falha se o
+   verificador estiver ausente ou rejeitar qualquer módulo.
+
+Os testes unitários do backend LLVM verificam apenas estrutura (blocos
+terminados, tipos, instruções). A prova de que o IR é aceito por uma ferramenta
+LLVM vem do CI, não dos testes locais.
+
+## Integração contínua
+
+`.github/workflows/ci.yml` roda em `push` (main e `arena/**`), `pull_request` e
+manualmente. Em `ubuntu-24.04` o workflow:
+
+1. instala `python3-venv` e `llvm`;
+2. instala Zig 0.17.0 a partir do wheel oficial do PyPI (o mesmo caminho
+   descrito acima) e o expõe no `PATH`;
+3. executa `zig fmt --check build.zig src std`;
+4. executa `zig build test` (96 testes) e `zig build e2e` (64 casos);
+5. executa `zig build validate-ir-strict` (IR de 59 fixtures aceito por
+   `llvm-as`).
+
+A ausência de LLVM no CI **falha** o build, por isso a validação do IR não pode
+ser ignorada silenciosamente.
 
 ## Estrutura
 

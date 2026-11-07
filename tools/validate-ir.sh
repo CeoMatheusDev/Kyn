@@ -6,7 +6,11 @@
 # lacuna rodando o verificador do LLVM sobre o IR de todas as fixtures que o
 # compilador aceita hoje.
 #
-# Uso: tools/validate-ir.sh [caminho-do-kync]
+# Uso: tools/validate-ir.sh [caminho-do-kync] [--require-tool]
+#
+#   --require-tool  falha (código 1) quando nenhuma ferramenta LLVM existir, em
+#                   vez de avisar e ignorar. Usado pelo CI, para que a ausência
+#                   do verificador nunca passe silenciosamente.
 #
 # Ferramentas procuradas, nesta ordem:
 #   1. llvm-as (llvm-as, llvm-as-NN ou /usr/lib/llvm-NN/bin/llvm-as)
@@ -16,7 +20,16 @@
 
 set -u
 
-KYNC="${1:-./zig-out/bin/kync}"
+KYNC="./zig-out/bin/kync"
+REQUIRE_TOOL=0
+for arg in "$@"; do
+    case "$arg" in
+        --require-tool) REQUIRE_TOOL=1 ;;
+        -*) echo "validate-ir: opção desconhecida '$arg'" >&2; exit 2 ;;
+        *) KYNC="$arg" ;;
+    esac
+done
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [ ! -x "$KYNC" ]; then
@@ -68,6 +81,11 @@ if [ -z "$VALIDATOR" ]; then
 fi
 
 if [ -z "$VALIDATOR" ]; then
+    if [ "$REQUIRE_TOOL" -eq 1 ]; then
+        echo "validate-ir: ERRO — nenhuma ferramenta LLVM encontrada e --require-tool foi passado" >&2
+        echo "validate-ir: instale 'llvm' ou 'clang' para validar o IR" >&2
+        exit 1
+    fi
     echo "validate-ir: nenhum llvm-as/clang encontrado — validação de IR ignorada" >&2
     echo "validate-ir: instale LLVM (ex.: 'apt-get install llvm' ou 'apt-get install clang') para validar" >&2
     exit 0

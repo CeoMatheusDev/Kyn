@@ -28,7 +28,7 @@ self-hosting funcional.
 | AST | `src/ast/ast.zig` | Funções, parâmetros, `let`/`var`, atribuição, `return`, `if`/`else`, `while`, blocos, expressões | Testes unitários |
 | Parser | `src/parser/parser.zig` | Programa completo, precedência e associatividade, erros com span | Testes unitários e negativos |
 | Semântica | `src/sema/sema.zig` | Escopos aninhados, resolução de nomes, tipos `i32`/`bool`/`void`, mutabilidade, chamadas, slots de pilha, validação de `main` | Testes unitários |
-| Backend LLVM IR | `src/codegen/llvm.zig` | IR textual derivado da AST (aritmética, comparações, `&&`/`||` com `phi`, `if`, `while`, chamadas) | Apenas estrutural: não há LLVM no ambiente |
+| Backend LLVM IR | `src/codegen/llvm.zig` | IR textual derivado da AST (aritmética, comparações, `&&`/`||` com `phi`, `if`, `while`, chamadas) | Testes estruturais localmente; aceito por `llvm-as` no CI (59/59 módulos) |
 | Backend x86-64 | `src/codegen/x86_64.zig` | Assembly System V sem libc, `_start` + syscall `exit` | Executado: `as` + `ld` + código de saída |
 | FFI | `src/ffi/ffi.zig` | Experimento isolado de `extern "c" printf` | Não integrado |
 | `unsafe`/`repr(C)` | `src/sema/unsafe.zig` | Política isolada e testada; AST ainda não possui esses nós | Testes unitários do módulo |
@@ -75,9 +75,16 @@ slices `[]T`, ponteiros, generics, `Result<T, E>`/`?`, closures, `for`.
 - `zig build e2e` — 64/64 casos: 9 fixtures comportamentais, 50 fixtures
   `case_N.kyn` com código de saída `N`, 5 fixtures negativas com código `1`.
 - `zig fmt --check build.zig src std` — sem diferenças.
+- `zig build validate-ir` (local, sem LLVM) — avisa e ignora, como documentado.
+- CI (`.github/workflows/ci.yml`, run `42413779278` em 2026-11-07) — job
+  "build, testes e validação de IR" concluído com sucesso em 1m50s:
+  `zig fmt --check`, `zig build test`, `zig build e2e` e
+  `zig build validate-ir-strict` (o `llvm-as` instalado no runner aceitou os 59
+  módulos emitidos; o passo estrito falharia se o verificador faltasse ou
+  rejeitasse qualquer módulo).
 
-Não validado: montagem do LLVM IR por ferramenta LLVM; comportamento em
-plataformas diferentes de Linux x86-64; desempenho.
+Não validado: execução em plataformas diferentes de Linux x86-64; desempenho;
+fidelidade do IR a alvos LLVM diferentes de x86-64 (o `target triple` é fixo).
 
 ## Divergências históricas
 

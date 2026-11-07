@@ -70,4 +70,13 @@ pub fn build(b: *std.Build) void {
     validate_ir_cmd.step.dependOn(b.getInstallStep());
     const validate_ir_step = b.step("validate-ir", "Valida o LLVM IR emitido com llvm-as/clang (quando disponível)");
     validate_ir_step.dependOn(&validate_ir_cmd.step);
+
+    // Variante estrita usada no CI: falha se nenhuma ferramenta LLVM existir,
+    // para que a validação do IR nunca seja ignorada silenciosamente.
+    const validate_ir_strict_cmd = b.addSystemCommand(&.{ "bash", "tools/validate-ir.sh" });
+    validate_ir_strict_cmd.addArtifactArg(exe);
+    validate_ir_strict_cmd.addArg("--require-tool");
+    validate_ir_strict_cmd.step.dependOn(b.getInstallStep());
+    const validate_ir_strict_step = b.step("validate-ir-strict", "Valida o LLVM IR e falha se não houver LLVM instalado");
+    validate_ir_strict_step.dependOn(&validate_ir_strict_cmd.step);
 }

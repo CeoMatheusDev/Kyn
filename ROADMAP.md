@@ -22,8 +22,9 @@ implementação integrada e testes reproduzíveis.
       `i32`/`bool`/`void` (inteiros de outras larguras, `f32`/`f64`, `str`,
       ownership, lifetimes, checagem de fluxo).
 - [ ] Definir e validar o backend oficial. O backend x86-64 é validado por
-      execução; o backend LLVM IR é validado apenas estruturalmente porque não
-      há ferramenta LLVM no ambiente de desenvolvimento.
+      execução; o IR do backend LLVM é aceito por `llvm-as` no CI, mas a
+      escolha do backend oficial (e um `target triple` configurável) segue
+      pendente.
 
 ## Fase 2 — Linguagem e runtime
 
@@ -42,8 +43,9 @@ implementação integrada e testes reproduzíveis.
 
 ## Fase 3 — Qualidade e portabilidade
 
-- [ ] Adicionar CI para build, testes e formatação (`zig fmt --check` já passa
-      localmente).
+- [x] Adicionar CI para build, testes e formatação: `.github/workflows/ci.yml`
+      roda `zig fmt --check`, `zig build test`, `zig build e2e` e
+      `zig build validate-ir-strict` (com LLVM instalado no runner).
 - [ ] Cobrir diagnósticos, entradas malformadas e casos de fronteira de forma
       sistemática.
 - [ ] Definir targets e matriz de plataformas suportadas (o backend nativo é

@@ -1,5 +1,7 @@
 # Kyn
 
+[![CI](https://github.com/CeoMatheusDev/Kyn/actions/workflows/ci.yml/badge.svg)](https://github.com/CeoMatheusDev/Kyn/actions/workflows/ci.yml)
+
 **Kyn** é um projeto experimental de linguagem de programação de sistemas,
 desenvolvido com foco em controle explícito de recursos, interoperabilidade com
 C e compilação de baixo nível.
@@ -35,11 +37,11 @@ interpretados como garantias de recursos completos.
 | Lexer | `src/lexer/lexer.zig` com tokens tipados e spans | Funcional, testado |
 | Parser e AST | `src/parser/`, `src/ast/` para o subconjunto documentado | Funcional, testado |
 | Análise semântica | `src/sema/` com escopos, tipos e mutabilidade | Funcional para `i32`/`bool`/`void` |
-| Backend LLVM IR | `src/codegen/llvm.zig` derivado da AST | Experimental, sem validação por ferramenta LLVM |
+| Backend LLVM IR | `src/codegen/llvm.zig` derivado da AST | Aceito por `llvm-as` no CI (59/59 módulos) |
 | Backend x86-64 | `src/codegen/x86_64.zig` (asm + `as`/`ld`) | Validado por execução |
 | Implementação em Kyn | `src/kyn/`, `src/compiler/` | Esqueleto / placeholders |
 | Biblioteca padrão | `std/` | Experimental |
-| Testes | Unitários (`zig build test`) e e2e (`zig build e2e`) | 96 testes unitários; 64 casos e2e |
+| Testes | Unitários (`zig build test`), e2e (`zig build e2e`) e IR (`zig build validate-ir`) | 96 testes unitários; 64 casos e2e; IR validado por `llvm-as` no CI |
 
 Consulte [o estado detalhado](docs/status.md) e o
 [subconjunto aceito hoje](docs/syntax.ebnf) antes de depender de qualquer
@@ -62,9 +64,10 @@ cd Kyn
 ## Compilação e testes
 
 ```sh
-zig build          # gera zig-out/bin/kync
-zig build test     # testes unitários (compilador + std experimental)
-zig build e2e      # fixture -> assembly -> as/ld -> executa -> confere código
+zig build                  # gera zig-out/bin/kync
+zig build test             # testes unitários (compilador + std experimental)
+zig build e2e              # fixture -> assembly -> as/ld -> executa -> confere código
+zig build validate-ir      # confere o LLVM IR com llvm-as/clang (se instalado)
 ```
 
 Exemplo de uso:

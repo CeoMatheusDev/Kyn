@@ -10,6 +10,25 @@ Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
 > e testes, está em [docs/status.md](docs/status.md). O versionamento será
 > reconciliado antes de qualquer release pública.
 
+## [v0.3.1-alpha.1] — 2026-11-07
+
+Integração contínua e validação do backend LLVM IR por ferramenta real.
+
+- **CI:** adicionado `.github/workflows/ci.yml` (ubuntu-24.04) que instala Zig
+  0.17.0 a partir do wheel oficial do PyPI, instala LLVM e executa
+  `zig fmt --check`, `zig build test`, `zig build e2e` e
+  `zig build validate-ir-strict`. Primeira execução verde: run `42413779278`.
+- **Validação de IR:** novo `tools/validate-ir.sh`, que roda `llvm-as`
+  (PATH, sufixo de versão ou `/usr/lib/llvm-*/bin`) ou `clang -x ir` sobre o IR
+  de todas as fixtures suportadas (59 módulos). Sem LLVM, a variante leniente
+  avisa; a variante `--require-tool` (usada no CI) falha, impedindo que a
+  validação seja ignorada em silêncio.
+- **Build:** novos passos `zig build validate-ir` e
+  `zig build validate-ir-strict`.
+- **Documentação:** `docs/development.md` descreve a suíte de validação, o
+  workflow de CI e como reproduzir localmente; `README.md` ganha badge de CI;
+  `docs/status.md` e `ROADMAP.md` atualizados com a evidência obtida.
+
 ## [v0.3.0-alpha.1] — 2026-11-07
 
 Ciclo de integração do frontend com validação executável.
