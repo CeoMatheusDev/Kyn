@@ -16,7 +16,6 @@
     "language",
     "syntax"
   ],
-  "main": "./extension.js",
   "contributes": {
     "languages": [
       {
