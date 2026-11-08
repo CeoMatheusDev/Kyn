@@ -1,8 +1,8 @@
 {
   "name": "kyn-language",
   "displayName": "Kyn Language Support",
-  "description": "Language support, compiler diagnostics, symbol navigation and build commands for the Kyn programming language.",
-  "version": "0.3.0",
+  "description": "Compiler-resolved navigation, diagnostics and language tooling for the Kyn programming language.",
+  "version": "0.4.0",
   "publisher": "ceomatheusdev",
   "license": "Apache-2.0",
   "engines": {
@@ -21,7 +21,9 @@
     "assembly",
     "go-to-definition",
     "references",
-    "workspace-symbols"
+    "workspace-symbols",
+    "semantic-navigation",
+    "compiler-index"
   ],
   "main": "./src/extension.js",
   "activationEvents": [
