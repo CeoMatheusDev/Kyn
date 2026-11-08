@@ -1,21 +1,23 @@
 # Implementation status
 
-This document describes work integrated through PR #41 (November 8, 2026).
-The final PR head and its merge commit `c04a6a7` each passed both CI jobs,
-including strict `llvm-as`; post-merge `main`
-[run 42532984118](https://github.com/CeoMatheusDev/Kyn/actions/runs/42532984118)
-is green. Local validation used Zig 0.17.0, Linux x86-64, GNU `as`/`ld` and
-LLVM 20 (`llvmlite`). Earlier results remain historical evidence, not a claim
-about outstanding feature branches.
+The released baseline `v0.3.12-alpha.1` points to `main` commit `f977b27`,
+whose [CI run 42534639767](https://github.com/CeoMatheusDev/Kyn/actions/runs/42534639767)
+passed both jobs, including strict `llvm-as`. The division/remainder trap
+contract below has separate local validation using Zig 0.17.0, Linux x86-64,
+GNU `as`/`ld` and LLVM 20 (`llvmlite`). Previous `main` CI cannot validate
+newer code: the final PR head and its post-merge `main` commit must pass their
+own CI before the next tag. Earlier results remain historical evidence, not a
+claim about outstanding feature branches.
 
 ## Summary
 
 Kyn remains an **experimental prototype**. The integrated frontend pipeline
 is **validated by execution**: `.kyn` sources of the supported subset compile
 to x86-64 assembly, assemble, link and run with exit code/stdout checked. The
-integrated shift contract defines counts modulo the left integer's width and
-tests the behavior across both backends; it does not claim a stable calling
-convention, pointer safety or a portable arithmetic overflow model.
+integrated shift contract defines counts modulo the left integer's width; the
+division/remainder work below traps on zero divisors and signed MIN / -1 in
+both backends. Neither establishes a stable calling convention, pointer safety
+or a general arithmetic overflow model.
 
 There are also now **named composite types** (`struct` with scalar fields,
 literals, field access/assignment, copy by value) and **text and number
@@ -63,13 +65,13 @@ and embedded targets is analysed in `docs/embedded.md`.
 | Parser | `src/parser/parser.zig` | Whole program, `import` before declarations, `struct`, `enum` with optional payload, `impl` blocks (their methods join `Program.functions` in source order), `switch` arms (`Case`, `Case(name)`, `else`), struct literals and field access, enum constructors (`Shape.Circle(5)`), method calls (`value.method(args)`), precedence and associativity (including bitwise `|`/`^`/`&`/`<<`/`>>`), unary `~`, address-of `&`, dereference `*`, `expr as Type` cast syntax, errors with span | Unit and negative tests |
 | Modules | `src/driver.zig` | `compilePath` loads the import graph in pre-order, normalizes paths, deduplicates and flattens into one `Program` | Tests with a temporary directory + 3 executed e2e fixtures + 3 negative ones |
 | Semantics | `src/sema/sema.zig` | Nested scopes, name resolution, types `i8`/`i16`/`i32`/`i64`/`u8`/`u16`/`u32`/`u64`/`usize`/`bool`/`str`/`void`/struct/enum (`isInteger`, `isValue`, `bitWidth`, `isSigned`, `fromName`, `name`, `registerWords`), enum cases (unique name and case, `i32` payload only), enum nominality in annotations, assignments, arguments and returns (`param_enum_ids`/`return_enum_id`), exhaustive `switch` (missing cases listed, unreachable `else`, unknown/duplicated case, payload binding rules), struct fields and literals, methods (`impl` target resolution, per-type name space, `Type_method` mangling, receiver `self: Name` rules, field/duplicate/symbol clash checks, shared argument checking between free and method calls), `str` and struct by value in parameters/returns (nominal identity preserved), six-register limit through `registerWordsOf` (`str`/enum/64-bit scalar = 2, struct field/pointer = 1, receiver included), `print`/`print_i32` builtins (arity and type checked, reserved names), mutability, calls, stack slots, `main` validation, `checkBinary` width-aware (arithmetic/comparison/bitwise require same non-bool integer type; shift result = left operand type; logical requires bool; `==`/`!=` fallback via `isValue()`), `checkExpr` for unary `-`/`~` (integer only, same type) and `.cast` (int↔int only, `bool`/`str` rejected, clear diagnostic), implicit narrowing rejected (initializer of `u8` from `i32` literal `300` fails) | Unit tests |
-| LLVM IR backend | `src/codegen/llvm.zig` | Textual IR derived from the AST (arithmetic, comparisons, `&&`/`||` with `phi`, `if`, `while`, calls, `switch` lowered to `switch i32` on the tag with one block per arm); enums as two `alloca i32` slots (tag + payload), two `i32` parameters and a `{ i32, i32 }` return (`insertvalue`/`extractvalue`); structs in a contiguous `[n+1 x i64]` local frame with a reserved base word; `str` in `@.strN` with `declare i64 @write(i32, ptr, i64)`, `str` by value as `ptr`+`i64` in parameters and `{ ptr, i64 }` return, struct by value with parameters flattened into scalars and aggregate return `{ i32, i1, … }` (`insertvalue`/`extractvalue`); `print` calling `write` and `print_i32` through `@kyn_print_i32` (`urem`/`udiv`); `llvmType` maps `i8/u8`→`i8`, `i16/u16`→`i16`, `i32/u32`→`i32`, `i64/u64/usize`→`i64`; `typeAlign` maps 1/2/4/8; bitwise operators emit `and`/`or`/`xor`/`shl`/`ashr`/`lshr`; `~` emits `xor -1`; `as` emits `trunc`/`zext`/`sext`; address-of/typed scalar dereference and struct pointer-field reads use opaque `ptr`; pointer arithmetic scales signed offsets by `codegen.pointeeStride` | 111/111 modules verified locally via LLVM 20 `llvmlite`; strict `llvm-as` passed on PR #41 and its `main` merge commit |
-| x86-64 backend | `src/codegen/x86_64.zig` | Linux assembly without libc, `_start` + `exit` syscall; enums (tag/payload) and `str` (pointer/length) use register pairs, structs use one register per field; 64-bit scalar integer parameters use low/high 32-bit halves in two registers while returns use `%rax`; pointers and wide struct fields use one 64-bit register. Narrow operations normalize results to 8/16 bits, wide operations use 64-bit ALU, casts extend/truncate without losing high bits. Typed pointer operations, strings and `print`/`print_i32` retain their tested paths. This is an internal Kyn ABI, not C-compatible. | `as` + `ld` execution (158/158 local fixtures; PR #41 and post-merge `main` CI green) |
+| LLVM IR backend | `src/codegen/llvm.zig` | Textual IR derived from the AST (arithmetic, comparisons, `&&`/`||` with `phi`, `if`, `while`, calls, `switch` lowered to `switch i32` on the tag with one block per arm); enums as two `alloca i32` slots (tag + payload), two `i32` parameters and a `{ i32, i32 }` return (`insertvalue`/`extractvalue`); structs in a contiguous `[n+1 x i64]` local frame with a reserved base word; `str` in `@.strN` with `declare i64 @write(i32, ptr, i64)`, `str` by value as `ptr`+`i64` in parameters and `{ ptr, i64 }` return, struct by value with parameters flattened into scalars and aggregate return `{ i32, i1, … }` (`insertvalue`/`extractvalue`); `print` calling `write` and `print_i32` through `@kyn_print_i32` (`urem`/`udiv`); `llvmType` maps `i8/u8`→`i8`, `i16/u16`→`i16`, `i32/u32`→`i32`, `i64/u64/usize`→`i64`; `typeAlign` maps 1/2/4/8; bitwise operators emit `and`/`or`/`xor`/`shl`/`ashr`/`lshr`; `~` emits `xor -1`; `as` emits `trunc`/`zext`/`sext`; address-of/typed scalar dereference and struct pointer-field reads use opaque `ptr`; pointer arithmetic scales signed offsets by `codegen.pointeeStride`; source `/`/`%` branch to `llvm.trap` before an invalid division | 120/120 modules locally verified via LLVM 20 `llvmlite`; strict `llvm-as` passed on the `v0.3.12-alpha.1` baseline; newer code requires CI |
+| x86-64 backend | `src/codegen/x86_64.zig` | Linux assembly without libc, `_start` + `exit` syscall; enums (tag/payload) and `str` (pointer/length) use register pairs, structs use one register per field; 64-bit scalar integer parameters use low/high 32-bit halves in two registers while returns use `%rax`; pointers and wide struct fields use one 64-bit register. Narrow operations normalize results to 8/16 bits, wide operations use 64-bit ALU, casts extend/truncate without losing high bits. Typed pointer operations, strings and `print`/`print_i32` retain their tested paths. This is an internal Kyn ABI, not C-compatible; source `/`/`%` use width-matched divide instructions so zero and signed MIN / -1 trap | `as` + `ld` execution (167/167 local fixtures, eight SIGFPE cases; released `v0.3.12-alpha.1` `main` CI green) |
 | FFI | `src/ffi/ffi.zig` | Isolated `extern "c" printf` experiment | Not integrated |
 | `unsafe`/`repr(C)` | `src/sema/unsafe.zig` | Isolated, tested policy; the AST still has no such nodes | Unit tests of the module |
 | Self-hosting | `src/kyn/*.kyn`, `src/compiler/*.kyn` | Placeholders; not executed by `kync` | Not demonstrated |
 | Standard library | `std/core/core.zig`, `std/os/*.zig` | Experimental stubs; some APIs do no real I/O | Compile in the std tests |
-| Fixtures | `tests/` | Numbered integration fixtures plus positive/negative programs and multi-file module scenarios under `tests/e2e/`; unsupported language experiments are kept separate from the accepted subset | `zig build e2e` (158/158 locally; PR #41 and post-merge `main` CI green) |
+| Fixtures | `tests/` | Numbered integration fixtures plus positive/negative programs and multi-file module scenarios under `tests/e2e/`; unsupported language experiments are kept separate from the accepted subset | `zig build e2e` (167/167 locally; strict CI on the newer branch is a separate gate) |
 
 ## Language subset accepted today
 
@@ -135,6 +137,42 @@ and formatting of `str`, `f32`/`f64` and other types, `[]T` slices, generics,
 `Result<T, E>`/`?`, closures, `for`, visibility (`pub`), qualified/selective
 imports and packages.
 
+## Division/remainder trap contract (local November 8, 2026)
+
+Before this cycle, `i8` MIN divided by `-1` returned a truncated value in the
+native backend: it used `idivl` even for a byte. LLVM emitted `sdiv i8` for the
+same input, which produces poison; divisor zero also produced LLVM poison
+while native division raised a CPU fault. Now source-level `/` and `%` have a
+fatal trap, without a result, if the divisor is zero or a signed minimum is
+paired with `-1`. This applies to all fixed integer widths and to `usize` for
+zero divisors. Valid quotients truncate toward zero; signed remainders have
+the dividend's sign. Source order and single evaluation of operands are
+preserved. There is no catchable Kyn exception and **no portable signal/exit
+code guarantee**: native Linux x86-64 raises SIGFPE (#DE), whereas LLVM 20
+MCJIT uses an instruction trap (SIGILL on this host).
+
+- Native `/`/`%` now use the actual 8-/16-/32-/64-bit `div`/`idiv` instruction,
+  so valid operations have **no added branches** and even narrow MIN / -1
+  faults instead of truncating a wide quotient. Result normalization remains.
+- LLVM IR checks the divisor and, for signed types, MIN / -1 **before** the
+  divide/remainder instruction. A single `llvm.trap` block per function is
+  shared by the guards; no libc call is added for arithmetic. Internal pointer
+  stride and decimal-printing divisions use fixed positive divisors.
+- Local `zig build test` with a fresh cache: **280 compiler + 7 std = 287/287**.
+  `zig build e2e`: **167/167** native cases, including eight trap fixtures with
+  Linux SIGFPE exit status 136 and one valid-width/stdout/short-circuit case.
+  No previous fixtures were removed. `tools/e2e.sh` disables core dumps for
+  these deliberate fault tests.
+- LLVM 20 `llvmlite.parse_assembly` + `.verify`: **120/120** emitted modules.
+  MCJIT in isolated processes: the valid fixture returned 0 and wrote `rhs`
+  exactly once; **8/8** exceptional fixtures trapped. This is runtime evidence,
+  not a substitute for the strict `llvm-as` check on the final PR and the
+  post-merge `main` commit.
+
+**Still open:** overflow for `+`, `-`, `*`, pointer bounds/lifetimes, a stable
+external ABI and cross-target/freestanding behavior. PRs #36/#37 remain open
+with red compiler checks and must be reviewed independently.
+
 ## Shift-count contract (PR #41, integrated November 8, 2026)
 
 Before this change, shifting a `u8` value by 8 returned **0** natively: the
@@ -157,11 +195,11 @@ mask instruction for 8-/16-bit values. Valid in-range shifts are unchanged.
   post-merge `main` commit (run 42532984118) passed.
 - Extension check/tests/manifests: 4/4 tests passed locally.
 
-**Not solved:** division by zero and signed division overflow have different
-failure/poison behavior across backends; arithmetic overflow and external ABI
-contracts are not formalized. Pointer bounds/lifetimes, freestanding targets,
-and a 1.0 release remain unproven. The open PRs #36/#37 still have failing
-compiler checks and must not be merged red.
+At the time of PR #41, division by zero and signed division overflow still
+differed between backends; the later division/remainder cycle above addresses
+that gap. Other arithmetic overflow, external ABI, pointer bounds/lifetimes,
+freestanding targets and 1.0 readiness remain open. PRs #36/#37 still have
+failing compiler checks and must not be merged red.
 
 ## Previous integer-width cycle (PR #40, local November 8, 2026)
 
@@ -201,8 +239,8 @@ compiler checks and must not be merged red.
 - PR #37 (target foundations, 10 exclusive commits) and PR #36 (editor rename,
   4 exclusive commits) remain open with failing compiler checks. Neither was
   merged or discarded; evaluate them independently after their required checks
-  pass. After this shift cycle, prioritize division failure/overflow and
-  target-aware/freestanding contracts with tests.
+  pass. Division failure behavior is addressed in the separate cycle above;
+  prioritize remaining arithmetic overflow and target-aware contracts next.
 
 **Reproduced, then fixed in PR #40:** at `main` commit `d2c067e`, the
 following program returned **1** as native assembly but **0** with LLVM 20
@@ -225,11 +263,11 @@ unsigned values); `bool` remains rejected. The six-word limit is unchanged:
 wide scalar arguments use two registers (low/high 32-bit halves), whereas a
 wide struct field or pointer uses one full 64-bit register. Returns use `%rax`.
 LLVM IR uses scalar `i64` arguments, so this is **not** a shared C-compatible
-calling convention. Division by zero, signed division overflow, pointer
-validity/lifetimes and cross-target integer semantics still lack portable
-language contracts. Shift-count semantics are specified in PR #41 above.
-No freestanding target, kernel ABI, memory-safety guarantee or 1.0 readiness
-is implied.
+calling convention. Division failure behavior is specified in the later
+cycle above; pointer validity/lifetimes, other arithmetic overflow and
+cross-target integer semantics still lack portable language contracts.
+Shift-count semantics are specified in PR #41 above. No freestanding target,
+kernel ABI, memory-safety guarantee or 1.0 readiness is implied.
 
 ## Historical validation baseline (previous cycles)
 

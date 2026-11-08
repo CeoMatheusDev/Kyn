@@ -8,6 +8,35 @@ No changes recorded for the next version yet.
 
 Rules: Semantic Versioning 2.0.0. Pre-1.0.0 = pre-release.
 
+## [v0.3.13-alpha.1] — 2026-11-08
+
+Changes since `v0.3.12-alpha.1`: an experimental division/remainder failure
+contract.
+
+- **Language:** integer `/` truncates toward zero; `%` returns the remainder
+  with the dividend's sign for signed inputs.
+  Divisor zero traps for every integer type. Signed `MIN / -1` and `MIN % -1`
+  also trap at 8/16/32/64 bits. Neither operation returns a value on those
+  inputs; there is no recoverable exception or specified OS signal/exit code.
+  Other arithmetic overflow and pointer/ABI safety are still unformalized.
+- **Native backend:** `divb/w/l/q` and `idivb/w/l/q` now operate at the true
+  integer width, so x86 #DE traps on invalid operands even for i8/i16. Valid
+  narrow results are still sign/zero-extended into the existing Kyn ABI;
+  32-/64-bit operations retain their branchless hardware path.
+- **LLVM backend:** each source-level `/` or `%` guards zero and (when signed)
+  the `MIN / -1` case before `sdiv`/`srem`/`udiv`/`urem`, branching to one
+  `llvm.trap` block per function. This prevents LLVM poison without a libc
+  dependency or changing the frontend's integer type rules.
+- **Validation (local, Linux x86-64 / Zig 0.17.0 / LLVM 20):** 280 compiler +
+  7 std tests (287/287), 167/167 native E2E fixtures including eight deliberate
+  SIGFPE cases, and 120/120 IR modules verified by `llvmlite`. The valid
+  division fixture returned 0 and printed one line under MCJIT; all eight
+  exceptional fixtures trapped in isolated MCJIT processes. Strict `llvm-as`
+  on the exact PR and post-merge `main` commits is the release gate.
+- **Still pending:** other arithmetic overflow semantics, external C ABI,
+  pointer bounds/lifetime, freestanding/embedded targets and stable 1.0
+  compatibility. Release binaries and checksums are not provided.
+
 ## [v0.3.12-alpha.1] — 2026-11-08
 
 Experimental update since `v0.3.11-alpha.1` (PRs #32–#35 and #38–#41):

@@ -116,9 +116,30 @@ literals. Arithmetic, ordering and bitwise operators require operands of the
 same integer type; shifts accept an independently typed integer count. Integer
 literals default to `i32`; literal overflow is diagnosed. Executed native
 regressions now cover selected 8-/16-/32-/64-bit operations and internal wide
-arguments; shift counts are defined modulo the left operand's width.
-Arithmetic overflow and division-by-zero still need portable language
-contracts (see `status.md`).
+arguments; shift counts are defined modulo the left operand's width. Division
+and remainder now trap on exceptional inputs (below); overflow for `+`, `-`
+and `*` still needs a portable language contract (see `status.md`).
+
+### Integer division and remainder (`/`, `%`)
+
+Both operands must have the same integer type. For nonzero divisors with a
+representable quotient, `/` truncates toward zero and `%` returns the remainder
+with the dividend's sign (or zero). This holds for i8/i16/i32/i64,
+u8/u16/u32/u64 and `usize`.
+
+If the divisor is zero, **both `/` and `%` trap**. For a signed type, dividing
+its minimum value by `-1` also traps for **both** operators (even though its
+mathematical remainder is zero): the quotient cannot fit in that type.
+For example, with `let min: i8 = (0 - 128) as i8;` and
+`let minus_one: i8 = (0 - 1) as i8;`, both `min / minus_one` and
+`min % minus_one` trap. These inputs produce no result and execution cannot
+resume after the trap. The exact OS signal/exit status is target-specific,
+not part of the language contract. Guard the divisor and signed overflow case
+in Kyn before the operation if the program must continue. Both operands are
+evaluated once in source order
+when the expression is reached; `&&`/`||` still short-circuit their right side.
+The frontend does not reject constant zero divisors at compile time; this is a
+runtime trap, not a recoverable exception or a general overflow policy.
 
 ### Numeric conversion (`as`)
 
@@ -161,8 +182,9 @@ or signedness. Negative counts use their two's-complement low bits: shifting
 `1 as u8` left by `8 as i32` leaves it at 1, and shifting `1 as u64` left by
 `(0 - 1) as i32` uses a count of 63. This matches x86-64's full-width mask,
 adds an explicit mask for narrow native values, and avoids poison from an
-out-of-range LLVM shift. It does not specify arithmetic overflow or division
-by zero. Bitwise AND/XOR/OR require both operands to have the same type:
+out-of-range LLVM shift. This does not specify overflow for `+`, `-` or `*`;
+`/` and `%` use the trap contract above. Bitwise AND/XOR/OR require both
+operands to have the same type:
 
 ```kyn
 fn main() -> i32 {

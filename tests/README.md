@@ -6,7 +6,9 @@ The test tree contains compiler fixtures and regression cases.
 
 - Root-level `*.kyn`: focused language/compiler fixtures used by configured test steps.
 - `integration/`: numbered exit-code fixtures; filenames and expected exit codes are intentionally paired.
-- `e2e/positive/`: programs expected to compile and execute successfully.
+- `e2e/positive/`: accepted programs expected to compile and execute; most
+  return normally, while deliberate division trap cases expect Linux SIGFPE
+  (shell exit code 136, not a Kyn language guarantee).
 - `e2e/negative/`: programs expected to fail compilation.
 - `e2e/modules/`: multi-file import scenarios.
 - `e2e/modules_negative/`: invalid module graphs and expected diagnostics.

@@ -53,21 +53,24 @@ implementation and reproducible tests.
       pointer arithmetic and pointer equality/inequality for the current target.
       Generic pointer parameters/struct fields now preserve full addresses, but
       the language still lacks bounds, lifetime and pointer-safety contracts.
-- [ ] Specify and validate the remaining arithmetic overflow and division-by-zero
-      behavior, plus a stable external ABI, before making general cross-backend
-      or C-compatibility claims. The documented `i64` discrepancy, selected
-      width/argument paths and out-of-range shifts (counts modulo width) now
-      have native + LLVM regressions (`docs/status.md`); other targets and edge
-      cases remain open.
+- [x] Define source-level `/` and `%` with zero divisors or signed MIN / -1 as
+      fatal traps for all supported integer widths. Native true-width division
+      and guarded LLVM IR have structural, executable E2E and MCJIT regression
+      evidence (`docs/status.md`); no exact OS signal is promised by Kyn.
+- [ ] Specify overflow behavior for the remaining arithmetic (`+`, `-`, `*`)
+      and a stable external ABI before general cross-backend/C-compatibility
+      claims. The earlier `i64` discrepancy and out-of-range shifts are covered
+      by regressions, but other targets and edge cases remain open.
 - [ ] Complete the language beyond the implemented subset: slices, arrays,
       nested aggregates, enum struct fields, richer payloads, `unsafe`,
       attributes, generics and a formal ownership/lifetime model.
 - [ ] Extend semantic analysis with floating-point types, richer flow
       analysis, ownership/lifetime checking and a complete error model.
 - [ ] Define and validate the official backend. The x86-64 backend is validated
-      by execution; LLVM IR passed strict `llvm-as` on PRs #40 and #41 and
-      on both post-merge `main` commits (latest: `c04a6a7`, CI run
-      42532984118). The choice of the official backend and a configurable
+      by execution; LLVM IR passed strict `llvm-as` on the released
+      `v0.3.12-alpha.1` `main` commit (`f977b27`, CI run 42534639767).
+      The division work must pass its own strict PR and post-merge `main`
+      checks before release. Choosing the official backend and configuring the
       `target triple` remain pending.
 
 ## Phase 2 — Freestanding and embedded targets
