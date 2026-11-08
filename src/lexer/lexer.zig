@@ -32,6 +32,8 @@ pub const Tag = enum {
     kw_if,
     kw_else,
     kw_while,
+    kw_enum,
+    kw_switch,
     kw_true,
     kw_false,
 
@@ -45,6 +47,7 @@ pub const Tag = enum {
     comma,
     dot, // .
     arrow, // ->
+    fat_arrow, // =>
 
     // operadores
     assign, // =
@@ -95,6 +98,8 @@ pub const Token = struct {
             .kw_if => "'if'",
             .kw_else => "'else'",
             .kw_while => "'while'",
+            .kw_enum => "'enum'",
+            .kw_switch => "'switch'",
             .kw_true => "'true'",
             .kw_false => "'false'",
             .lparen => "'('",
@@ -106,6 +111,7 @@ pub const Token = struct {
             .comma => "','",
             .dot => "'.'",
             .arrow => "'->'",
+            .fat_arrow => "'=>'",
             .assign => "'='",
             .eq => "'=='",
             .ne => "'!='",
@@ -129,7 +135,7 @@ pub const Token = struct {
 
     pub fn isKeyword(self: Token) bool {
         return switch (self.tag) {
-            .kw_fn, .kw_struct, .kw_let, .kw_var, .kw_return, .kw_if, .kw_else, .kw_while, .kw_true, .kw_false => true,
+            .kw_fn, .kw_struct, .kw_let, .kw_var, .kw_return, .kw_if, .kw_else, .kw_while, .kw_enum, .kw_switch, .kw_true, .kw_false => true,
             else => false,
         };
     }
@@ -146,6 +152,8 @@ fn keywordTag(text: []const u8) ?Tag {
         .{ "if", .kw_if },
         .{ "else", .kw_else },
         .{ "while", .kw_while },
+        .{ "enum", .kw_enum },
+        .{ "switch", .kw_switch },
         .{ "true", .kw_true },
         .{ "false", .kw_false },
     });
@@ -264,7 +272,7 @@ pub const Lexer = struct {
             '*' => .star,
             '/' => .slash,
             '%' => .percent,
-            '=' => if (self.eat('=')) .eq else .assign,
+            '=' => if (self.eat('=')) .eq else if (self.eat('>')) .fat_arrow else .assign,
             '!' => if (self.eat('=')) .ne else .bang,
             '<' => if (self.eat('=')) .le else .lt,
             '>' => if (self.eat('=')) .ge else .gt,
@@ -475,4 +483,32 @@ test "lexer: 'struct' is a keyword and '.' is punctuation" {
     try std.testing.expectEqualStrings(".", dot.text);
     try std.testing.expectEqual(Tag.identifier, fields.next().tag);
     try std.testing.expectEqual(Tag.assign, fields.next().tag);
+}
+
+test "lexer: 'enum', 'switch' and '=>' are their own tokens" {
+    try expectTags("enum Color { Red } switch x { Red => 1 }", &.{
+        .kw_enum,   .identifier, .lbrace, .identifier, .rbrace,
+        .kw_switch, .identifier, .lbrace, .identifier, .fat_arrow,
+        .integer,   .rbrace,     .eof,
+    });
+}
+
+test "lexer: '=>' is a single token, distinct from '=' and '>'" {
+    var buf: [8]Token = undefined;
+    const toks = collect("=> = >", &buf);
+    try std.testing.expectEqual(@as(usize, 4), toks.len);
+    try std.testing.expectEqual(Tag.fat_arrow, toks[0].tag);
+    try std.testing.expectEqual(Tag.assign, toks[1].tag);
+    try std.testing.expectEqual(Tag.gt, toks[2].tag);
+    try std.testing.expectEqualStrings("=>", toks[0].text);
+}
+
+test "lexer: 'enum' and 'switch' are keywords, not identifiers" {
+    var lex = Lexer.init("enum switch");
+    const first = lex.next();
+    const second = lex.next();
+    try std.testing.expectEqual(Tag.kw_enum, first.tag);
+    try std.testing.expectEqual(Tag.kw_switch, second.tag);
+    try std.testing.expect(first.isKeyword());
+    try std.testing.expect(second.isKeyword());
 }
