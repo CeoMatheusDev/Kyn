@@ -307,19 +307,27 @@ class WorkspaceSymbolIndex {
     this.client = client;
     this.cache = new Map();
     this.pending = new Map();
+    this.revision = 0;
   }
   invalidate() {
+    this.revision++;
     this.cache.clear();
+    this.pending.clear();
   }
   async get(document) {
     const key = document.uri.toString();
     const cached = this.cache.get(key);
     if (cached && cached.version === document.version) return cached.snapshot;
     if (this.pending.has(key)) return this.pending.get(key);
+    const revision = this.revision;
     const pending = this.client.semanticIndex(document).then(snapshot => {
-      if (snapshot && !document.isClosed) this.cache.set(key, { version: document.version, snapshot });
+      if (snapshot && revision === this.revision && !document.isClosed) {
+        this.cache.set(key, { version: document.version, snapshot });
+      }
       return snapshot;
-    }).finally(() => this.pending.delete(key));
+    }).finally(() => {
+      if (this.pending.get(key) === pending) this.pending.delete(key);
+    });
     this.pending.set(key, pending);
     return pending;
   }
