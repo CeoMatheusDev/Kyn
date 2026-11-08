@@ -1,8 +1,8 @@
 {
   "name": "kyn-language",
   "displayName": "Kyn Language Support",
-  "description": "Compiler-resolved navigation, diagnostics and language tooling for the Kyn programming language.",
-  "version": "0.4.0",
+  "description": "Compiler-resolved navigation, rename, diagnostics and language tooling for the Kyn programming language.",
+  "version": "0.5.0",
   "publisher": "ceomatheusdev",
   "license": "Apache-2.0",
   "engines": {
@@ -23,7 +23,8 @@
     "references",
     "workspace-symbols",
     "semantic-navigation",
-    "compiler-index"
+    "compiler-index",
+    "rename-symbol"
   ],
   "main": "./src/extension.js",
   "activationEvents": [
