@@ -121,8 +121,8 @@ The project only declares a step complete when there is an executable test:
 
 The LLVM unit tests check structural properties only. In this local iteration,
 all 106 emitted modules were also parsed and verified with LLVM 20 via
-`llvmlite`, and 13 selected programs were executed via its MCJIT; those commands
-are separate from (and do not replace) the required CI `llvm-as` check.
+`llvmlite`, and 13 selected programs were executed via its MCJIT. The separate
+required `llvm-as` CI also passed on PR #38 and its merge into `main`.
 
 ## Continuous integration
 
@@ -138,9 +138,10 @@ requests and manual dispatch. On `ubuntu-24.04` the workflow:
 5. runs `zig build validate-ir-strict` (LLVM verifier required), then
    `zig build e2e` if IR validation succeeds.
 
-The current local results are 272/272 unit tests, 151/151 E2E cases and
-106/106 LLVM 20-verified modules; these do **not** assert that the PR or `main`
-CI has passed.
+The local results are 272/272 unit tests, 151/151 E2E cases and 106/106
+LLVM 20-verified modules. The independent required GitHub CI succeeded on
+[PR #38](https://github.com/CeoMatheusDev/Kyn/pull/38) (run 42529572145) and
+on `main` commit `ac49f66` (run 42529755898), including strict `llvm-as`.
 
 A missing LLVM in CI **fails** the build, so IR validation cannot be skipped
 silently.

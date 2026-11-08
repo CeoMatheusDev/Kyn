@@ -65,7 +65,13 @@ zig build validate-ir
 
 Use `zig build validate-ir-strict` to require an LLVM verifier. CI runs the strict validation step so a missing verifier cannot silently pass.
 
-On this branch, local Zig 0.17.0 runs passed **265 compiler unit tests + 7 standard-library tests** and **151 native end-to-end cases**. All **106 emitted LLVM IR modules** were parsed and verified with LLVM 20 (`llvmlite`); selected programs also ran under its JIT. This does **not** replace the required `llvm-as`/CI check, nor establish a green `main` build. See [Implementation status](docs/status.md).
+Locally with Zig 0.17.0: **265 compiler unit tests + 7 standard-library
+tests**, **151 native end-to-end cases** and **106 LLVM 20-verified IR
+modules** (`llvmlite`; 13 selected programs also ran under MCJIT). These
+local checks are distinct from the required CI: PR #38 and the resulting
+`main` commit `ac49f66` also passed the strict `llvm-as`, E2E and extension
+jobs. See [Implementation status](docs/status.md) for remaining release
+blockers.
 
 ## Quick start
 
