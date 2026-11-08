@@ -1137,7 +1137,11 @@ pub const Checker = struct {
                     .{self.typeLabel(scrutinee_type, self.structIdOfExpr(sw.scrutinee) orelse 0)},
                 );
             }
-            for (sw.arms) |arm| try self.checkScopedBlock(arm.body);
+            for (sw.arms) |arm| {
+                try self.pushScope();
+                try self.checkStatements(arm.body);
+                self.popScope();
+            }
             if (sw.else_body) |body| try self.checkScopedBlock(body);
             return;
         };
@@ -1153,9 +1157,8 @@ pub const Checker = struct {
                 "'switch' over a constructed enum value is not supported yet; store it in a variable first",
                 .{},
             );
-            for (sw.arms) |arm| try self.checkScopedBlock(arm.body);
-            if (sw.else_body) |body| try self.checkScopedBlock(body);
-            return;
+            // Keep checking the arms so the payload bindings exist; the
+            // backend restriction is the only problem reported here.
         }
 
         const covered = try self.arena.alloc(bool, info.cases.len);
@@ -1382,25 +1385,25 @@ pub const Checker = struct {
             },
 
             .method_call => |*call| {
-                const not_a_method = struct {
-                    fn fail(checker: *Checker, span: Span) std.mem.Allocator.Error!Type {
-                        try checker.diags.add(
-                            .unsupported,
-                            span,
-                            "method calls are not supported yet (only enum constructors)",
-                            .{},
-                        );
-                        return .unknown;
-                    }
-                }.fail;
-
-                if (call.base.kind != .identifier) return not_a_method(self, call.base.span);
-                const base_name = call.base.kind.identifier;
-                // A variable shadows the enum name: `x.Case(...)` is not a constructor.
-                if (self.lookup(base_name) != null) return not_a_method(self, call.base.span);
-
-                const enum_id = self.findEnumIndex(base_name) orelse return not_a_method(self, call.base.span);
-                const info = &self.enums.items[enum_id];
+                // A variable shadows the enum name: `x.Case(...)` is not a
+                // constructor either, so both cases fail the same way.
+                const base_name: ?[]const u8 = if (call.base.kind == .identifier and
+                    self.lookup(call.base.kind.identifier) == null)
+                    call.base.kind.identifier
+                else
+                    null;
+                const enum_id = if (base_name) |name| self.findEnumIndex(name) else null;
+                if (enum_id == null) {
+                    try self.diags.add(
+                        .unsupported,
+                        call.base.span,
+                        "method calls are not supported yet (only enum constructors)",
+                        .{},
+                    );
+                    for (call.args) |arg| _ = try self.checkExpr(arg);
+                    return .unknown;
+                }
+                const info = &self.enums.items[enum_id.?];
                 const case_index = findCaseIndex(info, call.name) orelse {
                     try self.diags.add(
                         .unknown_case,
@@ -1411,7 +1414,7 @@ pub const Checker = struct {
                     for (call.args) |arg| _ = try self.checkExpr(arg);
                     return .unknown;
                 };
-                call.resolved_enum = enum_id;
+                call.resolved_enum = enum_id.?;
                 call.resolved_case = case_index;
                 const case = info.cases[case_index];
 
