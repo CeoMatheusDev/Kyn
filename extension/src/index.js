@@ -1,100 +1,59 @@
 "use strict";
 
-const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const path = require("node:path");
 
-function tokenize(source) {
-  const tokens = [];
-  let i = 0;
-  while (i < source.length) {
-    const ch = source[i], next = source[i + 1];
-    if (/\s/.test(ch)) { i++; continue; }
-    if (ch === "/" && next === "/") {
-      i += 2;
-      while (i < source.length && source[i] !== "\n") i++;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      i += 2;
-      let depth = 1;
-      while (i < source.length && depth) {
-        if (source[i] === "/" && source[i + 1] === "*") { depth++; i += 2; }
-        else if (source[i] === "*" && source[i + 1] === "/") { depth--; i += 2; }
-        else i++;
-      }
-      continue;
-    }
-    if (ch === '"') {
-      i++;
-      while (i < source.length) {
-        if (source[i] === "\\") i += 2;
-        else if (source[i++] === '"') break;
-      }
-      continue;
-    }
-    const start = i;
-    if (/[A-Za-z_]/.test(ch)) {
-      i++;
-      while (i < source.length && /[A-Za-z0-9_]/.test(source[i])) i++;
-      tokens.push({ text: source.slice(start, i), start, end: i, identifier: true });
-    } else {
-      tokens.push({ text: ch, start, end: ++i, identifier: false });
-    }
-  }
-  return tokens;
+function validateSnapshot(snapshot) {
+  return !!snapshot && snapshot.schema === 1 &&
+    Array.isArray(snapshot.files) &&
+    Array.isArray(snapshot.symbols) &&
+    Array.isArray(snapshot.references) &&
+    snapshot.files.every(file => Number.isInteger(file.id) && typeof file.path === "string") &&
+    snapshot.symbols.every(symbol =>
+      typeof symbol.id === "string" && typeof symbol.name === "string" &&
+      typeof symbol.kind === "string" && Number.isInteger(symbol.file) &&
+      Number.isInteger(symbol.start) && Number.isInteger(symbol.end) &&
+      symbol.start >= 0 && symbol.end >= symbol.start) &&
+    snapshot.references.every(reference =>
+      typeof reference.target === "string" && Number.isInteger(reference.file) &&
+      Number.isInteger(reference.start) && Number.isInteger(reference.end) &&
+      reference.start >= 0 && reference.end >= reference.start);
 }
 
-function indexSource(source, uri) {
-  const tokens = tokenize(source);
-  const declarations = [];
-  const identifiers = tokens.filter(token => token.identifier);
-  let depth = 0, implOwner = null, implDepth = -1, pendingImpl = null;
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (token.text === "}") {
-      if (depth === implDepth) { implOwner = null; implDepth = -1; }
-      depth = Math.max(0, depth - 1);
-      continue;
-    }
-    if (token.identifier && token.text === "impl" && depth === 0) {
-      const owner = tokens[i + 1];
-      if (owner && owner.identifier) pendingImpl = owner.text;
-      continue;
-    }
-    if (token.text === "{") {
-      depth++;
-      if (pendingImpl && implDepth < 0) { implOwner = pendingImpl; implDepth = depth; }
-      pendingImpl = null;
-      continue;
-    }
-    const topLevel = depth === 0;
-    const inImpl = implDepth >= 0 && depth === implDepth;
-    if (!token.identifier || (!topLevel && !inImpl) ||
-        !["fn", "struct", "enum"].includes(token.text)) continue;
-    const name = tokens[i + 1];
-    if (!name || !name.identifier || !IDENTIFIER.test(name.text)) continue;
-    const kind = token.text === "fn" ? "function" :
-      token.text === "struct" ? "struct" : "enum";
-    declarations.push({
-      name: name.text,
-      qualifiedName: inImpl ? implOwner + "." + name.text : name.text,
-      kind: inImpl ? "method" : kind,
-      uri,
-      start: name.start,
-      end: name.end
-    });
-  }
-  return { uri, declarations, identifiers };
+function filePathOf(snapshot, fileId) {
+  const file = snapshot.files.find(entry => entry.id === fileId);
+  return file ? file.path : null;
 }
 
-function tokenAt(index, offset) {
-  let low = 0, high = index.identifiers.length - 1;
-  while (low <= high) {
-    const mid = (low + high) >>> 1, token = index.identifiers[mid];
-    if (offset < token.start) high = mid - 1;
-    else if (offset >= token.end) low = mid + 1;
-    else return token;
-  }
-  return null;
+function targetAt(snapshot, sourcePath, offset, canonicalize = path.resolve) {
+  const source = canonicalize(sourcePath);
+  const declaration = snapshot.symbols.find(symbol => {
+    const file = filePathOf(snapshot, symbol.file);
+    return file && canonicalize(file) === source &&
+      symbol.start <= offset && offset < symbol.end;
+  });
+  if (declaration) return declaration.id;
+  const reference = snapshot.references.find(item => {
+    const file = filePathOf(snapshot, item.file);
+    return file && canonicalize(file) === source &&
+      item.start <= offset && offset < item.end;
+  });
+  return reference ? reference.target : null;
 }
 
-module.exports = { tokenize, indexSource, tokenAt };
+function findSymbol(snapshot, id) {
+  return snapshot.symbols.find(symbol => symbol.id === id) || null;
+}
+
+function referencesFor(snapshot, id, includeDeclaration) {
+  const result = [];
+  if (includeDeclaration) {
+    const declaration = findSymbol(snapshot, id);
+    if (declaration) result.push(declaration);
+  }
+  for (const reference of snapshot.references) {
+    if (reference.target === id) result.push(reference);
+  }
+  return result;
+}
+
+module.exports = { validateSnapshot, filePathOf, targetAt, findSymbol, referencesFor };
