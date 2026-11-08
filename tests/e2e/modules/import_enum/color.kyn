@@ -1,0 +1,21 @@
+// Enum declared in the imported module and consumed by a local `switch`.
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
+fn green_tag() -> i32 {
+    let c = Color.Green;
+    switch c {
+        Red => {
+            return 0;
+        }
+        Green => {
+            return 7;
+        }
+        Blue => {
+            return 9;
+        }
+    }
+}

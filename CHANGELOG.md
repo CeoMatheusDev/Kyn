@@ -50,8 +50,9 @@ Enums with payload and exhaustive `switch`, in both backends.
 - **Driver:** `enum` declarations of every module are flattened into
   `Program.enums`; `file_id` is assigned by the loader.
 - **Tests:** **228** (`221` compiler + `7` std), including lexer, parser, sema
-  (12 new cases) and structural tests in both backends. **112/112** e2e cases
-  with 2 new positives (`enum_switch`, `enum_switch_else`) and 8 new negatives
+  (12 new cases) and structural tests in both backends. **113/113** e2e cases
+  with 2 new positives (`enum_switch`, `enum_switch_else`), 1 module
+  (`import_enum`) and 8 new negatives
   (`enum_non_exhaustive`, `enum_unknown_case`, `enum_else_unreachable`,
   `enum_payload_missing`, `enum_payload_binding`, `enum_in_parameter`,
   `enum_in_field`, `enum_operator`).

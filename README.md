@@ -44,7 +44,7 @@ guarantees of complete features.
 | x86-64 backend | `src/codegen/x86_64.zig` (asm + `as`/`ld`) | Validated by execution |
 | Implementation in Kyn | `src/kyn/`, `src/compiler/` | Skeleton / placeholders |
 | Standard library | `std/` | Experimental |
-| Tests | Unit (`zig build test`), e2e (`zig build e2e`) and IR (`zig build validate-ir`) | 228 unit tests (221 compiler + 7 std); 112 e2e cases (with stdout checked); IR validated by `llvm-as` in CI |
+| Tests | Unit (`zig build test`), e2e (`zig build e2e`) and IR (`zig build validate-ir`) | 228 unit tests (221 compiler + 7 std); 113 e2e cases (with stdout checked); IR validated by `llvm-as` in CI |
 
 See the [detailed status](docs/status.md) and the
 [subset accepted today](docs/syntax.ebnf) before depending on any feature.

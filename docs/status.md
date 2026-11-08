@@ -54,7 +54,7 @@ functional self-hosting.
 | `unsafe`/`repr(C)` | `src/sema/unsafe.zig` | Isolated, tested policy; the AST still has no such nodes | Unit tests of the module |
 | Self-hosting | `src/kyn/*.kyn`, `src/compiler/*.kyn` | Placeholders; not executed by `kync` | Not demonstrated |
 | Standard library | `std/core/core.zig`, `std/os/*.zig` | Experimental stubs; some APIs do no real I/O | Compile in the std tests |
-| Fixtures | `tests/` | 50 `integration/case_N.kyn` + 62 entries in `tests/e2e` (28 positive with `struct_*`/`print_*`/`print_int_*`/`str_*`/`enum_*`, 7 modules, 24 negative, 3 negative modules) + remaining language cases not supported yet | `zig build e2e` (112 cases) |
+| Fixtures | `tests/` | 50 `integration/case_N.kyn` + 63 entries in `tests/e2e` (28 positive with `struct_*`/`print_*`/`print_int_*`/`str_*`/`enum_*`, 8 modules including `import_enum`, 24 negative, 3 negative modules) + remaining language cases not supported yet | `zig build e2e` (113 cases) |
 
 ## Language subset accepted today
 
@@ -111,7 +111,7 @@ closures, `for`, visibility (`pub`), qualified/selective imports and packages.
   structs, `str`/`print`, `str` by value in calls, struct by value in calls,
   `print_i32`, enums with payload and exhaustive `switch`, string pool and
   rejection of `void` variables) and 7 from the experimental std.
-- `zig build e2e` — 112/112 cases: 28 behavioral fixtures (2 with `enum` +
+- `zig build e2e` — 113/113 cases: 28 behavioral fixtures (2 with `enum` +
   `switch`, one of them using `else`, 6 with `struct`,
   including 3 struct by value, 4 with `print`, 4 with `print_i32`/mixed, 3 with
   `str` by value, all checking stdout), 7 executed multi-file programs (with
@@ -121,15 +121,15 @@ closures, `for`, visibility (`pub`), qualified/selective imports and packages.
   binding on a payload-less case, enum in parameter, enum struct field, operator
   on an enum; 4 struct, including swapped nominal structs and the register
   limit; 4 `str`/`print`, 2 `print_i32`, 1 `str` field, 1 `main` returning
-  `str`) and 3 negative modules (cycle, missing file, duplicated symbol) with
-  the expected message.
+  `str`), 1 module with an enum (`import_enum`) and 3 negative modules (cycle,
+  missing file, duplicated symbol) with the expected message.
 - `zig fmt --check build.zig src std` — no differences.
 - `zig build validate-ir` (local, no LLVM) — warns and skips, as documented for
   the development environment; the same script covers 83 modules when
   `llvm-as`/`clang` is available.
 - CI (`.github/workflows/ci.yml`) — runs `42427966554` (PR #23) and
   `42428126584` (`main` after merge) green with `zig fmt --check`, `zig build
-  test` (228 tests), `zig build e2e` (112 cases, with stdout checked) and
+  test` (228 tests), `zig build e2e` (113 cases, with stdout checked) and
   `zig build validate-ir-strict` (83 modules accepted by `llvm-as`, including
   the `{ ptr, i64 }` aggregates of `str` and the `{ i32, i1, … }` of structs).
   The strict step fails if the verifier is missing or rejects any module.
