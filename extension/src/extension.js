@@ -358,7 +358,8 @@ class WorkspaceSymbolIndex {
     return result;
   }
 }
-\nfunction activate(context) {
+
+function activate(context) {
   const client = new KynClient(context);\n  const symbolIndex = new WorkspaceSymbolIndex();
   context.subscriptions.push(
     vscode.languages.registerCompletionItemProvider(SELECTOR, { provideCompletionItems: completions }, ".", ":", " "),
