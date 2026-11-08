@@ -1,7 +1,7 @@
 (* Kyn — syntactic grammar of the implemented subset.
    This file describes exactly what the parser in src/parser/parser.zig accepts
-   today. Constructs from the language vision (generics, slices, pointers,
-   unsafe, attributes) are NOT part of this subset yet; see
+   today. Constructs from the language vision (generics, slices, unsafe
+   blocks and attributes) are NOT part of this subset yet; see
    docs/language_reference.md and docs/status.md. *)
 
 (* Imports come before any declaration; the path is a string literal and is
@@ -39,8 +39,10 @@ parameter        = identifier, ":", type_expr ;
 (* Accepted by semantics: i8/i16/i32/i64, u8/u16/u32/u64, usize, bool, str,
    void, ptr, names of declared structs and names of declared enums. An enum
    crosses calls by value (tag + payload, two registers); a struct field of enum
-   type is diagnosed as unsupported. `ptr` is a pointer value; its pointee type
-   is not tracked by the type system yet. *)
+   type is diagnosed as unsupported. `ptr` is the generic pointer annotation
+   (unknown pointee); `&variable` produces a pointer whose pointee type is
+   inferred from the variable. Typed pointer notation such as `ptr<i32>` is a
+   semantic description, not a source-level type expression. *)
 type_expr        = identifier ;
 
 block            = "{", { statement }, "}" ;
@@ -106,6 +108,12 @@ shift            = additive, { ( "<<" | ">>" ), additive } ;
 additive         = multiplicative, { ( "+" | "-" ), multiplicative } ;
 multiplicative   = unary, { ( "*" | "/" | "%" ), unary } ;
 unary            = ( "-" | "!" | "~" | "&" | "*" ), unary | postfix ;
+
+(* Pointer operations accepted by the parser and semantic checker include
+   address-of on variables, dereference, pointer arithmetic/comparison and
+   field access through a pointer to a known struct. The native x86-64 backend
+   lowers these operations; the LLVM backend currently rejects address-of and
+   dereference during emission. *)
 
 (* Dotted postfix. `Name.Case(...)` is an enum constructor; `value.method(...)`
    is a method call whose receiver (the base) is passed as argument 1; a dotted
