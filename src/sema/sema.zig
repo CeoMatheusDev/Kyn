@@ -188,6 +188,15 @@ fn ptrToUnknown() Type {
     return ptr_to_unknown_type;
 }
 
+/// True when two pointer types are assignment-compatible: either they have
+/// the same pointee, or one side is `ptr<unknown>` (written as `ptr`).
+fn ptrTypesCompatible(a: Type, b: Type) bool {
+    if (!a.isPtr() or !b.isPtr()) return false;
+    const a_pt = switch (a) { .ptr => |pt| pt.*, else => unreachable };
+    const b_pt = switch (b) { .ptr => |pt| pt.*, else => unreachable };
+    return a_pt.eq(b_pt) or a_pt.eq(.unknown) or b_pt.eq(.unknown);
+}
+
 pub const SymbolKind = enum { param, local };
 
 pub const Symbol = struct {
@@ -1249,7 +1258,7 @@ pub const Checker = struct {
                         "variable '{s}' needs a value: 'void' cannot be stored",
                         .{decl.name},
                     );
-                } else if (!declared_type.eq(.unknown) and !init_type.eq(.unknown) and !declared_type.eq(init_type)) {
+                } else if (!declared_type.eq(.unknown) and !init_type.eq(.unknown) and !declared_type.eq(init_type) and !ptrTypesCompatible(declared_type, init_type)) {
                     try self.diags.add(
                         .type_mismatch,
                         decl.init.span,
@@ -1344,7 +1353,7 @@ pub const Checker = struct {
                         .{assign.name},
                     );
                 }
-                if (!sym.typ.eq(.unknown) and !value_type.eq(.unknown) and !sym.typ.eq(value_type)) {
+                if (!sym.typ.eq(.unknown) and !value_type.eq(.unknown) and !sym.typ.eq(value_type) and !ptrTypesCompatible(sym.typ, value_type)) {
                     try self.diags.add(
                         .type_mismatch,
                         assign.value.span,
@@ -1766,7 +1775,9 @@ pub const Checker = struct {
                     },
                     .address_of => {
                         // `&expr` requires the operand to be an lvalue: a
-                        // variable or a field access. The result is a pointer.
+                        // variable or a field access. The result is a pointer
+                        // to the operand's type (e.g. `&x` where `x: i32`
+                        // yields `ptr<i32>`).
                         if (operand.eq(.unknown)) return .unknown;
                         if (!operand.isValue() and !operand.isPtr()) {
                             try self.diags.add(
@@ -1777,12 +1788,17 @@ pub const Checker = struct {
                             );
                             return .unknown;
                         }
-                        return ptrToUnknown();
+                        // Allocate the pointee type in the arena so the
+                        // pointer can reference it.
+                        const pointee: Type = operand;
+                        const pointee_slot = try self.arena.alloc(Type, 1);
+                        pointee_slot[0] = pointee;
+                        return Type{ .ptr = &pointee_slot[0] };
                     },
                     .dereference => {
                         // `*ptr` requires the operand to be a pointer. The
-                        // pointee type is not tracked yet, so the result is
-                        // `.unknown` until pointer pointee tracking is added.
+                        // result is the pointee type (e.g. `*p` where
+                        // `p: ptr<i32>` yields `i32`).
                         if (operand.eq(.unknown)) return .unknown;
                         if (!operand.isPtr()) {
                             try self.diags.add(
@@ -1793,7 +1809,12 @@ pub const Checker = struct {
                             );
                             return .unknown;
                         }
-                        return .unknown;
+                        // Access the pointee type through the union field.
+                        const pointee = switch (operand) {
+                            .ptr => |pt| pt.*,
+                            else => unreachable,
+                        };
+                        return pointee;
                     },
                 }
             },
