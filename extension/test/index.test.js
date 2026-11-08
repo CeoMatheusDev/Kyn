@@ -1,32 +1,43 @@
 "use strict";
+
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { tokenize, indexSource, tokenAt } = require("../src/index");
+const {
+  validateSnapshot, filePathOf, targetAt, findSymbol, referencesFor
+} = require("../src/index");
 
-test("ignores identifiers in line comments, block comments and strings", () => {
-  const source = '// fn fake() {}\n/* struct Hidden {} */\nfn real() -> i32 { print("fake"); return 0; }';
-  const index = indexSource(source, "file:///a.kyn");
-  assert.deepEqual(index.declarations.map(x => x.name), ["real"]);
-  assert.equal(index.identifiers.some(x => x.text === "fake"), false);
+const snapshot = {
+  schema: 1,
+  files: [{ id: 0, path: "/workspace/main.kyn" }, { id: 1, path: "/workspace/lib.kyn" }],
+  symbols: [
+    { id: "function:0", name: "twice", kind: "function", file: 1, start: 3, end: 8 },
+    { id: "variable:0", name: "value", kind: "parameter", file: 1, start: 12, end: 17 }
+  ],
+  references: [
+    { target: "function:0", file: 0, start: 40, end: 45, role: "call" },
+    { target: "variable:0", file: 1, start: 29, end: 34, role: "read" },
+    { target: "variable:0", file: 1, start: 39, end: 44, role: "read" }
+  ]
+};
+
+test("validates the compiler semantic snapshot schema", () => {
+  assert.equal(validateSnapshot(snapshot), true);
+  assert.equal(validateSnapshot({ schema: 2, files: [], symbols: [], references: [] }), false);
+  assert.equal(validateSnapshot({ schema: 1, files: [], symbols: [], references: [{}] }), false);
 });
 
-test("indexes top-level declarations and methods with qualified names", () => {
-  const source = "struct Vec {}\nenum Color {}\nimpl Vec { fn length(self: Vec) -> i32 { return 0; } }";
-  const index = indexSource(source, "file:///a.kyn");
-  assert.deepEqual(index.declarations.map(x => [x.name, x.qualifiedName, x.kind]), [
-    ["Vec", "Vec", "struct"], ["Color", "Color", "enum"], ["length", "Vec.length", "method"]
-  ]);
+test("maps file ids and resolves declaration and reference spans", () => {
+  assert.equal(filePathOf(snapshot, 1), "/workspace/lib.kyn");
+  assert.equal(filePathOf(snapshot, 9), null);
+  assert.equal(targetAt(snapshot, "/workspace/lib.kyn", 4), "function:0");
+  assert.equal(targetAt(snapshot, "/workspace/main.kyn", 42), "function:0");
+  assert.equal(targetAt(snapshot, "/workspace/main.kyn", 10), null);
 });
 
-test("tokenAt returns only identifier spans", () => {
-  const index = indexSource("fn main() {}", "file:///a.kyn");
-  assert.equal(tokenAt(index, 3).text, "main");
-  assert.equal(tokenAt(index, 0).text, "fn");
-  assert.equal(tokenAt(index, 2), null);
-  assert.equal(tokenAt(index, 7), null);
-});
-
-test("supports nested block comments", () => {
-  const index = indexSource("/* outer /* fn hidden() {} */ end */ fn visible() {}", "file:///a.kyn");
-  assert.deepEqual(index.declarations.map(x => x.name), ["visible"]);
+test("returns compiler-identity references and optional declaration", () => {
+  assert.equal(findSymbol(snapshot, "function:0").name, "twice");
+  assert.equal(findSymbol(snapshot, "missing"), null);
+  assert.deepEqual(referencesFor(snapshot, "variable:0", false).map(x => x.role), ["read", "read"]);
+  assert.deepEqual(referencesFor(snapshot, "variable:0", true).map(x => x.id || x.target),
+    ["variable:0", "variable:0", "variable:0"]);
 });
