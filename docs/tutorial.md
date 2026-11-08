@@ -828,52 +828,31 @@ fn main() -> str {
 
 ## 19. Current limits
 
-The compiler explicitly diagnoses every item below — nothing fails silently:
+The compiler's exact supported subset is maintained in [Implementation status](status.md) and [the accepted grammar](syntax.ebnf). The main limitations are:
 
-- **Memory:** no pointers, slices, arrays, allocators, `defer`/`errdefer`.
-- **Types:** only `i32`, `bool`, `str`, `void`, structs of scalar fields and
-  local enums (no `i8`/`i64`/`u32`/`f32`, no `union`, no `char`).
-- **Enums:** no enum in parameters/returns/struct fields, no payload other than
-  `i32`, no operator on enum values, no `switch` over a constructed value, no
-  nested payload patterns.
-- **Structs:** no struct field, no `str` field, no empty struct, no
-  methods/`impl`; struct by value in calls **exists** (up to 6 fields).
-- **Text:** no concatenation, interpolation, comparison by content, escapes
-  (`\n`) or `print(bool)`.
-- **Errors:** no error sets, error unions or `?`.
-- **Metaprogramming:** no generics, no `comptime`.
-- **Low level:** no `unsafe`, `volatile`, atomics, inline assembly, MMIO,
-  attributes (`#[...]`), controllable sections/symbols or configurable calling
-  conventions.
-- **Interop:** no integrated C FFI (there is an isolated experiment in
-  `src/ffi/`).
-- **Targets:** Linux x86-64 only; the IR `target triple` is fixed; no ARM64,
-  Windows or freestanding/stable `--lib`.
-- **CLI/tools:** no LSP, no JSON diagnostics, no automatic fix-it.
+- **Memory and pointers:** typed pointers and basic pointer operations exist, but there is no defined ownership/borrowing system, no slices, arrays, allocators or `defer`.
+- **Types and aggregates:** fixed-width integers, `usize`, `bool`, `str`, `void`, structs and enums are implemented within documented restrictions. Nested structs, `str` struct fields and enum struct fields are not supported.
+- **Enums:** payloads are currently limited to `i32`; enum values support parameters and returns, and `switch` is exhaustive. General enum operators and switching directly on a constructed temporary are not supported.
+- **Text:** `str` is a static pointer-plus-length value. Printing and equality/inequality are implemented; concatenation, interpolation, formatting and relational comparisons are not.
+- **Language abstractions:** no generics, slices, closures, `comptime`, error unions or complete error-handling model.
+- **Safety and ABI:** no integrated `unsafe` syntax, stable ownership model, complete `repr(C)` contract or integrated C FFI.
+- **Targets:** the executable native backend targets Linux x86-64 System V. Other architectures, Windows and freestanding/embedded targets are not implemented.
+- **Tooling:** the VS Code extension currently provides declarative syntax support only. There is no LSP, semantic completion, navigation, formatter or debugger.
+
+Do not infer support from files in `src/compiler/`, `src/kyn/`, `std/` or from design documents. Those areas include prototypes and experiments.
 
 ---
 
 ## 20. Where Kyn is going
 
-Planned order (detailed in `DEVELOPMENT_STATE.md` §5, `ROADMAP.md` and, for the
-hardware direction, `docs/embedded.md`):
+The [roadmap](../ROADMAP.md) describes proposed work, not release commitments. The next architectural priorities are:
 
-1. Fixed-width integers (`u8`/`i8`, `u16`/`i16`, `u32`, `u64`, `usize`) with
-   explicit conversions and bitwise/shift operators.
-2. Pointers (`*T`) and real `unsafe` blocks, followed by `volatile` and MMIO.
-3. `#[repr(C)]`, explicit alignment and compile-time size/offset assertions.
-4. Freestanding mode: configurable entry point, sections, linker script, ELF.
-5. A target abstraction (`src/target/`) and the first embedded target — ARM
-   Cortex-M4 (STM32F401RE) — then RISC-V RV32.
-6. Error sets/unions, `try`, `defer`/`errdefer`.
-7. Static generics and `comptime`.
-8. C FFI, cross-compilation, ARM64 and controllable linking.
-9. First-class diagnostics: stable codes, notes, fix suggestions and JSON output
-   for editors.
+1. Establish a stable intermediate representation between semantic analysis and code generation.
+2. Define pointer validity, aliasing, ownership and lifetime rules before expanding unsafe operations.
+3. Specify target configuration and ABI boundaries before adding additional architectures.
+4. Integrate FFI only after layout, calling convention and ownership contracts are testable.
+5. Grow the standard library around explicit allocation and platform boundaries.
+6. Develop the editor integration around a real language server backed by compiler diagnostics.
+7. Begin self-hosting only when the language has enough stable features to support a reproducible bootstrap.
 
-Methods (`impl`) and enums by value already landed; enum **struct fields** and
-payloads beyond `i32` stay on the list.
-
-Every step lands with success **and** failure tests, documentation and an entry
-in `DEVELOPMENT_STATE.md` — and none of them gives up the central rule: the
-compiler never silently accepts a program it can reject.
+Every milestone should include positive and negative tests, updated grammar and documentation, and reproducible validation. The compiler must not silently accept programs that violate its defined contracts.
