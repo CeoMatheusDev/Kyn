@@ -250,7 +250,10 @@ const Builder = struct {
     fn walkStatements(self: *Builder, statements: []*ast.Stmt, file: u32) anyerror!void {
         for (statements) |stmt| {
             switch (stmt.kind) {
-                .let_decl => |decl| try self.walkExpr(decl.init, file),
+                .let_decl => |decl| {
+                    if (decl.type_name) |type_name| try self.addTypeReference(file, type_name);
+                    try self.walkExpr(decl.init, file);
+                },
                 .assign => |assign| {
                     if (try self.variableId(assign.resolved)) |id| try self.addReference(id, file, assign.name_span, "write");
                     try self.walkExpr(assign.value, file);
