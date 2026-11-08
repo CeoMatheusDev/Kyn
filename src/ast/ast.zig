@@ -168,7 +168,7 @@ pub const Expr = struct {
         type_name: TypeName,
     };
 
-        pub const FieldAccess = struct {
+    pub const FieldAccess = struct {
         base: *Expr,
         name: []const u8,
         name_span: Span,
