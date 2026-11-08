@@ -705,3 +705,18 @@ test "driver: duplicated struct across modules cites the source file" {
     try testing.expectEqual(@as(u32, 1), diag.file); // the imported module repeats 'P'
     try testing.expect(std.mem.indexOf(u8, diag.message, "struct 'P' already declared in 'main.kyn'") != null);
 }
+
+test "driver: semantic JSON exposes resolved symbol identities" {
+    var result = try compile(
+        testing.allocator,
+        "fn twice(x: i32) -> i32 { let y: i32 = x; return y + x; } fn main() -> i32 { return twice(21); }",
+        .{ .require_main = true },
+    );
+    defer result.deinit();
+    try testing.expect(!result.diags.hasErrors());
+    const json = try semanticJson(&result);
+    try testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"function\"") != null);
+    try testing.expect(std.mem.indexOf(u8, json, "\"role\":\"call\"") != null);
+    try testing.expect(std.mem.indexOf(u8, json, "\"role\":\"read\"") != null);
+    try testing.expect(std.mem.indexOf(u8, json, "\"target\":\"function:0\"") != null);
+}
