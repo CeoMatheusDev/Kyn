@@ -964,7 +964,7 @@ const FnEmitter = struct {
         const lhs = try self.emitExpr(binary.lhs);
         const rhs = try self.emitExpr(binary.rhs);
         if (lhs.typ == .void or rhs.typ == .void) return error.UnsupportedNode;
-        if (lhs.typ != rhs.typ) return error.UnsupportedNode;
+        if (!lhs.typ.eq(rhs.typ)) return error.UnsupportedNode;
 
         const ty = try llvmType(lhs.typ);
         const result = try self.newTemp();

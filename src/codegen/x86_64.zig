@@ -155,6 +155,14 @@ pub fn emit(
     return out.toOwnedSlice(arena);
 }
 
+/// Returns a pointer type whose pointee is `.unknown`. Used when the exact
+/// pointee type is not tracked (e.g. the result of `&x` before pointee
+/// tracking is fully integrated).
+fn ptr_to_unknown() sema.Type {
+    var unknown: sema.Type = .unknown;
+    return sema.Type{ .ptr = &unknown };
+}
+
 const FnEmitter = struct {
     arena: std.mem.Allocator,
     func: *const ast.Function,
@@ -250,7 +258,7 @@ const FnEmitter = struct {
         // functions that don't use pointers.
         var ptr_var_count: u32 = 0;
         for (self.info.symbol_start .. self.info.symbol_start + self.info.symbol_count) |i| {
-            if (self.checked.symbols[i].typ == .ptr) ptr_var_count += 1;
+            if (self.checked.symbols[i].typ.isPtr()) ptr_var_count += 1;
         }
         const total_slots: u32 = self.info.slot_count + ptr_var_count;
         const frame_bytes: u32 = std.mem.alignForward(u32, total_slots * 8, 16);
@@ -328,12 +336,16 @@ const FnEmitter = struct {
                     try self.emitEnumStore(symbol, decl.init);
                 } else {
                     try self.emitExpr(decl.init);
-                    if (self.last_expr_type == .ptr) {
-                        // Pointer value was spilled to memory by emitExpr;
-                        // store it into the variable's slot.
-                        try self.print("    mov %rax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
-                        self.last_expr_type = null;
-                        self.last_expr_slot = 0;
+                    if (self.last_expr_type) |t| {
+                        if (t.isPtr()) {
+                            // Pointer value was spilled to memory by emitExpr;
+                            // store it into the variable's slot.
+                            try self.print("    mov %rax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
+                            self.last_expr_type = null;
+                            self.last_expr_slot = 0;
+                        } else {
+                            try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
+                        }
                     } else {
                         try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
                     }
@@ -350,12 +362,16 @@ const FnEmitter = struct {
                     try self.emitEnumStore(symbol, assign.value);
                 } else {
                     try self.emitExpr(assign.value);
-                    if (self.last_expr_type == .ptr) {
-                        // Pointer value was spilled to memory by emitExpr;
-                        // store it into the variable's slot.
-                        try self.print("    mov %rax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
-                        self.last_expr_type = null;
-                        self.last_expr_slot = 0;
+                    if (self.last_expr_type) |t| {
+                        if (t.isPtr()) {
+                            // Pointer value was spilled to memory by emitExpr;
+                            // store it into the variable's slot.
+                            try self.print("    mov %rax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
+                            self.last_expr_type = null;
+                            self.last_expr_slot = 0;
+                        } else {
+                            try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
+                        }
                     } else {
                         try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
                     }
@@ -568,10 +584,10 @@ const FnEmitter = struct {
                 // `str` does not fit in `%eax`: it is only copied/printed by dedicated
                 // routines, and semantics refuses to use it as a scalar.
                 if (symbol.typ == .str) return error.MiscompiledAst;
-                if (symbol.typ == .ptr) {
+                if (symbol.typ.isPtr()) {
                     // Pointer values are 64-bit: load into %rax.
                     try self.print("    movq -{d}(%rbp), %rax\n", .{slotOffset(symbol.slot)});
-                    self.last_expr_type = .ptr;
+                    self.last_expr_type = ptr_to_unknown();
                     self.last_expr_slot = 0; // in %rax, not memory
                 } else {
                     try self.print("    movl -{d}(%rbp), %eax\n", .{slotOffset(symbol.slot)});
@@ -596,7 +612,7 @@ const FnEmitter = struct {
                         try self.print("    lea -{d}(%rbp), %rax\n", .{slotOffset(symbol.slot)});
                         // mov %rax, -ptr_slot(%rbp)
                         try self.print("    mov %rax, -{d}(%rbp)\n", .{ptrSlotOffset(ptr_slot)});
-                        self.last_expr_type = .ptr;
+                        self.last_expr_type = ptr_to_unknown();
                         self.last_expr_slot = ptr_slot;
                     },
                     .dereference => {
@@ -605,9 +621,11 @@ const FnEmitter = struct {
                         // leaving either a 64-bit pointer in memory (last_expr_slot > 0)
                         // or already in %rax (last_expr_slot == 0).
                         try self.emitExpr(unary.operand);
-                        if (self.last_expr_type == .ptr and self.last_expr_slot != 0) {
-                            // Pointer was spilled to memory: load it into %rax.
-                            try self.print("    mov -{d}(%rbp), %rax\n", .{ptrSlotOffset(self.last_expr_slot)});
+                        if (self.last_expr_type) |t| {
+                            if (t.isPtr() and self.last_expr_slot != 0) {
+                                // Pointer was spilled to memory: load it into %rax.
+                                try self.print("    mov -{d}(%rbp), %rax\n", .{ptrSlotOffset(self.last_expr_slot)});
+                            }
                         }
                         // If last_expr_slot == 0, the pointer is already in %rax
                         // (loaded by the .identifier case). Just dereference.
@@ -632,7 +650,7 @@ const FnEmitter = struct {
                     },
                 }
                 self.last_expr_type = switch (unary.op) {
-                    .address_of => .ptr,
+                    .address_of => ptr_to_unknown(),
                     .dereference => .i32,
                     else => self.last_expr_type,
                 };
