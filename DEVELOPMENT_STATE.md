@@ -10,17 +10,17 @@ PR #20–#22 (records, `2a68d9a`/`da92f44`/`d6eb534`), PR #23 (struct by value,
 `9125bff`) merged into `main` (2026-11-07/08). Tags: **`v0.3.7-alpha.1`** at
 `1c80a7b` (first tag, with a GitHub release) and **`v0.3.9-alpha.1`** at
 `9125bff` (enums with payload and exhaustive `switch`, with a GitHub release).
-**Project version:** `0.3.9-alpha.1`
-**Last validation:** 2026-11-07 — local (Zig 0.17.0 + GNU `as`/`ld`, Linux
-x86-64): `zig build`, `zig build test` (228 tests), `zig build e2e` (113/113,
-with stdout checked, including `str`, struct by value and enums with `switch`)
+**Project version:** `0.3.10-alpha.1`
+**Last validation:** 2026-11-08 — local (Zig 0.17.0 + GNU `as`/`ld`, Linux
+x86-64): `zig build`, `zig build test` (233 tests), `zig build e2e` (115/115,
+with stdout checked, including `str`, struct by value and enums passed/returned
+across calls)
 and `zig fmt --check`; `validate-ir` locally without LLVM (documented skip) but
-all 86 emitted modules verified against LLVM 22 through `llvmlite`
-(`parse_assembly` + `verify`), and the strict step revalidated them with
-`llvm-as` in CI; the 21 code blocks of
-`docs/tutorial.md` checked with `kync check` (16 compile, 1 is a library file, 1
-imports a module, 3 fail with the documented error) — the new enum/`switch`
-block also runs through `as`/`ld` (prints `5`, exits `5`).
+all 87 emitted modules verified against LLVM 22 through `llvmlite`
+(`parse_assembly` + `verify`); the 22 code blocks of `docs/tutorial.md` checked
+with `kync check` (17 compile, 1 is a library file, 1 imports a module, 3 fail
+with the documented error) — the two enum blocks also run through `as`/`ld`
+(exit `5` and exit `9`).
 **Working tree state:** check with `git status` before acting
 
 ---
@@ -64,14 +64,14 @@ the frontend pipeline is **integrated and validated by execution**:
 | Diagnostics | `src/diagnostics.zig` | stable category + message + line/caret + `file` (source file) |
 | AST | `src/ast/ast.zig` | program with `imports`, `structs` and `enums` (cases with optional payload), functions (`file_id`), params, let/var, assign (variable and field), return, if/else, while, `switch` (arms with optional payload binding, `else`), blocks, expressions (field access, struct literal, enum case, enum constructor, string literal), `Call.builtin` (`print`, `print_i32`) |
 | Parser | `src/parser/parser.zig` | whole program, `import` before declarations, `struct`, `enum` (optional payload, trailing comma), `switch` arms (`Case`, `Case(name)`, `else`), literals, field access and dotted constructors, precedence/associativity, error on the first invalid token |
-| Semantics | `src/sema/sema.zig` | scopes, resolution, `i32`/`bool`/`str`/`void`/struct/enum, enum cases (unique, `i32` payload only, tag = declaration order), enum nominality in annotations/assignments, exhaustive `switch` with payload binding rules, `alwaysReturns` over switches, struct fields and literals, `str` and struct by value in parameters/returns (nominal identity in `param_struct_ids`/`return_struct_id`), 6-register limit through `registerWordsOf` (`str` = 2, field = 1), generic builtins (`print`/`print_i32`: arity, type and reserved name), mutability, calls, slots, `main`, `alwaysReturns` |
-| LLVM backend | `src/codegen/llvm.zig` | IR derived from the AST; enums as two `alloca i32` (tag + payload) with `switch i32` per arm; structs through scalar replacement (one `alloca` per field); `str` in `@.strN` + `declare i64 @write` + two `alloca`s, `str` by value as `ptr`+`i64` and `{ ptr, i64 }` return, struct by value with flattened parameters and aggregate return `{ i32, i1, … }` (`insertvalue`/`extractvalue`); `print_i32` through `@kyn_print_i32` (once per module); validated by `llvm-as` in CI |
-| Native backend | `src/codegen/x86_64.zig` | System V without libc; enums in two slots (tag + payload) with `switch` as a `cmpl`/`je` chain; struct in consecutive slots and by value with one register per field (return `%eax`/`%edx`/`%ecx`/`%r8d`/`%r9d`/`%r10d`); `str` in two slots (pointer/length) and by value in register pairs (return `%rax`/`%rdx`), text in `.rodata` and `print` through the `write` syscall; `print_i32` with a single decimal routine in `.text`; validated by running binaries and checking stdout |
+| Semantics | `src/sema/sema.zig` | scopes, resolution, `i32`/`bool`/`str`/`void`/struct/enum, enum cases (unique, `i32` payload only, tag = declaration order), enum nominality in annotations/assignments/arguments/returns (`param_enum_ids`, `return_enum_id`), exhaustive `switch` with payload binding rules, `alwaysReturns` over switches, struct fields and literals, `str` and struct by value in parameters/returns (nominal identity in `param_struct_ids`/`return_struct_id`), 6-register limit through `registerWordsOf` (`str` = 2, field = 1), generic builtins (`print`/`print_i32`: arity, type and reserved name), mutability, calls, slots, `main`, `alwaysReturns` |
+| LLVM backend | `src/codegen/llvm.zig` | IR derived from the AST; enums as two `alloca i32` (tag + payload) with `switch i32` per arm, two `i32` parameters and `{ i32, i32 }` return; structs through scalar replacement (one `alloca` per field); `str` in `@.strN` + `declare i64 @write` + two `alloca`s, `str` by value as `ptr`+`i64` and `{ ptr, i64 }` return, struct by value with flattened parameters and aggregate return `{ i32, i1, … }` (`insertvalue`/`extractvalue`); `print_i32` through `@kyn_print_i32` (once per module); validated by `llvm-as` in CI |
+| Native backend | `src/codegen/x86_64.zig` | System V without libc; enums in two slots (tag + payload) with `switch` as a `cmpl`/`je` chain, parameters/arguments as register pairs and return in `%eax`/`%edx`; struct in consecutive slots and by value with one register per field (return `%eax`/`%edx`/`%ecx`/`%r8d`/`%r9d`/`%r10d`); `str` in two slots (pointer/length) and by value in register pairs (return `%rax`/`%rdx`), text in `.rodata` and `print` through the `write` syscall; `print_i32` with a single decimal routine in `.text`; validated by running binaries and checking stdout |
 | Driver | `src/driver.zig` | arena per compilation; `compile` (single buffer) and `compilePath` (import graph, dedupe, cycles, flatten); `Result.deinit()` |
 | `unsafe`/`repr(C)` | `src/sema/unsafe.zig` | isolated, tested policy; no AST nodes yet |
 | Self-hosting | `src/kyn/*.kyn`, `src/compiler/*.kyn` | placeholders; not executed |
 | Std | `std/core/*`, `std/os/*` | experimental stubs; compile in the tests |
-| Fixtures | `tests/` | 50 `integration/case_N.kyn` (supported) + 63 entries in `tests/e2e` (28 positive, 8 modules, 24 negative, 3 negative modules); the rest not supported yet |
+| Fixtures | `tests/` | 50 `integration/case_N.kyn` (supported) + 65 entries in `tests/e2e` (29 positive, 8 modules, 25 negative, 3 negative modules); the rest not supported yet |
 | CI | `.github/workflows/ci.yml` | ubuntu-24.04: fmt + test + e2e + strict IR validation |
 | IR validation | `tools/validate-ir.sh` | `llvm-as`/`clang` over 83 modules (includes multi-file, `struct`, `str`/`print`, `str` and struct by value, `print_i32`); strict in CI |
 | Tutorial | `docs/tutorial.md` | Language guide (19 sections): CLI, types, control flow, structs by value, enums with `switch`, modules, diagnostics, tests, limits and roadmap; 21 `kyn` blocks checked with `kync check` |
@@ -81,8 +81,9 @@ the frontend pipeline is **integrated and validated by execution**:
 `import "path.kyn";` before declarations (path relative to the importing file,
 each file loaded once, symbols flattened into a single scope), `enum Name {
 Case, Case(i32) }` with tags in declaration order, `Color.Red` and
-`Shape.Circle(5)` values and `switch` over an enum variable (`Case`,
-`Case(name)`, `else`; exhaustiveness enforced), `struct Name {
+`Shape.Circle(5)` values, `switch` over an enum variable (`Case`,
+`Case(name)`, `else`; exhaustiveness enforced) and enums by value in parameters
+and returns (two registers, nominal identity checked), `struct Name {
 field: type, ... }`, literals `Name { field: value }` (every field, once each),
 `p.field` access and `p.field = v` assignment on `var`, struct copy by value,
 string literals, `str` variables (inferred or annotated) with copy and
@@ -94,9 +95,9 @@ inference or annotation (`i32`/`bool`/`str`/`void`/struct), assignment only on
 `&&`/`||` with short-circuit, `-`/`!`, integer/boolean literals and calls to
 functions of the program (≤ 6 argument registers, counting `str` as two).
 
-Outside the subset: printing `bool`/interpolated `str`, enums in
-parameters/returns/struct fields, payload types other than `i32`, operators on
-enums, `switch` over a constructed value, `impl`/methods,
+Outside the subset: printing `bool`/interpolated `str`, enum **struct fields**,
+payload types other than `i32`, operators on enums, `switch` over a constructed
+value, `impl`/methods,
 `unsafe`, attributes, struct with a struct field, empty struct, struct field of
 type `str`, nested struct, comparison (`==`/`!=`), concatenation and formatting
 of `str`, `main` returning `str`, signatures above 6 registers, `f32`/`f64`,
@@ -298,42 +299,44 @@ qualified/selective imports and packages.
 
 ## 5. Next priority step
 
-**`enum` with scalar payload + exhaustive `switch`.**
+**`impl`/methods with `self` on structs (and enums).**
 
-- Why: `enum` is the basis of error sets/error unions (0.6), of `impl` with
-  state returns and of any protocol/state modeling in systems; exhaustive
-  `switch` is Kyn's way of turning "I forgot a case" into a compilation error,
-  consistent with the project's central rule.
+- Why: methods are the last piece of the "record + behaviour" model the docs
+  promise before the numeric/pointer work; they also unlock the `self` receiver
+  that the error-union and slice phases will reuse.
 - Minimum scope:
-  1. Parser/AST: `enum Name { A, B(i32), C }` (single scalar payload) and
-     `switch value { A => { ... }, B(n) => { ... } }` with an optional `else`
-     only when exhaustiveness is not statically known.
-  2. Semantics: nominal `enum` type (`EnumInfo` + id), constructor
-     `Name.Case(...)`, payload bound to a symbol in the `switch` arm, case-by-case
-     exhaustiveness checking (missing → error listing the absent cases) and
-     diagnostics for a redundant/unreachable arm.
-  3. Backends: representation `tag` (i32) + payload in a separate slot (the same
-     convention in both); `switch` comparing the tag in a chain (x86) / the IR
-     `switch` with one block per case; passing enums by value between functions
-     can reuse `registerWordsOf` (enum = 1 word, payload counted).
-  4. Tests: parser/sema unit tests (exhaustiveness, unknown case, payload with
-     the wrong type, duplicated enum) and codegen tests (tag/`switch` in both
-     backends); positive e2e fixtures (with stdout) and negative ones (missing
-     case, unreachable arm).
-  5. Docs: `docs/syntax.ebnf`, `docs/language_reference.md`, `docs/tutorial.md`
-     (new chapter), `docs/architecture.md`, `docs/status.md`, `README.md`,
-     `ROADMAP.md`, `CHANGELOG.md` and this file; version `0.3.9-alpha.1`.
+  1. Parser/AST: `impl Name { fn method(self: Name, ...) -> T { ... } }`, with
+     `self` as an explicit first parameter at this stage (no implicit `self`
+     sugar yet), and a `Method` node referencing the struct/enum declaration.
+  2. Semantics: methods live in a namespace per type (`Checked.methods` keyed by
+     struct/enum id + name), `p.method(args)` resolves through the receiver type
+     and is checked with the same `param_struct_ids`/`param_enum_ids` contract as
+     a free function (receiver passed by value, one/two registers); a method name
+     clashing with a field or with another method is diagnosed; free functions
+     and methods never share a name space.
+  3. Backends: name mangling `kyn_<Type>_<method>` (deterministic, no collisions
+     with user functions), receiver passed like any other first argument (struct:
+     one register per field; enum: tag + payload), calls reuse `emitCall`.
+  4. Tests: parser/sema units (unknown method, wrong receiver type, duplicated
+     method, method on a type of another module) and codegen structure (mangled
+     symbol, receiver in the first argument registers); positive e2e with a
+     method reading its receiver and one with an enum method; negatives for
+     unknown method and wrong receiver.
+  5. Docs: `docs/syntax.ebnf`, `docs/architecture.md` (mangling + receiver
+     contract), `docs/tutorial.md`, `docs/language_reference.md`,
+     `docs/status.md`, `README.md`, `ROADMAP.md`, `CHANGELOG.md` and this file;
+     version `0.3.11-alpha.1`.
 - Completion criteria: `zig build test`, `zig build e2e` and
-  `validate-ir-strict` green in CI, with an `enum` used in a real program and a
-  non-exhaustive `switch` rejected.
+  `validate-ir-strict` green in CI, with a program calling a method on a struct
+  and on an enum, and an unknown method rejected.
 
-**After that (suggested order):** `impl`/methods with `self` (struct and enum by
-value) → larger numeric types (`i64`, `u8`, `f32`) and explicit conversions →
-`bool` printing and `str` concatenation/interpolation → pointers, arrays and
-slices with documented layout → `unsafe`/`volatile`/atomics/MMIO → error
-unions/`try`/`defer` → generics/`comptime` → C FFI and cross-compilation
-(ARM64/freestanding) → first-class diagnostics (stable codes, notes, fix-it,
-JSON/LSP) → self-hosting in Kyn.
+**After that (suggested order):** larger numeric types (`i64`, `u8`, `f32`) with
+explicit conversions → `bool` printing and `str` concatenation/interpolation →
+enum **struct fields** and pointers/arrays/slices with documented layout →
+`unsafe`/`volatile`/atomics/MMIO → error unions/`try`/`defer` →
+generics/`comptime` → C FFI and cross-compilation (ARM64/freestanding) →
+first-class diagnostics (stable codes, notes, fix-it, JSON/LSP) → self-hosting
+in Kyn.
 
 ## 6. Cycle history
 
@@ -349,6 +352,7 @@ JSON/LSP) → self-hosting in Kyn.
 | Cycle 7 (2026-11-07) | `print_i32`: `ast.Expr.Builtin` with `print_i32` and generic builtin checking (arity, expected type and reserved name derived from the enum); `kyn_print_i32` routine emitted once per program in `.text` in the native backend (unsigned `divl`, 12-byte buffer, no libc) and `@kyn_print_i32` in the IR (`alloca [12 x i8]`, `phi`, `urem`/`udiv`, `select`, `zext`); 12 new tests (181 total), 4 new fixtures with checked stdout (including INT_MIN) + 2 negatives (92/92), `validate-ir` with 75 modules; version `0.3.5-alpha.1`. Integrated through PR #17 (`87903db`). | Yes: local (174 compiler tests, 92/92 e2e with stdout, `fmt --check`, execution through `as`/`ld`, IR checked) and CI runs `42423945656` (PR) and `42424147963` (`main`), both green with strict IR; local suite retested on `main` after the merge |
 | Cycle 8 (2026-11-07) | `str` by value in parameters and returns: `Type.isValue()` includes `.str` and new `Type.registerWords()` (2 for `str`); 6-register limit per signature counted in words (`function '...' uses N parameter registers...` / `call to '...' uses N registers...`), replacing `max_params`; backends with their own ABI (`(%rdi,%rsi)`, `(%rdx,%rcx)`, `(%r8,%r9)` and return `%rax`/`%rdx` on x86-64; `ptr`+`i64` and `{ ptr, i64 }` with `insertvalue`/`extractvalue` in the IR), including a fast path for one argument and reverse popping for several; 12 new tests and 2 obsolete negatives replaced (193 total), 3 new fixtures with stdout + 1 imported module with `str` + 2 new negatives (97/97), `validate-ir` with 79 modules; version `0.3.6-alpha.1`. Integrated through PR #19 (`9ec07be`). | Yes: local (186 compiler tests, 97/97 e2e, `fmt --check`, `as`/`ld` execution of nested `echo`/`title`/`tag`, IR checked by hand) and CI runs `42425605484` (PR #19) and `42425757025` (`main`), both green with strict IR; local suite retested on `main` after the merge |
 | Cycle 9 (2026-11-07) | Struct by value in parameters, arguments and returns: `FunctionInfo.param_struct_ids`/`return_struct_id` and `structIdOfExpr` recognizing calls (`let` inference preserves the struct), `sema.registerWordsOf` as the single source of the 6-register limit (field = 1, `str` = 2), nominal identity checked in argument/return/annotation and return limited to 6 fields; x86-64 with one register per field on entry, calls pushing field by field and return in `%eax`/`%edx`/`%ecx`/`%r8d`/`%r9d`/`%r10d` (fields evaluated on the stack so they do not clobber each other); IR with flattened parameters, `{ i32, i1, … }` aggregate return and `insertvalue`/`extractvalue`; 11 new tests (204 total), 3 new e2e fixtures + 1 module with struct by value + 2 negatives (102/102), `validate-ir` with 83 modules; **new `docs/tutorial.md`** with 20 verified blocks; tag `v0.3.7-alpha.1`; version `0.3.7-alpha.1`. Integrated through PR #23 (`1c80a7b`). | Yes: local (197 compiler tests, 102/102 e2e, `fmt --check`, `as`/`ld` execution of `origin`/`shift`/`echo`/`pair`, IR checked by hand, tutorial verified block by block) and CI runs `42427966554` (PR #23) and `42428126584` (`main`), both green with strict IR; local suite retested on `main` after the merge; tag `v0.3.7-alpha.1` published |
+| Cycle 12 (2026-11-08) | Enums **by value** across calls: `FunctionInfo.param_enum_ids`/`return_enum_id`, nominal identity in arguments/returns/annotations, `enumIdOfExpr` recognizing calls, the two `unsupported` diagnostics (enum in parameter/return) removed; x86-64 with a register pair per enum (tag, payload) in parameters/arguments and the return in `%eax`/`%edx` (`emitEnumValue` shared by store/return/arguments); LLVM IR with flattened `i32` pairs and the `{ i32, i32 }` aggregate (`insertvalue`/`extractvalue`, `emitEnumCall`/`enumOperand`). 5 new tests, 1 new positive and 2 new negatives in e2e (the old `enum_in_parameter` negative became the `enum_passing` positive), docs and version `0.3.10-alpha.1`. | Yes: local (233 tests, 115/115 e2e, 87/87 IR modules, `fmt --check`) |
 | Cycle 11 (2026-11-07) | `enum` with optional `i32` payload and exhaustive `switch`: lexer (`enum`, `switch`, `=>`), AST (`EnumDecl`/`EnumCase`, `MethodCall`, `SwitchStmt`/`SwitchArm`), parser (`parseEnum`, `parseSwitch`, dotted call), semantics (`Type.enumeration`, two slots, nominality, exhaustiveness, payload binding rules, enum restrictions), both backends (tag/payload slots, `switch` as `cmp`/`je` chain and `switch i32`), driver flattening, 24 new unit tests, 2 positives, 1 module and 8 negatives in e2e, docs (including a new tutorial section) and version `0.3.9-alpha.1`. | Yes: local (228 tests, 113/113 e2e, `fmt --check`) |
 | Cycle 10 (2026-11-07) | Project-wide English conversion: `src/**` (doc comments, messages, test names), `tools/*.sh`, `build.zig`, `.github/workflows/ci.yml`, `.kyn` fixtures (comments, identifiers and printed text) with renamed files and modules, `std/`, and every document (`README`, `ROADMAP`, `CHANGELOG`, `CONTRIBUTING`, `CODE_OF_CONDUCT`, `DEVELOPMENT_STATE`, `docs/*`); assertion strings migrated with the messages; version `0.3.8-alpha.1`. | Yes: local (204 tests, 102/102 e2e, `fmt --check`) before and after the conversion, with no test removed or loosened |
 

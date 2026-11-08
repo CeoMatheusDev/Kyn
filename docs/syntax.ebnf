@@ -29,9 +29,8 @@ parameters       = parameter, { ",", parameter } ;
 parameter        = identifier, ":", type_expr ;
 
 (* Accepted by semantics: i32, bool, str, void, names of declared structs and
-   names of declared enums. An enum is only storable in a local variable:
-   parameters, returns and struct fields of enum type are diagnosed as
-   unsupported. *)
+   names of declared enums. An enum crosses calls by value (tag + payload, two
+   registers); a struct field of enum type is diagnosed as unsupported. *)
 type_expr        = identifier ;
 
 block            = "{", { statement }, "}" ;
@@ -134,7 +133,8 @@ builtin_call     = ( "print" | "print_i32" ), "(", expression, ")" ;
    field. *)
 
 (* Enum values carry a tag (the case index in declaration order) and one
-   payload slot. They take part in no operator (`==`, arithmetic and conditions
-   are diagnosed) and are consumed only by `switch`, which reads the tag from
-   the variable slots. A case without payload is written `Color.Red`; a case
-   with payload is written `Shape.Circle(5)`. *)
+   payload slot, and cross calls as a pair (tag, payload). They take part in no
+   operator (`==`, arithmetic and conditions are diagnosed) and are consumed
+   only by `switch`, which reads the tag from the variable slots. A case without
+   payload is written `Color.Red`; a case with payload is written
+   `Shape.Circle(5)`. *)
