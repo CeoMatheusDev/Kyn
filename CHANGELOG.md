@@ -48,7 +48,12 @@ Enums cross calls by value, with nominal identity enforced.
   `docs/tutorial.md` §11 documents enums by value with a new verified example,
   plus `docs/syntax.ebnf`, `docs/language_reference.md` (§ 7), `docs/status.md`,
   `README.md`, `docs/development.md`, `ROADMAP.md` and `DEVELOPMENT_STATE.md`.
-- **Version:** `0.3.10-alpha.1` (derived from `build.zig.zon`).
+- **Version:** `0.3.10-alpha.1` (derived from `build.zig.zon`), published as the
+  annotated tag `v0.3.10-alpha.1` with a GitHub release.
+- **Integration:** PR #28 merged into `main` as `9b989ad`; CI green in runs
+  `42436782775`/`42436791204` (push and PR) and `42437018292` (`main`), with
+  `zig fmt --check`, 233 tests, 115 e2e cases and `validate-ir-strict` over 87
+  modules.
 
 ## [v0.3.9-alpha.1] — 2026-11-07
 

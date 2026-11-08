@@ -1,15 +1,16 @@
 # DEVELOPMENT_STATE — Kyn
 
 **Maintained by:** continuity agent (Arena)
-**Active branch:** `arena/5d850e87-kyn` (from `b367f46` of `main`)
+**Active branch:** `arena/53f21894-kyn` (from `4e6a023` of `main`)
 **Integration:** PRs #7–#11 (modules/`import`), PR #13 (`struct` with value,
 `4234c07`), PR #15 (`str`/`print`, `89ca6ce`), PR #17 (`print_i32`,
 `87903db`), PR #18 (docs, `3be9df0`), PR #19 (`str` by value, `9ec07be`),
 PR #20–#22 (records, `2a68d9a`/`da92f44`/`d6eb534`), PR #23 (struct by value,
-`1c80a7b`), PR #24 (release records, `288eb3f`) and PR #26 (`enum` + `switch`,
-`9125bff`) merged into `main` (2026-11-07/08). Tags: **`v0.3.7-alpha.1`** at
-`1c80a7b` (first tag, with a GitHub release) and **`v0.3.9-alpha.1`** at
-`9125bff` (enums with payload and exhaustive `switch`, with a GitHub release).
+`1c80a7b`), PR #24 (records, `288eb3f`), PR #26 (`enum` + `switch`, `9125bff`),
+PR #27 (records, `4e6a023`) and PR #28 (enums by value, `9b989ad`) merged into
+`main` (2026-11-07/08). Tags: **`v0.3.7-alpha.1`** at `1c80a7b` (first tag),
+**`v0.3.9-alpha.1`** at `9125bff` and **`v0.3.10-alpha.1`** at `9b989ad`, each
+with a GitHub release.
 **Project version:** `0.3.10-alpha.1`
 **Last validation:** 2026-11-08 — local (Zig 0.17.0 + GNU `as`/`ld`, Linux
 x86-64): `zig build`, `zig build test` (233 tests), `zig build e2e` (115/115,
