@@ -10,6 +10,46 @@ Rules: Semantic Versioning 2.0.0. Pre-1.0.0 = pre-release.
 > [docs/status.md](docs/status.md). Versioning will be reconciled before any
 > public release.
 
+## [v0.3.10-alpha.1] — 2026-11-08
+
+Enums cross calls by value, with nominal identity enforced.
+
+- **Semantics:** `FunctionInfo` carries `param_enum_ids` and `return_enum_id`;
+  the two "enum in parameters/returns is not supported" diagnostics are gone;
+  a different enum in an argument, in a `return` or in an annotated `let` is
+  rejected (`argument 1 of 'paint' is enum 'B', expected 'A'`,
+  `expected enum 'A' in return, found 'B'`) and `enumIdOfExpr` recognizes calls
+  that return an enum, so `let c = pick(1);` infers the enum. An enum parameter
+  counts **two** of the six argument registers (`registerWordsOf`), and the
+  limit messages mention it. A struct **field** of enum type remains diagnosed.
+- **x86-64:** new `emitEnumValue` (tag in `%eax`, payload in `%edx`) shared by
+  `let`/assignment stores, `return`, argument passing and the single-argument
+  fast path; enum parameters arrive as a register pair and calls push two words
+  per enum (`pushq` tag, `pushq` payload) with the reverse pop restoring order.
+  The payload is evaluated before the tag is written, so an expression using
+  `%edx` (`idivl`) cannot clobber the pair.
+- **LLVM IR:** an enum parameter becomes `i32 %argN, i32 %argN+1`, the return is
+  the `{ i32, i32 }` aggregate built with `insertvalue`, and a call returning an
+  enum is destructured with `extractvalue` (new `emitEnumCall` and
+  `enumOperand`), including forwarding a returned enum straight as an argument
+  or as the value of another `return`.
+- **Tests:** **233** (226 compiler + 7 std): 5 new — enums crossing calls with
+  `param_enum_ids`/`return_enum_id` and inferred `let`, identity errors in
+  argument/return/annotation, the two-register limit, and structural tests for
+  both backends (register pair, tags in `%eax`/`%edx`, `{ i32, i32 }`,
+  `extractvalue`). **115/115** e2e cases: the `enum_in_parameter` negative
+  became the `enum_passing` positive (enum built, passed, returned and consumed
+  by `switch`, with stdout checked) and two negatives were added
+  (`enum_nominal`, `enum_registers`). The `enum_switch`/`enum_switch_else`
+  fixtures keep covering the in-function representation.
+- **IR evidence:** 87/87 modules accepted by the LLVM verifier (LLVM 22 through
+  `llvmlite` locally, `llvm-as` in CI).
+- **Docs:** `docs/architecture.md` gained the enum layout/call contract,
+  `docs/tutorial.md` §11 documents enums by value with a new verified example,
+  plus `docs/syntax.ebnf`, `docs/language_reference.md` (§ 7), `docs/status.md`,
+  `README.md`, `docs/development.md`, `ROADMAP.md` and `DEVELOPMENT_STATE.md`.
+- **Version:** `0.3.10-alpha.1` (derived from `build.zig.zon`).
+
 ## [v0.3.9-alpha.1] — 2026-11-07
 
 Enums with payload and exhaustive `switch`, in both backends.

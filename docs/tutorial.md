@@ -408,12 +408,63 @@ Rules the compiler enforces:
   arm; a bare `Case` matches a case without payload.
 - Enums compare equal by no operator: `==`, arithmetic and conditions on an
   enum are rejected — `switch` is the only consumer.
-- For now enums are **local variables only**: parameters, returns and struct
-  fields of enum type are diagnosed as unsupported, and so is `switch` over a
-  constructed value (`switch Shape.Empty { ... }`).
+- Enums cross calls **by value**: a parameter and a return both carry the pair
+  (tag, payload) in two registers, and the enum identity is checked (passing an
+  enum of another type is an error, even with the same cases).
+- Every enum parameter consumes **two** of the six argument registers.
+- Still diagnosed: a struct **field** of enum type, a payload type other than
+  `i32`, and `switch` over a constructed value (`switch Shape.Empty { ... }`) —
+  store it in a variable first.
 
-Representation (both backends): a tag slot plus a payload slot, the payload
-slot unused when no case declares one; `switch` reads the tag and compares it
+```kyn
+enum Shape {
+    Circle(i32),
+    Square(i32),
+    Empty,
+}
+
+fn make(kind: i32, size: i32) -> Shape {
+    if kind == 0 {
+        return Shape.Circle(size);
+    }
+    if kind == 1 {
+        return Shape.Square(size);
+    }
+    return Shape.Empty;
+}
+
+fn weight(shape: Shape) -> i32 {
+    var result: i32 = 0;
+    switch shape {
+        Circle(r) => {
+            result = r;
+        }
+        Square(side) => {
+            result = side * 2;
+        }
+        Empty => {
+            result = 0;
+        }
+    }
+    return result;
+}
+
+fn main() -> i32 {
+    let circle = make(0, 3);      // enum returned by a call
+    let square = make(1, 3);
+    print_i32(weight(circle));    // 3
+    print_i32(weight(square));    // 6
+    print_i32(weight(make(2, 9))); // 0 — enum straight from a call
+    return weight(circle) + weight(square);
+}
+```
+
+Representation and call contract (the same in both backends): a tag slot plus a
+payload slot, the payload slot unused when no case declares one. On x86-64 a
+parameter arrives as a register pair (tag in `%edi`, payload in `%esi`, …), an
+argument pushes two words and a return comes back in `%eax` (tag) and `%edx`
+(payload); in the LLVM IR the parameters are flattened into two `i32` and the
+return is the `{ i32, i32 }` aggregate. `switch` reads the tag and compares it
 against the case order, and copies the payload into the binding slot at the
 start of the arm.
 

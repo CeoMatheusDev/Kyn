@@ -112,7 +112,7 @@ The project only declares a step complete when there is an executable test:
    symbol).
 3. **LLVM IR** (`zig build validate-ir-strict`): runs `llvm-as` (or `clang`) over
    the IR of every supported fixture, including the multi-file programs and the
-   `struct`/`print`/`print_i32`, `str`, struct-by-value and enum fixtures (86
+   `struct`/`print`/`print_i32`, `str`, struct-by-value and enum fixtures (87
    modules). LLVM is not installed in the default development environment, so
    locally the `validate-ir` step only warns; CI installs LLVM and uses the
    **strict** variant, which fails if the verifier is missing or rejects any
@@ -131,8 +131,8 @@ from the local tests.
 2. installs Zig 0.17.0 from the official PyPI wheel (the same path described
    above) and exposes it on `PATH`;
 3. runs `zig fmt --check build.zig src std`;
-4. runs `zig build test` (228 tests) and `zig build e2e` (113 cases);
-5. runs `zig build validate-ir-strict` (IR of 86 modules accepted by
+4. runs `zig build test` (233 tests) and `zig build e2e` (115 cases);
+5. runs `zig build validate-ir-strict` (IR of 87 modules accepted by
    `llvm-as`).
 
 A missing LLVM in CI **fails** the build, so IR validation cannot be skipped

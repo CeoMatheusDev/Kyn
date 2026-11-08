@@ -105,8 +105,8 @@ declaration order.
   built with `insertvalue` and read with `extractvalue`). No `getelementptr` is
   needed.
 - `sema.registerWordsOf` is the single source for the **6-register** limit: it
-  counts 1 per struct field, 2 per `str` and 1 per scalar; it applies to
-  declaration, call and struct return.
+  counts 1 per struct field, 2 per `str`, 2 per enum and 1 per scalar; it applies
+  to declaration, call, struct return and enum return.
 - Literals require every field exactly once, which guarantees structs are
   always initialized (no partially built state).
 
@@ -148,6 +148,30 @@ scalar; it exists to give programs observable output (text) and to prepare
   in arithmetic/condition/`==`/`!=` (comparing would require comparing bytes),
   `main` returning `str`, `str` expression as a statement and signatures above
   six registers (`'str' takes two`).
+
+### Enums (layout) — `src/sema/sema.zig` + backends
+
+An enum value is **nominal** (`Symbol.enum_id` → `Checked.enums`) and crosses
+calls **by value** (Cycle 12), like a two-field record: the **tag** (the case
+index in declaration order) plus one **payload** word.
+
+- `Symbol.typ == .enumeration` reserves two consecutive slots: `slot` holds the
+  tag and `slot + 1` the payload (the payload slot stays unused when no case
+  declares one). `sema.registerWordsOf` counts **2** for an enum, so an enum
+  parameter consumes two of the six argument registers.
+- The only consumer of a value is `switch`: the scrutinee must be a variable, the
+  arms compare the tag and the payload is copied into the binding slot at the
+  start of the arm.
+- x86-64: parameters arrive as a register **pair** (tag then payload) stored with
+  two `movl`; arguments push two words in the same order; the return leaves the
+  tag in `%eax` and the payload in `%edx` — the same pair as a two-field struct
+  return, so a call can be forwarded straight to another call or returned.
+- LLVM IR: two `alloca i32` (tag + payload) for storage, parameters **flattened**
+  into `i32 %argN, i32 %argN+1`, and the return as the `{ i32, i32 }` aggregate
+  built with `insertvalue` / read with `extractvalue`.
+- Restrictions at this stage, all diagnosed: struct field of type enum (the
+  struct layout would need a second slot per field), payload types other than
+  `i32`, any operator on an enum value and `switch` over a constructed value.
 
 ### Semantics — `src/sema/sema.zig`
 

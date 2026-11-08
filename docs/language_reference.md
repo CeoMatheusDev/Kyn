@@ -259,7 +259,8 @@ layout still have to be formalized.
 
 `enum` represents discriminated alternatives. **Implemented today** (see
 `docs/syntax.ebnf`): cases in declaration order become the tag, one case may
-carry an `i32` payload, and `switch` over an enum variable must be exhaustive.
+carry an `i32` payload, `switch` over an enum variable must be exhaustive, and
+enums cross calls **by value** (two registers: tag + payload).
 
 ```kyn
 enum Shape {
@@ -280,11 +281,12 @@ fn main() -> i32 {
 }
 ```
 
-Current limits, enforced by semantics: enums only live in local variables (no
-parameters, returns or struct fields), the payload is `i32` only, and no
+Current limits, enforced by semantics: no struct **field** of enum type (the
+struct layout would need a second slot per field), the payload is `i32` only, no
 operator accepts an enum (`==` and arithmetic are diagnosed; `switch` is the
-only consumer). Payload types beyond `i32`, enums across calls and exhaustive
-checks over nested payloads are the next steps.
+only consumer) and `switch` requires a variable, not a constructed value.
+Payload types beyond `i32`, enum fields and nested payload patterns are the next
+steps.
 
 A type family such as `Result<T, E>` is proposed for explicit errors:
 

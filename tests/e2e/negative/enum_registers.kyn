@@ -1,0 +1,13 @@
+// Each enum parameter takes two registers: four of them exceed the limit of 6.
+enum Shape {
+    Circle(i32),
+    Empty,
+}
+
+fn too_wide(a: Shape, b: Shape, c: Shape, extra: i32) -> i32 {
+    return extra;
+}
+
+fn main() -> i32 {
+    return 0;
+}

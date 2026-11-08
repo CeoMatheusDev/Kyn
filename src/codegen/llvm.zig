@@ -90,9 +90,14 @@ fn llvmType(typ: sema.Type) codegen.Error![]const u8 {
     };
 }
 
-/// Return type of a function: `str` comes back as a `{ ptr, i64 }` pair.
+/// Return type of a function: `str` comes back as a `{ ptr, i64 }` pair and an
+/// enum as `{ i32, i32 }` (tag, payload).
 fn llvmReturnType(typ: sema.Type) codegen.Error![]const u8 {
-    return if (typ == .str) "{ ptr, i64 }" else llvmType(typ);
+    return switch (typ) {
+        .str => "{ ptr, i64 }",
+        .enumeration => "{ i32, i32 }",
+        else => llvmType(typ),
+    };
 }
 
 fn typeAlign(typ: sema.Type) codegen.Error!u32 {
@@ -330,6 +335,10 @@ const FnEmitter = struct {
                 try self.emit("  store ptr %arg{d}, ptr {s}, align 8\n", .{ arg_index, try self.varName(sym.slot) });
                 try self.emit("  store i64 %arg{d}, ptr {s}, align 8\n", .{ arg_index + 1, try self.varName(sym.slot + 1) });
                 arg_index += 2;
+            } else if (sym.typ == .enumeration) {
+                try self.emit("  store i32 %arg{d}, ptr {s}, align 4\n", .{ arg_index, try self.varName(sym.slot) });
+                try self.emit("  store i32 %arg{d}, ptr {s}, align 4\n", .{ arg_index + 1, try self.varName(sym.slot + 1) });
+                arg_index += 2;
             } else {
                 const ty = try llvmType(sym.typ);
                 const align_value = try typeAlign(sym.typ);
@@ -381,6 +390,10 @@ const FnEmitter = struct {
             if (param_type == .str) {
                 // Slice: pointer and length take two arguments.
                 try signature.print(self.arena, "ptr %arg{d}, i64 %arg{d}", .{ arg_index, arg_index + 1 });
+                arg_index += 2;
+            } else if (param_type == .enumeration) {
+                // Enum: tag and payload take two arguments.
+                try signature.print(self.arena, "i32 %arg{d}, i32 %arg{d}", .{ arg_index, arg_index + 1 });
                 arg_index += 2;
             } else {
                 try signature.print(self.arena, "{s} %arg{d}", .{ try llvmType(param_type), arg_index });
@@ -478,6 +491,22 @@ const FnEmitter = struct {
                     try self.emit("  {s} = insertvalue {{ ptr, i64 }} {s}, i64 {s}, 1\n", .{ with_len, with_ptr, value.len });
                     try self.emit("  ret {{ ptr, i64 }} {s}\n", .{with_len});
                     self.block().terminated = true;
+                } else if (self.info.return_type == .enumeration) {
+                    const expr = maybe_expr orelse return error.MiscompiledAst;
+                    // A call returning an enum already is the aggregate.
+                    if (expr.kind == .call) {
+                        const direct = try self.emitEnumCall(expr.kind.call);
+                        try self.emit("  ret {{ i32, i32 }} {s}\n", .{direct});
+                        self.block().terminated = true;
+                        return;
+                    }
+                    const value = try self.enumOperand(expr);
+                    const with_tag = try self.newTemp();
+                    try self.emit("  {s} = insertvalue {{ i32, i32 }} undef, i32 {s}, 0\n", .{ with_tag, value.tag });
+                    const with_payload = try self.newTemp();
+                    try self.emit("  {s} = insertvalue {{ i32, i32 }} {s}, i32 {s}, 1\n", .{ with_payload, with_tag, value.payload });
+                    try self.emit("  ret {{ i32, i32 }} {s}\n", .{with_payload});
+                    self.block().terminated = true;
                 } else if (self.info.return_type == .aggregate) {
                     const expr = maybe_expr orelse return error.MiscompiledAst;
                     const aggregate_type = try self.structType(self.info.return_struct_id);
@@ -571,14 +600,21 @@ const FnEmitter = struct {
     /// Writes an enum value (tag + optional payload) into the two slots of
     /// `dst`: a case without payload, a constructor with payload, or a copy of
     /// another enum variable.
-    fn emitEnumStore(self: *FnEmitter, dst: *const sema.Symbol, value: *ast.Expr) Error!void {
-        switch (value.kind) {
+    /// Tag and payload of an enum value, already in SSA: case without payload
+    /// (`0`), constructor (payload evaluated), variable (`load` per slot) or
+    /// call returning an enum (`extractvalue` per field).
+    const EnumOperand = struct { tag: []const u8, payload: []const u8 };
+
+    fn enumOperand(self: *FnEmitter, expr: *ast.Expr) Error!EnumOperand {
+        switch (expr.kind) {
             .field_access => |access| {
-                const tag = try self.caseTag(
-                    access.resolved_enum orelse return error.MiscompiledAst,
-                    access.resolved_case orelse return error.MiscompiledAst,
-                );
-                try self.emit("  store i32 {s}, ptr {s}, align 4\n", .{ tag, try self.varName(dst.slot) });
+                return .{
+                    .tag = try self.caseTag(
+                        access.resolved_enum orelse return error.MiscompiledAst,
+                        access.resolved_case orelse return error.MiscompiledAst,
+                    ),
+                    .payload = "0",
+                };
             },
             .method_call => |call| {
                 const tag = try self.caseTag(
@@ -587,21 +623,37 @@ const FnEmitter = struct {
                 );
                 if (call.args.len != 1) return error.MiscompiledAst;
                 const payload = try self.emitExpr(call.args[0]);
-                try self.emit("  store i32 {s}, ptr {s}, align 4\n", .{ tag, try self.varName(dst.slot) });
-                try self.emit("  store i32 {s}, ptr {s}, align 4\n", .{ payload.text, try self.varName(dst.slot + 1) });
+                if (payload.typ != .i32) return error.UnsupportedNode;
+                return .{ .tag = tag, .payload = payload.text };
             },
             .identifier => {
-                const src = self.symbolAt(value.resolved orelse return error.MiscompiledAst);
+                const src = self.symbolAt(expr.resolved orelse return error.MiscompiledAst);
                 if (src.typ != .enumeration) return error.MiscompiledAst;
                 const tag = try self.newTemp();
                 try self.emit("  {s} = load i32, ptr {s}, align 4\n", .{ tag, try self.varName(src.slot) });
                 const payload = try self.newTemp();
                 try self.emit("  {s} = load i32, ptr {s}, align 4\n", .{ payload, try self.varName(src.slot + 1) });
-                try self.emit("  store i32 {s}, ptr {s}, align 4\n", .{ tag, try self.varName(dst.slot) });
-                try self.emit("  store i32 {s}, ptr {s}, align 4\n", .{ payload, try self.varName(dst.slot + 1) });
+                return .{ .tag = tag, .payload = payload };
+            },
+            .call => |call| {
+                const index = call.callee_fn orelse return error.MiscompiledAst;
+                if (self.checked.functions[index].return_type != .enumeration) return error.MiscompiledAst;
+                const aggregate = try self.emitEnumCall(call);
+                const tag = try self.newTemp();
+                try self.emit("  {s} = extractvalue {{ i32, i32 }} {s}, 0\n", .{ tag, aggregate });
+                const payload = try self.newTemp();
+                try self.emit("  {s} = extractvalue {{ i32, i32 }} {s}, 1\n", .{ payload, aggregate });
+                return .{ .tag = tag, .payload = payload };
             },
             else => return error.MiscompiledAst,
         }
+    }
+
+    /// Writes an enum value (tag + payload) into the two slots of `dst`.
+    fn emitEnumStore(self: *FnEmitter, dst: *const sema.Symbol, value: *ast.Expr) Error!void {
+        const operand = try self.enumOperand(value);
+        try self.emit("  store i32 {s}, ptr {s}, align 4\n", .{ operand.tag, try self.varName(dst.slot) });
+        try self.emit("  store i32 {s}, ptr {s}, align 4\n", .{ operand.payload, try self.varName(dst.slot + 1) });
     }
 
     /// `switch` over an enum variable: one block per arm, `switch` on the tag
@@ -892,6 +944,9 @@ const FnEmitter = struct {
             if (ptype == .str) {
                 const text = try self.strOperand(arg);
                 try args.print(self.arena, "ptr {s}, i64 {s}", .{ text.ptr, text.len });
+            } else if (ptype == .enumeration) {
+                const value = try self.enumOperand(arg);
+                try args.print(self.arena, "i32 {s}, i32 {s}", .{ value.tag, value.payload });
             } else {
                 const value = try self.emitExpr(arg);
                 if (value.typ == .void) return error.UnsupportedNode;
@@ -911,6 +966,17 @@ const FnEmitter = struct {
         return result;
     }
 
+    /// Call whose return is an enum: returns the temporary holding
+    /// `{ i32, i32 }`.
+    fn emitEnumCall(self: *FnEmitter, call: ast.Expr.Call) Error![]const u8 {
+        const fn_index = call.callee_fn orelse return error.MiscompiledAst;
+        const callee = self.checked.functions[fn_index];
+        const args = try self.emitArgs(call, callee.params, callee.param_struct_ids);
+        const result = try self.newTemp();
+        try self.emit("  {s} = call {{ i32, i32 }} @{s}({s})\n", .{ result, call.callee, args });
+        return result;
+    }
+
     fn emitCall(self: *FnEmitter, call: ast.Expr.Call) Error!Operand {
         if (call.builtin) |builtin| switch (builtin) {
             .print => return self.emitPrint(call),
@@ -919,10 +985,11 @@ const FnEmitter = struct {
 
         const fn_index = call.callee_fn orelse return error.MiscompiledAst;
         const callee = self.checked.functions[fn_index];
-        // `str` and struct do not fit in an `Operand`: consumers use
-        // `strOperand`/`emitStructCall`.
+        // `str`, struct and enum do not fit in an `Operand`: consumers use
+        // `strOperand`, `enumOperand`, `emitEnumCall` and `emitStructCall`.
         if (callee.return_type == .str) return error.UnsupportedNode;
         if (callee.return_type == .aggregate) return error.UnsupportedNode;
+        if (callee.return_type == .enumeration) return error.UnsupportedNode;
 
         const args = try self.emitArgs(call, callee.params, callee.param_struct_ids);
 
@@ -1430,4 +1497,40 @@ test "llvm: switch with else uses the else block as the default label" {
     defer f.deinit();
     const ir = try emitFixture(&f);
     try support.expectContains(ir, "label %switch_else");
+}
+
+test "llvm: enums cross calls as two i32 arguments and a { i32, i32 } return" {
+    var f = try support.Fixture.build(
+        \\enum Color { Red, Green, Blue }
+        \\fn pick(n: i32) -> Color {
+        \\    if n == 0 { return Color.Red; }
+        \\    return Color.Blue;
+        \\}
+        \\fn label(c: Color) -> i32 {
+        \\    var value: i32 = 0;
+        \\    switch c {
+        \\        Red => { value = 1; }
+        \\        Green => { value = 2; }
+        \\        Blue => { value = 3; }
+        \\    }
+        \\    return value;
+        \\}
+        \\fn main() -> i32 {
+        \\    return label(pick(1));
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+
+    // Enum parameter flattened into two scalar arguments.
+    try support.expectContains(ir, "define i32 @label(i32 %arg0, i32 %arg1)");
+    // Enum return becomes an aggregate built with `insertvalue`.
+    try support.expectContains(ir, "define { i32, i32 } @pick(i32 %arg0)");
+    try support.expectContains(ir, "insertvalue { i32, i32 } undef, i32 0, 0");
+    try support.expectContains(ir, "ret { i32, i32 }");
+    // A call returning an enum is destructured with `extractvalue` and passed
+    // on as two scalars.
+    try support.expectContains(ir, "call { i32, i32 } @pick(i32 1)");
+    try support.expectContains(ir, "extractvalue { i32, i32 }");
+    try support.expectContains(ir, "call i32 @label(i32 ");
 }

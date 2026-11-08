@@ -1,0 +1,51 @@
+// Enums cross calls by value: two registers (tag, payload) in, the same pair
+// out, and a `switch` on the parameter of the callee.
+// expect-stdout: 3
+// expect-stdout: 6
+// expect-stdout: 10
+// expect-exit: 19
+enum Shape {
+    Circle(i32),
+    Square(i32),
+    Empty,
+}
+
+fn make(kind: i32, size: i32) -> Shape {
+    if kind == 0 {
+        return Shape.Circle(size);
+    }
+    if kind == 1 {
+        return Shape.Square(size);
+    }
+    return Shape.Empty;
+}
+
+fn weight(shape: Shape) -> i32 {
+    var result: i32 = 0;
+    switch shape {
+        Circle(r) => {
+            result = r;
+        }
+        Square(side) => {
+            result = side * 2;
+        }
+        Empty => {
+            result = 0;
+        }
+    }
+    return result;
+}
+
+fn add(a: Shape, extra: i32) -> i32 {
+    return weight(a) + extra;
+}
+
+fn main() -> i32 {
+    let circle = make(0, 3);
+    let square = make(1, 3);
+    let empty = make(2, 9);
+    print_i32(weight(circle));
+    print_i32(weight(square));
+    print_i32(add(circle, 7));
+    return weight(circle) + weight(square) + add(empty, 10);
+}

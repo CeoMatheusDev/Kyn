@@ -1,0 +1,18 @@
+// Enums are nominal: an enum of another type is rejected in the argument.
+enum A {
+    One,
+    Two,
+}
+
+enum B {
+    One,
+    Two,
+}
+
+fn paint(a: A) -> i32 {
+    return 1;
+}
+
+fn main() -> i32 {
+    return paint(B.One);
+}

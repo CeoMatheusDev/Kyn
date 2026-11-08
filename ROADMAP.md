@@ -36,6 +36,10 @@ implementation and reproducible tests.
 - [x] `enum` with optional `i32` payload and exhaustive `switch` (`Case`,
       `Case(name)` and `else` arms, tags in declaration order, tag + payload
       slots in both backends, missing/redundant cases diagnosed).
+- [x] Enums **by value** across calls: parameters and returns carry the pair
+      (tag, payload) in two registers, with nominal identity enforced in
+      arguments, returns and annotations; an enum parameter counts two of the
+      six argument registers.
 - [ ] Complete parser and AST for the target language. Current subset: `fn`,
       `let`/`var`, assignment, `return`, `if`/`else`, `while`, `switch` over
       enums, blocks, expressions with precedence, `import`, `struct`, `enum` and
