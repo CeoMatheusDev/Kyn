@@ -9,7 +9,9 @@ Lightweight VS Code support for Kyn, backed by the real `kync` compiler. Semanti
 - Automatic checks on open, edit and save with configurable debounce.
 - Commands to check a file, emit LLVM IR and emit x86-64 Assembly.
 - Static completions for language keywords, primitive types, builtins and snippets.
-- Document outline for functions, structs, enums and implementation blocks.\n- Workspace-wide Go to Definition, Find All References and symbol search for uniquely named declarations.
+- Document outline for functions, structs, enums and implementation blocks.
+- Compiler-resolved Go to Definition, Find All References and workspace symbol search.
+- Unsaved current-file buffers are analyzed through a temporary sibling source file; relative imports continue to resolve from the original directory.
 - Dedicated **Kyn** Output Channel with compiler activity and errors.
 - Configurable compiler executable; auto-detects `zig-out/bin/kync`, then PATH.
 
