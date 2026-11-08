@@ -40,6 +40,40 @@ function targetAt(snapshot, sourcePath, offset, canonicalize = path.resolve) {
   return reference ? reference.target : null;
 }
 
+
+function remapSnapshotOffsets(snapshot, sourceTextByFile) {
+  for (const file of snapshot.files) {
+    const source = sourceTextByFile.get(file.id);
+    if (typeof source !== "string") continue;
+    const entries = [
+      ...snapshot.symbols.filter(item => item.file === file.id),
+      ...snapshot.references.filter(item => item.file === file.id)
+    ];
+    const offsets = [...new Set(entries.flatMap(item => [item.start, item.end]))].sort((a, b) => a - b);
+    const bytes = Buffer.from(source, "utf8"), converted = new Map();
+    let byteOffset = 0, utf16Offset = 0;
+    for (const target of offsets) {
+      if (target > bytes.length) continue;
+      while (byteOffset < target) {
+        const lead = bytes[byteOffset];
+        let width = lead < 0x80 ? 1 : lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : 4;
+        if (byteOffset + width > target || byteOffset + width > bytes.length) width = 1;
+        byteOffset += width;
+        utf16Offset += width === 4 ? 2 : 1;
+      }
+      converted.set(target, utf16Offset);
+    }
+    for (const entry of entries) {
+      const start = converted.get(entry.start), end = converted.get(entry.end);
+      if (start !== undefined && end !== undefined) {
+        entry.start = start;
+        entry.end = end;
+      }
+    }
+  }
+  return snapshot;
+}
+
 function findSymbol(snapshot, id) {
   return snapshot.symbols.find(symbol => symbol.id === id) || null;
 }
@@ -56,4 +90,4 @@ function referencesFor(snapshot, id, includeDeclaration) {
   return result;
 }
 
-module.exports = { validateSnapshot, filePathOf, targetAt, findSymbol, referencesFor };
+module.exports = { validateSnapshot, filePathOf, targetAt, findSymbol, referencesFor, remapSnapshotOffsets };
