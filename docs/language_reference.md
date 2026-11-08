@@ -117,8 +117,9 @@ of the same type, integer literals default to `i32` and overflow is diagnosed.
 
 ### Numeric conversion (`as`)
 
-There are no implicit conversions between integer types. To convert between
-them, or from/to `bool`, use the explicit cast expression `expr as Type`:
+There are no implicit conversions between integer types. Convert between
+integer types with the explicit cast expression `expr as Type`. Conversions
+to or from `bool`, `str` and `void` are rejected:
 
 ```kyn
 let a: u8 = 255 as u8;
