@@ -1,5 +1,5 @@
 // expect-exit: 7
-// Cadeia if / else if / else.
+// if / else if / else chain.
 fn classify(x: i32) -> i32 {
     if x < 0 {
         return 1;

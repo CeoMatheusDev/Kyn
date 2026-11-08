@@ -1,5 +1,5 @@
 // tests/self_host.kyn
-// Validação do compilador self-hosted (Kyn)
+// Self-hosted compiler (Kyn) validation
 fn main() -> i32 {
     return 0;
 }

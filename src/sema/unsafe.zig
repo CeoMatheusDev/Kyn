@@ -1,9 +1,9 @@
-//! Verificações de `unsafe` e de representação (`#[repr(C)]`).
+//! `unsafe` and representation (`#[repr(C)]`) checks.
 //!
-//! O subconjunto atual da linguagem (ver `docs/status.md`) ainda não possui
-//! blocos `unsafe`, `struct` nem atributos na AST. Este módulo mantém a
-//! política de verificação isolada e testada, pronta para ser conectada quando
-//! esses nós existirem — sem simulá-los no parser.
+//! The current language subset (see `docs/status.md`) has no `unsafe`
+//! blocks, `struct` nodes or attributes in the AST. This module keeps the
+//! verification policy isolated and tested, ready to be wired in once
+//! those nodes exist — without faking them in the parser.
 
 const std = @import("std");
 const Span = @import("../span.zig").Span;
@@ -28,7 +28,7 @@ pub const UnsafeChecker = struct {
         self.in_unsafe = false;
     }
 
-    /// Operações de baixo nível exigem contexto `unsafe` explícito.
+    /// Low-level operations require an explicit `unsafe` context.
     pub fn checkOperation(self: *UnsafeChecker, op: []const u8) !void {
         _ = op;
         if (!self.in_unsafe) return error.UnsafeOutsideBlock;
@@ -36,10 +36,10 @@ pub const UnsafeChecker = struct {
 };
 
 pub const ReprChecker = struct {
-    /// Valida que uma struct exposta na ABI declara `#[repr(C)]`.
+    /// Validates that a struct exposed in the ABI declares `#[repr(C)]`.
     ///
-    /// Enquanto a AST não tiver nós de `struct`, a checagem recebe os dados
-    /// explicitamente; nenhum atributo é inferido.
+    /// While the AST has no `struct` nodes, the check receives the data
+    /// explicitly; no attribute is ever inferred.
     pub fn checkExternStruct(self: *ReprChecker, name: []const u8, span: Span, has_repr_c: bool) !void {
         _ = self;
         _ = span;
@@ -48,7 +48,7 @@ pub const ReprChecker = struct {
     }
 };
 
-test "unsafe: operação fora do bloco é rejeitada" {
+test "unsafe: operation outside the block is rejected" {
     var checker = UnsafeChecker.init();
     try std.testing.expectError(error.UnsafeOutsideBlock, checker.checkOperation("raw_ptr"));
 
@@ -64,7 +64,7 @@ test "unsafe: contexto aninhado simplificado" {
     checker.enterUnsafe();
     try checker.checkOperation("deref");
     checker.exitUnsafe();
-    // A política atual não conta aninhamento; documentado como pendente.
+    // The current policy does not account for nesting; tracked as pending.
     try std.testing.expectError(error.UnsafeOutsideBlock, checker.checkOperation("deref"));
 }
 

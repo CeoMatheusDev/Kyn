@@ -1,5 +1,5 @@
 // expect-exit: 21
-// Chamadas aninhadas e parâmetros múltiplos.
+// Nested calls and multiple parameters.
 fn add(a: i32, b: i32) -> i32 {
     return a + b;
 }

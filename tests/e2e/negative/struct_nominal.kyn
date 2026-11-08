@@ -1,4 +1,4 @@
-// Erro esperado: structs diferentes não são intercambiáveis, mesmo com a mesma forma.
+// Expected error: different structs are not interchangeable, even with the same shape.
 struct A {
     x: i32,
 }
@@ -7,11 +7,11 @@ struct B {
     x: i32,
 }
 
-fn usa(a: A) -> i32 {
+fn uses(a: A) -> i32 {
     return a.x;
 }
 
 fn main() -> i32 {
     let b: B = B { x: 1 };
-    return usa(b);
+    return uses(b);
 }

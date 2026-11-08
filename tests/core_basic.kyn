@@ -1,6 +1,6 @@
 // tests/core_basic.kyn
 unsafe {
-    // acesso direto (bare-metal)
+    // direct access (bare-metal)
 }
 
 #[repr(C)]

@@ -1,4 +1,4 @@
-// Formatação decimal: zero, positivos e negativos na mesma execução.
+// Decimal formatting: zero, positives and negatives in the same run.
 // expect-exit: 0
 // expect-stdout: 0
 // expect-stdout: 7

@@ -1,8 +1,0 @@
-// Erro esperado: cada 'str' ocupa dois registradores; quatro excedem os seis do backend.
-fn quatro(a: str, b: str, c: str, d: str) -> i32 {
-    return 0;
-}
-
-fn main() -> i32 {
-    return 0;
-}

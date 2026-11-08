@@ -2,99 +2,98 @@
 
 [![CI](https://github.com/CeoMatheusDev/Kyn/actions/workflows/ci.yml/badge.svg)](https://github.com/CeoMatheusDev/Kyn/actions/workflows/ci.yml)
 
-**Kyn** é um projeto experimental de linguagem de programação de sistemas,
-desenvolvido com foco em controle explícito de recursos, interoperabilidade com
-C e compilação de baixo nível.
+**Kyn** is an experimental systems programming language project, developed with a
+focus on explicit resource control, interoperability with C and low-level
+compilation.
 
-O repositório reúne um protótipo de compilador escrito em Zig, experimentos de
-implementação da linguagem Kyn, módulos iniciais de biblioteca padrão e
-testes/fixtures. O projeto ainda está em desenvolvimento: a implementação
-disponível não corresponde a uma linguagem estável ou pronta para produção.
+The repository brings together a compiler prototype written in Zig, experiments
+of implementing the Kyn language itself, initial standard library modules and
+tests/fixtures. The project is still under development: the available
+implementation does not correspond to a stable, production-ready language.
 
-> **Estado atual:** protótipo em estágio inicial, com frontend integrado e
-> backend nativo x86-64 validado por execução. Interfaces, sintaxe, semântica e
-> comandos de build ainda podem mudar.
+> **Current state:** early-stage prototype, with an integrated frontend and a
+> native x86-64 backend validated by execution. Interfaces, syntax, semantics and
+> build commands may still change.
 
-## Objetivos de projeto
+## Project goals
 
-- Controle explícito de alocação e ciclo de vida de memória.
-- Ausência de garbage collector como objetivo de projeto.
-- Interoperabilidade com C e possibilidade de uso em sistemas de baixo nível.
-- Separação conceitual entre recursos essenciais (`kyn:core`) e recursos
-  dependentes do sistema operacional (`kyn:std`).
-- Compilador com implementação bootstrap em Zig e, futuramente, componentes
-  reimplementados em Kyn.
+- Explicit control of allocation and memory lifetime.
+- No garbage collector as a design goal.
+- Interoperability with C and the ability to be used in low-level systems.
+- A conceptual separation between essential features (`kyn:core`) and
+  operating-system-dependent features (`kyn:std`).
+- A compiler with a Zig bootstrap implementation and, in the future, components
+  reimplemented in Kyn.
 
-Esses itens descrevem objetivos e direção arquitetural; não devem ser
-interpretados como garantias de recursos completos.
+Those items describe goals and architectural direction; they must not be read as
+guarantees of complete features.
 
-## Estado de implementação
+## Implementation status
 
-| Área | O que existe | Estado |
+| Area | What exists | State |
 | --- | --- | --- |
-| Build | `build.zig` + `build.zig.zon` (Zig 0.17.0) | Funcional, validado |
-| CLI | `kync check` / `kync emit` (`--llvm`, `--asm`, `-o`, `--lib`) | Funcional para o subconjunto atual |
-| Lexer | `src/lexer/lexer.zig` com tokens tipados e spans | Funcional, testado |
-| Parser e AST | `src/parser/`, `src/ast/` para o subconjunto documentado | Funcional, testado |
-| Módulos | `src/driver.zig` (`compilePath`): `import "arquivo.kyn";` resolvido no disco | Funcional; caminhos relativos ao arquivo importador |
-| Structs | `struct`, literais `Nome { campo: valor }`, acesso e atribuição a campo, por valor em parâmetros/retornos | Funcional localmente, em chamadas (até 6 campos) e entre módulos |
-| Texto e números | `str` como fatia estática (por valor em parâmetros/retornos), `print(...)` e `print_i32(...)` embutidos (texto/decimais + quebra de linha) | Funcional localmente e com módulos; stdout conferido no e2e |
-| Análise semântica | `src/sema/` com escopos, tipos e mutabilidade | Funcional para `i32`/`bool`/`str`/`void` e structs |
-| Backend LLVM IR | `src/codegen/llvm.zig` derivado da AST | Aceito por `llvm-as` no CI (83/83 módulos) |
-| Backend x86-64 | `src/codegen/x86_64.zig` (asm + `as`/`ld`) | Validado por execução |
-| Implementação em Kyn | `src/kyn/`, `src/compiler/` | Esqueleto / placeholders |
-| Biblioteca padrão | `std/` | Experimental |
-| Testes | Unitários (`zig build test`), e2e (`zig build e2e`) e IR (`zig build validate-ir`) | 204 testes unitários (197 do compilador + 7 da std); 102 casos e2e (com stdout conferido); IR validado por `llvm-as` no CI |
+| Build | `build.zig` + `build.zig.zon` (Zig 0.17.0) | Working, validated |
+| CLI | `kync check` / `kync emit` (`--llvm`, `--asm`, `-o`, `--lib`) | Working for the current subset |
+| Lexer | `src/lexer/lexer.zig` with typed tokens and spans | Working, tested |
+| Parser and AST | `src/parser/`, `src/ast/` for the documented subset | Working, tested |
+| Modules | `src/driver.zig` (`compilePath`): `import "file.kyn";` resolved on disk | Working; paths relative to the importing file |
+| Structs | `struct`, literals `Name { field: value }`, field access and assignment, by value in parameters/returns | Working locally, in calls (up to 6 fields) and across modules |
+| Text and numbers | `str` as a static slice (by value in parameters/returns), builtin `print(...)` and `print_i32(...)` (text/decimals + line break) | Working locally and with modules; stdout checked in e2e |
+| Semantic analysis | `src/sema/` with scopes, types and mutability | Working for `i32`/`bool`/`str`/`void` and structs |
+| LLVM IR backend | `src/codegen/llvm.zig` derived from the AST | Accepted by `llvm-as` in CI (83/83 modules) |
+| x86-64 backend | `src/codegen/x86_64.zig` (asm + `as`/`ld`) | Validated by execution |
+| Implementation in Kyn | `src/kyn/`, `src/compiler/` | Skeleton / placeholders |
+| Standard library | `std/` | Experimental |
+| Tests | Unit (`zig build test`), e2e (`zig build e2e`) and IR (`zig build validate-ir`) | 204 unit tests (197 compiler + 7 std); 102 e2e cases (with stdout checked); IR validated by `llvm-as` in CI |
 
-Consulte [o estado detalhado](docs/status.md) e o
-[subconjunto aceito hoje](docs/syntax.ebnf) antes de depender de qualquer
-funcionalidade.
+See the [detailed status](docs/status.md) and the
+[subset accepted today](docs/syntax.ebnf) before depending on any feature.
 
-## Requisitos
+## Requirements
 
-- Zig **0.17.0** (verificado por `build.zig.zon`).
+- Zig **0.17.0** (checked by `build.zig.zon`).
 - Git.
-- Opcional, para a suíte e2e nativa: `bash`, GNU `as` e GNU `ld` em Linux
+- Optional, for the native e2e suite: `bash`, GNU `as` and GNU `ld` on Linux
   x86-64.
 
-## Obtendo o código
+## Getting the code
 
 ```sh
 git clone https://github.com/CeoMatheusDev/Kyn.git
 cd Kyn
 ```
 
-## Compilação e testes
+## Building and testing
 
 ```sh
-zig build                  # gera zig-out/bin/kync
-zig build test             # testes unitários (compilador + std experimental)
-zig build e2e              # fixture -> assembly -> as/ld -> executa -> confere código
-zig build validate-ir      # confere o LLVM IR com llvm-as/clang (se instalado)
+zig build                  # produces zig-out/bin/kync
+zig build test             # unit tests (compiler + experimental std)
+zig build e2e              # fixture -> assembly -> as/ld -> run -> check exit code
+zig build validate-ir      # checks the LLVM IR with llvm-as/clang (when installed)
 ```
 
-Exemplo de uso:
+Example usage:
 
 ```sh
 cat > hello.kyn <<'KYN'
 fn main() -> i32 {
-    let resposta: i32 = 6 * 7;
-    return resposta % 256;
+    let answer: i32 = 6 * 7;
+    return answer % 256;
 }
 KYN
 
 zig-out/bin/kync check hello.kyn
 zig-out/bin/kync emit --llvm hello.kyn -o hello.ll
 zig-out/bin/kync emit --asm  hello.kyn -o hello.s
-as hello.s -o hello.o && ld hello.o -o hello && ./hello; echo "saída: $?"
+as hello.s -o hello.o && ld hello.o -o hello && ./hello; echo "exit: $?"
 ```
 
-Um programa pode ser dividido em arquivos; cada `import` vem antes das funções e
-o caminho é relativo ao arquivo que importa:
+A program can be split into files; every `import` comes before the functions and
+the path is relative to the importing file:
 
 ```sh
 cat > util.kyn <<'KYN'
-fn dobro(x: i32) -> i32 {
+fn double(x: i32) -> i32 {
     return x * 2;
 }
 KYN
@@ -102,143 +101,142 @@ cat > app.kyn <<'KYN'
 import "util.kyn";
 
 fn main() -> i32 {
-    return dobro(21);
+    return double(21);
 }
 KYN
 zig-out/bin/kync check app.kyn
 zig-out/bin/kync emit --asm app.kyn -o app.s
 ```
 
-Ciclos, arquivos ausentes e funções repetidas entre arquivos são diagnosticados
-com `arquivo:linha:coluna` do arquivo de origem.
+Cycles, missing files and repeated functions across files are diagnosed with the
+`file:line:column` of the source file.
 
-Structs guardam campos escalares e são manipulados por valor em variáveis
-locais (`let`/`var`), com literais, leitura e escrita de campo:
+Structs hold scalar fields and are handled by value in local variables
+(`let`/`var`), with literals, field reads and writes:
 
 ```sh
-cat > ponto.kyn <<'KYN'
-struct Ponto {
+cat > point.kyn <<'KYN'
+struct Point {
     x: i32,
     y: i32,
 }
 
 fn main() -> i32 {
-    var p: Ponto = Ponto { x: 3, y: 4 };
+    var p: Point = Point { x: 3, y: 4 };
     p.x = p.x + p.y;
     return p.x;   // 7
 }
 KYN
-zig-out/bin/kync emit --asm ponto.kyn -o ponto.s
+zig-out/bin/kync emit --asm point.kyn -o point.s
 ```
 
-Struct por valor em parâmetros/retorno, campo de tipo struct e `struct` vazio são
-rejeitados com diagnóstico explícito.
+A struct field of struct type and an empty `struct` are rejected with an explicit
+diagnostic. Structs cross calls by value (one register per field, up to six
+fields).
 
-Texto: `str` é uma fatia estática e `print(...)` escreve o texto seguido de
-quebra de linha (`write` na libc no IR do LLVM; syscall no backend nativo):
+Text: `str` is a static slice and `print(...)` writes the text followed by a line
+break (`write` from libc in the LLVM IR; a syscall in the native backend):
 
 ```sh
-cat > ola.kyn <<'KYN'
+cat > hello2.kyn <<'KYN'
 fn main() -> i32 {
-    print("ola, kyn");
-    let nome = "bootstrap";
-    print(nome);
+    print("hello, kyn");
+    let name = "bootstrap";
+    print(name);
     return 0;
 }
 KYN
-zig-out/bin/kync emit --asm ola.kyn -o ola.s
-as ola.s -o ola.o && ld ola.o -o ola && ./ola
+zig-out/bin/kync emit --asm hello2.kyn -o hello2.s
+as hello2.s -o hello2.o && ld hello2.o -o hello2 && ./hello2
 ```
 
-`print_i32` fecha o outro lado da saída: valores calculados aparecem em decimal
-(0, positivos, negativos e os limites de `i32`), com a conversão feita por uma
-rotina própria em cada backend — `write` por syscall no backend nativo e
-`@kyn_print_i32` invocando `write` da libc no IR:
+`print_i32` closes the other side of output: computed values appear in decimal
+(0, positives, negatives and the `i32` limits), with the conversion done by a
+dedicated routine in each backend — a `write` syscall in the native backend and
+`@kyn_print_i32` calling libc `write` in the IR:
 
 ```sh
-cat > conta.kyn <<'KYN'
+cat > count.kyn <<'KYN'
 fn main() -> i32 {
     let a = 20;
     let b = 22;
-    print("soma");
+    print("sum");
     print_i32(a + b);
     print_i32(0 - a);
     return 0;
 }
 KYN
-zig-out/bin/kync emit --asm conta.kyn -o conta.s
-as conta.s -o conta.o && ld conta.o -o conta && ./conta
+zig-out/bin/kync emit --asm count.kyn -o count.s
+as count.s -o count.o && ld count.o -o count && ./count
 ```
 
-`str` em campo de struct, comparação (`==`/`!=`), concatenação e formatação
-ainda não são suportados e são diagnosticados. `str` em parâmetros e retornos é
-suportado por valor (ponteiro + tamanho, dois registradores por `str`).
+`str` in a struct field, comparison (`==`/`!=`), concatenation and formatting are
+not supported yet and are diagnosed. `str` in parameters and returns is
+supported by value (pointer + length, two registers per `str`).
 
-`kync` retorna `0` em sucesso, `1` para erros de compilação, `2` para uso
-inválido e `3` para falhas de E/S. Detalhes em
-[docs/development.md](docs/development.md).
+`kync` returns `0` on success, `1` for compilation errors, `2` for invalid usage
+and `3` for I/O failures. Details in [docs/development.md](docs/development.md).
 
-Novo na linguagem? Comece pelo **[tutorial](docs/tutorial.md)**: guia completo,
-do primeiro programa a structs por valor, módulos, diagnósticos e testes.
+New to the language? Start with the **[tutorial](docs/tutorial.md)**: a complete
+guide, from the first program to structs by value, modules, diagnostics and
+tests.
 
-Os arquivos `.kyn` em `tests/` cobrem tanto o subconjunto suportado
-(`tests/integration/`, `tests/e2e/`) quanto casos de linguagem ainda **não**
-implementados (por exemplo `impl`, `Result<T, E>`, `unsafe`). Não interprete a
-quantidade de fixtures como cobertura de recursos.
+The `.kyn` files in `tests/` cover both the supported subset
+(`tests/integration/`, `tests/e2e/`) and language cases **not** implemented yet
+(for example `impl`, `Result<T, E>`, `unsafe`). Do not read the number of
+fixtures as feature coverage.
 
-## Estrutura do repositório
+## Repository structure
 
 ```text
 .
-├── build.zig            # build, testes e e2e
+├── build.zig            # build, tests and e2e
 ├── build.zig.zon
-├── docs/                # arquitetura, status, gramáticas e visão de linguagem
+├── docs/                # architecture, status, grammars and language vision
 ├── src/
-│   ├── ast/             # nós da AST
-│   ├── codegen/         # interface de backend, LLVM IR e x86-64
-│   ├── compiler/        # módulos iniciais escritos em Kyn (placeholders)
-│   ├── ffi/             # experimentos de interoperabilidade
-│   ├── kyn/             # protótipos do compilador em Kyn (placeholders)
-│   ├── lexer/           # lexer bootstrap
-│   ├── parser/          # parser bootstrap
-│   ├── sema/            # análise semântica e política de unsafe
-│   ├── driver.zig       # pipeline integrado
-│   ├── diagnostics.zig  # diagnósticos e renderização
-│   ├── span.zig         # localização na fonte
-│   └── main.zig         # CLI kync
+│   ├── ast/             # AST nodes
+│   ├── codegen/         # backend interface, LLVM IR and x86-64
+│   ├── compiler/        # initial modules written in Kyn (placeholders)
+│   ├── ffi/             # interoperability experiments
+│   ├── kyn/             # compiler prototypes in Kyn (placeholders)
+│   ├── lexer/           # bootstrap lexer
+│   ├── parser/          # bootstrap parser
+│   ├── sema/            # semantic analysis and unsafe policy
+│   ├── driver.zig       # integrated pipeline
+│   ├── diagnostics.zig  # diagnostics and rendering
+│   ├── span.zig         # source location
+│   └── main.zig         # kync CLI
 ├── std/
-│   ├── core/            # primitivas independentes de SO (experimental)
-│   └── os/              # integrações dependentes de SO (experimental)
-├── tests/               # fixtures da linguagem (integração, e2e, fuzz...)
-└── tools/e2e.sh         # validação de ponta a ponta nativa
+│   ├── core/            # OS-independent primitives (experimental)
+│   └── os/              # OS-dependent integrations (experimental)
+├── tests/               # language fixtures (integration, e2e, fuzz...)
+└── tools/e2e.sh         # native end-to-end validation
 ```
 
-## Documentação
+## Documentation
 
-- [Visão geral e arquitetura](docs/architecture.md)
-- [Estado de implementação e limitações](docs/status.md)
-- [Desenvolvimento, build, CLI e testes](docs/development.md)
-- [Especificação em evolução](docs/spec.md)
-- [Referência preliminar da linguagem `.kyn`](docs/language_reference.md)
-- [Princípios de design da linguagem](docs/language_design.md)
-- [Gramática lexical implementada](docs/grammar.ebnf)
-- [Gramática sintática do subconjunto aceito](docs/syntax.ebnf)
-- [Modelo de memória — proposta](docs/memory_model.md)
+- [Overview and architecture](docs/architecture.md)
+- [Implementation status and limitations](docs/status.md)
+- [Development, build, CLI and tests](docs/development.md)
+- [Evolving specification](docs/spec.md)
+- [Preliminary `.kyn` language reference](docs/language_reference.md)
+- [Language design principles](docs/language_design.md)
+- [Implemented lexical grammar](docs/grammar.ebnf)
+- [Syntactic grammar of the accepted subset](docs/syntax.ebnf)
+- [Memory model — proposal](docs/memory_model.md)
 - [Roadmap](ROADMAP.md)
-- [Histórico de alterações](CHANGELOG.md)
-- [Como contribuir](CONTRIBUTING.md)
+- [Changelog](CHANGELOG.md)
+- [How to contribute](CONTRIBUTING.md)
 
-## Contribuindo
+## Contributing
 
-Contribuições são bem-vindas. Antes de abrir uma alteração, leia
-[CONTRIBUTING.md](CONTRIBUTING.md) e descreva claramente o comportamento
-implementado e como foi verificado (`zig build test`, `zig build e2e`).
+Contributions are welcome. Before opening a change, read
+[CONTRIBUTING.md](CONTRIBUTING.md) and clearly describe the behavior implemented
+and how it was verified (`zig build test`, `zig build e2e`).
 
-Não apresente protótipos, stubs ou objetivos do roadmap como funcionalidades
-concluídas.
+Do not present prototypes, stubs or roadmap goals as finished features.
 
-## Licença
+## License
 
-O projeto declara licenciamento duplo MIT e Apache-2.0. Consulte os arquivos de
-licença presentes no repositório e confirme os termos aplicáveis antes de
-redistribuir.
+The project declares dual MIT and Apache-2.0 licensing. Check the license files
+present in the repository and confirm the applicable terms before redistributing.

@@ -1,4 +1,4 @@
-// Erro esperado: campo inexistente no struct.
+// Expected error: field that does not exist in the struct.
 struct P {
     x: i32,
 }

@@ -1,15 +1,15 @@
-//! Raiz da biblioteca do compilador Kyn (bootstrap em Zig).
+//! Root of the Kyn compiler library (Zig bootstrap).
 //!
-//! Exposta pelo módulo `kyn` no `build.zig`; a CLI `kync` e os testes importam
-//! esta biblioteca em vez de arquivos individuais.
+//! Exposed by the `kyn` module in `build.zig`; the `kync` CLI and tests import
+//! this library instead of individual files.
 
 const build_options = @import("build_options");
 
-/// Versão do compilador/linguagem (pré-1.0: ver CHANGELOG.md). Vem de
-/// `build.zig.zon` via opções de build.
+/// Compiler/language version (pre-1.0: see CHANGELOG.md). Comes from
+/// `build.zig.zon` through build options.
 pub const version = build_options.version;
 
-/// Versão mínima do Zig declarada em `build.zig.zon`.
+/// Minimum Zig version declared in `build.zig.zon`.
 pub const zig_version = "0.17.0";
 
 pub const span = @import("span.zig");

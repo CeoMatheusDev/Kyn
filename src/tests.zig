@@ -1,4 +1,4 @@
-//! Agregador dos testes unitários do compilador bootstrap.
+//! Aggregator of the bootstrap compiler's unit tests.
 //!
 //! Executado por `zig build test` (artefato `kyn-unit-tests`).
 

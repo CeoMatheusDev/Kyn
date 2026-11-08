@@ -1,4 +1,4 @@
-// src/compiler/modules.kyn — Resolução de módulos & imports (v1.4.0)
+// src/compiler/modules.kyn — Module & import resolution (v1.4.0)
 import "core";
 
 pub struct Module {
@@ -7,6 +7,6 @@ pub struct Module {
 }
 
 pub fn resolve(path: []u8) Result<Module, Error> {
-    // Resolve caminhos de arquivos e namespaces: import "core"; import "std/...";
+    // Resolves file paths and namespaces: import "core"; import "std/...";
     return Ok(Module { path: path, namespace: path });
 }

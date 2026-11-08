@@ -1,11 +1,11 @@
-// 'str' por valor atravessa a importação de módulos.
+// 'str' by value crosses the module import.
 // expect-stdout: mod:
 // expect-stdout: kyn
 // expect-exit: 3
-import "texto.kyn";
+import "text.kyn";
 
 fn main() -> i32 {
-    print(prefixo());
-    print(rotulo("kyn"));
+    print(prefix());
+    print(label("kyn"));
     return 3;
 }

@@ -1,3 +1,0 @@
-fn sufixo() -> i32 {
-    return 4;
-}

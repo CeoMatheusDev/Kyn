@@ -1,18 +1,18 @@
-(* Kyn — gramática sintática do subconjunto implementado.
-   Este arquivo descreve exatamente o que o parser em src/parser/parser.zig
-   aceita hoje. Construções da visão de linguagem (enum, impl, generics,
-   slices, ponteiros, unsafe, atributos) ainda NÃO fazem parte deste
-   subconjunto; ver docs/language_reference.md e docs/status.md. *)
+(* Kyn — syntactic grammar of the implemented subset.
+   This file describes exactly what the parser in src/parser/parser.zig accepts
+   today. Constructs from the language vision (enum, impl, generics, slices,
+   pointers, unsafe, attributes) are NOT part of this subset yet; see
+   docs/language_reference.md and docs/status.md. *)
 
-(* Importações vêm antes de qualquer declaração; o caminho é literal de string
-   e é resolvido em relação ao diretório do arquivo que importa. *)
+(* Imports come before any declaration; the path is a string literal and is
+   resolved relative to the directory of the importing file. *)
 program          = { import_decl }, { struct_decl | function_decl }, EOF ;
 
 import_decl      = "import", string_literal, ";" ;
 
-(* Struct: campos com tipo explícito, vírgula final opcional.
-   Restrições verificadas pela semântica: sem campos de tipo struct, sem struct
-   por valor em parâmetros/retorno/argumentos. *)
+(* Struct: fields with an explicit type, optional trailing comma.
+   Restrictions checked by semantics: no fields of struct type, no struct by
+   value in parameters/returns/arguments. *)
 struct_decl      = "struct", identifier, "{", [ field, { ",", field }, [ "," ] ], "}" ;
 field            = identifier, ":", type_expr ;
 
@@ -22,7 +22,7 @@ function_decl    = "fn", identifier, "(", [ parameters ], ")",
 parameters       = parameter, { ",", parameter } ;
 parameter        = identifier, ":", type_expr ;
 
-(* Aceitos pela semântica: i32, bool, str, void e nomes de struct declarados. *)
+(* Accepted by semantics: i32, bool, str, void and names of declared structs. *)
 type_expr        = identifier ;
 
 block            = "{", { statement }, "}" ;
@@ -37,29 +37,30 @@ statement        = let_decl
                  | block
                  | expression_stmt ;
 
-(* O inicializador é obrigatório nesta etapa: `let x: i32;` produz
-   diagnóstico 'unsupported'. *)
+(* The initializer is mandatory at this stage: `let x: i32;` produces an
+   'unsupported' diagnostic. *)
 let_decl         = "let", identifier, [ ":", type_expr ], "=", expression, ";" ;
 var_decl         = "var", identifier, [ ":", type_expr ], "=", expression, ";" ;
 
 assignment       = identifier, "=", expression, ";" ;
 field_assignment = identifier, ".", identifier, "=", expression, ";" ;
 return_stmt      = "return", [ expression ], ";" ;
-(* Em condições, `Nome { ... }` não é literal de struct: o `{` inicia o bloco. *)
+(* In conditions, `Name { ... }` is not a struct literal: the `{` starts the
+   block. *)
 if_stmt          = "if", condition, block, [ "else", ( block | if_stmt ) ] ;
 condition        = expression ;
 while_stmt       = "while", condition, block ;
 expression_stmt  = expression, ";" ;
 
-(* Precedência, do menor para o maior:
-   1  ||            (bool, curto-circuito)
-   2  &&            (bool, curto-circuito)
-   3  == !=         (mesmo tipo, produz bool)
-   4  < <= > >=     (i32, produz bool)
-   5  + -           (i32, associativo à esquerda)
-   6  * / %         (i32, associativo à esquerda)
-   7  unários - !   (prefixo)
-   8  primárias *)
+(* Precedence, from loosest to tightest:
+   1  ||            (bool, short-circuit)
+   2  &&            (bool, short-circuit)
+   3  == !=         (same type, produces bool)
+   4  < <= > >=     (i32, produces bool)
+   5  + -           (i32, left-associative)
+   6  * / %         (i32, left-associative)
+   7  unary - !     (prefix)
+   8  primaries *)
 
 expression       = logical_or ;
 logical_or       = logical_and, { "||", logical_and } ;
@@ -70,8 +71,8 @@ additive         = multiplicative, { ( "+" | "-" ), multiplicative } ;
 multiplicative   = unary, { ( "*" | "/" | "%" ), unary } ;
 unary            = ( "-" | "!" ), unary | postfix ;
 
-(* Acesso a campo: a base precisa ser um identificador (struct com campo
-   struct ainda não existe na semântica). *)
+(* Field access: the base must be an identifier (a struct with a struct field
+   does not exist in semantics yet). *)
 postfix          = primary, { ".", identifier } ;
 
 primary          = integer
@@ -81,34 +82,33 @@ primary          = integer
                  | struct_literal
                  | "(", expression, ")" ;
 
-(* `Nome { ... }` só é literal fora de condições de if/while, onde `{` inicia
-   o bloco. Todos os campos precisam aparecer exatamente uma vez. *)
+(* `Name { ... }` is only a literal outside if/while conditions, where `{`
+   starts the block. Every field must appear exactly once. *)
 struct_literal   = identifier, "{", [ field_init, { ",", field_init }, [ "," ] ], "}" ;
 field_init       = identifier, ":", expression ;
 
 arguments        = expression, { ",", expression } ;
 
-(* `str` é uma fatia estática (ponteiro + tamanho), não um escalar, mas
-   atravessa chamadas por valor: cada parâmetro/argumento e cada retorno `str`
-   ocupa dois registradores (ponteiro e tamanho). Diagnósticos: campo de struct
-   de tipo `str`, `str` em aritmética, em condição e em `==`/`!=` (comparação de
-   bytes ainda não existe), `main` com retorno `str`, além de expressão `str`
-   sem uso. *)
+(* `str` is a static slice (pointer + length), not a scalar, but it crosses
+   calls by value: every `str` parameter/argument and every `str` return takes
+   two registers (pointer and length). Diagnostics: struct field of type `str`,
+   `str` in arithmetic, in conditions and in `==`/`!=` (byte comparison does not
+   exist yet), `main` returning `str`, plus an unused `str` expression. *)
 
-(* Funções embutidas, não palavras-chave nem declarações:
-   - `print(expr)` exige exatamente um argumento `str`, devolve `void` e
-     escreve o texto seguido de quebra de linha;
-   - `print_i32(expr)` exige exatamente um argumento `i32`, devolve `void` e
-     escreve o número em decimal (com '-' quando negativo) e a quebra de linha.
-   Os nomes `print` e `print_i32` são reservados para funções declaradas na
-   fonte. *)
+(* Builtin functions, neither keywords nor declarations:
+   - `print(expr)` requires exactly one `str` argument, returns `void` and
+     writes the text followed by a line break;
+   - `print_i32(expr)` requires exactly one `i32` argument, returns `void` and
+     writes the number in decimal (with '-' when negative) plus the line break.
+   The names `print` and `print_i32` are reserved for functions declared in the
+   source. *)
 builtin_call     = ( "print" | "print_i32" ), "(", expression, ")" ;
 
-(* Structs também atravessam chamadas por valor: cada campo escalar ocupa um
-   registrador, na ordem de declaração, e o retorno usa um registrador por campo
-   (até 6 campos). *)
+(* Structs also cross calls by value: each scalar field takes one register, in
+   declaration order, and the return uses one register per field (up to 6
+   fields). *)
 
-(* Limites do backend nativo atual (documentados como pendência de projeto):
-   até 6 registradores em parâmetros/argumentos por função, contando `str` como
-   dois e cada campo de struct como um; sem chamadas externas; sem struct
-   aninhado nem campo `str`. *)
+(* Limits of the current native backend (documented as a design pending item):
+   up to 6 parameter/argument registers per function, counting `str` as two and
+   each struct field as one; no external calls; no nested struct or `str`
+   field. *)

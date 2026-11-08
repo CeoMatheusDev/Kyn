@@ -1,5 +1,5 @@
 import "base.kyn";
 
-fn um() -> i32 {
+fn one() -> i32 {
     return ident(1);
 }

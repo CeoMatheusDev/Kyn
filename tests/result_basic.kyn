@@ -9,6 +9,6 @@ fn divide(a: i32, b: i32) -> Result<i32, Error> {
 }
 
 fn main() {
-    let x = divide(10, 2)?; // propagação com ?
-    let y = divide(10, 0)?; // erro propagado
+    let x = divide(10, 2)?; // propagation with ?
+    let y = divide(10, 0)?; // propagated error
 }

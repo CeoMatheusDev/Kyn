@@ -1,4 +1,4 @@
-// src/compiler/ffi.kyn — Suporte a FFI Nativa com C (extern) (v1.8.0)
+// src/compiler/ffi.kyn — Native FFI support for C (extern) (v1.8.0)
 import "core";
 
 pub struct ExternFn {
@@ -8,7 +8,7 @@ pub struct ExternFn {
 }
 
 pub fn parse_extern(source: []u8) Result<ExternFn, Error> {
-    // Parser e Sema para chamadas de funções externas do sistema C
+    // Parser and sema for calls to external C system functions
     // extern fn printf(fmt: [*]u8, ...) i32;
     return Ok(ExternFn { name: "printf", params: []Param {}, ret_type: Type::I32 });
 }

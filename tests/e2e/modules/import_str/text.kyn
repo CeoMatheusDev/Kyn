@@ -1,0 +1,7 @@
+fn prefix() -> str {
+    return "mod:";
+}
+
+fn label(name: str) -> str {
+    return name;
+}

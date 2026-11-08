@@ -1,16 +1,16 @@
-//! Driver do pipeline: fonte -> lexer -> parser -> semântica -> backend.
+//! Pipeline driver: source -> lexer -> parser -> semantics -> backend.
 //!
-//! Ownership: as funções públicas criam uma arena própria (alocada no `gpa`)
-//! que possui todos os artefatos — AST de cada módulo, tabela de símbolos,
-//! diagnósticos e saída do backend. O chamador deve invocar `Result.deinit()`.
+//! Ownership: the public functions create their own arena (allocated from the
+//! `gpa`) that owns every artifact — each module's AST, the symbol table,
+//! diagnostics and the backend output. The caller must run `Result.deinit()`.
 //!
-//! Duas entradas públicas:
+//! Two public entry points:
 //!
-//! * `compile` — um único buffer em memória (usada pelos testes e por
-//!   ferramentas que já têm a fonte em mãos).
-//! * `compilePath` — carrega recursivamente o arquivo raiz e seus `import`s do
-//!   disco, resolve caminhos relativos ao arquivo importador e achata todos os
-//!   módulos em um único `ast.Program` antes da semântica.
+//! * `compile` — a single in-memory buffer (used by tests and by tools that
+//!   already hold the source).
+//! * `compilePath` — recursively loads the root file and its `import`s from
+//!   disk, resolves paths relative to the importing file and flattens every
+//!   module into a single `ast.Program` before semantics.
 
 const std = @import("std");
 const lexer = @import("lexer/lexer.zig");
@@ -21,7 +21,7 @@ const codegen = @import("codegen/codegen.zig");
 const diagnostics = @import("diagnostics.zig");
 
 pub const Action = enum {
-    /// Apenas lexer + parser + semântica.
+    /// Lexer + parser + semantics only.
     check,
     /// Executa o pipeline completo e emite o artefato do backend.
     emit,
@@ -33,15 +33,15 @@ pub const Options = struct {
     require_main: bool = true,
 };
 
-/// Limite de bytes por arquivo de origem.
+/// Byte limit per source file.
 pub const max_source_bytes: usize = 16 * 1024 * 1024;
 
-/// Profundidade máxima da cadeia de importações (proteção contra recursão
-/// descontrolada antes de detectar ciclos).
+/// Maximum import chain depth (protection against runaway recursion before
+/// a cycle is detected).
 pub const max_import_depth: usize = 64;
 
-/// Uma unidade de origem já carregada. `path` é o caminho normalizado usado
-/// nos diagnósticos; `text` é o conteúdo completo.
+/// A source unit already loaded. `path` is the normalized path used in
+/// diagnostics; `text` is the full contents.
 pub const Source = struct {
     path: []const u8,
     text: []const u8,
@@ -65,7 +65,7 @@ pub const Result = struct {
         return self.diags.hasErrors() or self.output == null and false;
     }
 
-    /// Fonte associada ao diagnóstico, com fallback para o primeiro arquivo.
+    /// Source associated with the diagnostic, falling back to the first file.
     pub fn sourceFor(self: Result, diag: diagnostics.Diagnostic) Source {
         if (diag.file < self.sources.len) return self.sources[diag.file];
         return self.sources[0];
@@ -74,8 +74,8 @@ pub const Result = struct {
 
 pub const Error = std.mem.Allocator.Error;
 
-/// Erros de leitura do arquivo raiz. Arquivos importados ausentes viram
-/// diagnóstico (`.import_not_found`), não erro.
+/// Root-file read errors. Missing imported files become a
+/// diagnostic (`.import_not_found`), not an error.
 pub const LoadError = std.Io.Dir.ReadFileAllocError;
 
 fn initResult(gpa: std.mem.Allocator) Error!Result {
@@ -93,14 +93,14 @@ fn initResult(gpa: std.mem.Allocator) Error!Result {
     return .{ .gpa = gpa, .arena = arena, .diags = diags };
 }
 
-/// Compila um único buffer em memória (sem `import` resolvidos no disco).
+/// Compiles a single in-memory buffer (no `import` resolved on disk).
 pub fn compile(gpa: std.mem.Allocator, source: []const u8, options: Options) Error!Result {
     var result = try initResult(gpa);
     errdefer result.deinit();
 
     const a = result.arena.allocator();
     const sources = try a.alloc(Source, 1);
-    sources[0] = .{ .path = "<entrada>", .text = source };
+    sources[0] = .{ .path = "<input>", .text = source };
     result.sources = sources;
 
     const program = try parseSource(a, source, result.diags) orelse return result;
@@ -113,7 +113,7 @@ pub fn compile(gpa: std.mem.Allocator, source: []const u8, options: Options) Err
     return result;
 }
 
-/// Carrega `root_path` e, recursivamente, todos os arquivos por ele importados.
+/// Loads `root_path` and, recursively, every file it imports.
 pub fn compilePath(
     gpa: std.mem.Allocator,
     io: std.Io,
@@ -131,8 +131,8 @@ pub fn compilePath(
     for (modules, 0..) |module, i| sources[i] = module.source;
     result.sources = sources;
 
-    // Erros de carregamento ou de sintaxe já interrompem aqui: não há AST
-    // completa para a semântica e a CLI só precisa renderizar os diagnósticos.
+    // Loading or syntax errors stop here: there is no complete AST for
+    // semantics and the CLI only needs to render the diagnostics.
     if (result.diags.hasErrors()) return result;
 
     var structs: std.ArrayList(*ast.StructDecl) = .empty;
@@ -142,8 +142,8 @@ pub fn compilePath(
         for (module.program.?.functions) |func| try functions.append(a, func);
     }
 
-    // `require_main` e a ordem dos símbolos dependem de os módulos entrarem em
-    // pré-ordem (raiz primeiro), como o loader os devolve.
+    // `require_main` and the symbol order depend on modules arriving in
+    // pre-order (root first), as the loader returns them.
     const program = try a.create(ast.Program);
     program.* = .{
         .imports = &.{},
@@ -158,14 +158,14 @@ pub fn compilePath(
 
 const Module = struct {
     source: Source,
-    /// `null` quando o arquivo foi lido mas não passou no parser.
+    /// `null` when the file was read but did not parse.
     program: ?*ast.Program,
 };
 
-/// Percorre o grafo de importações em profundidade (pré-ordem) e devolve os
-/// módulos na ordem em que o arquivo aparece pela primeira vez. Caminhos são
-/// normalizados (`std.fs.path.resolveAlloc`, sem syscalls) e cada módulo entra
-/// uma única vez, o que também cobre importações em diamante.
+/// Walks the import graph depth-first (pre-order) and returns the
+/// modules in the order each file first appears. Paths are
+/// normalized (`std.fs.path.resolveAlloc`, no syscalls) and each module enters
+/// only once, which also covers diamond imports.
 fn loadModules(
     a: std.mem.Allocator,
     io: std.Io,
@@ -185,18 +185,18 @@ const Loader = struct {
     io: std.Io,
     dir: std.Io.Dir,
     diags: *diagnostics.List,
-    /// Módulos aceitos, na ordem de carregamento (pré-ordem de DFS).
+    /// Accepted modules, in load order (DFS pre-order).
     modules: std.ArrayList(Module) = .empty,
-    /// Chaves de arquivos já carregados ou já reportados como ausentes.
+    /// Keys of files already loaded or already reported as missing.
     loaded: std.ArrayList([]const u8) = .empty,
-    /// Chaves da pilha de DFS atual, para detectar ciclos.
+    /// Keys of the current DFS stack, used to detect cycles.
     stack: std.ArrayList([]const u8) = .empty,
 
     fn load(self: *Loader, key: []const u8, text: []const u8, depth: usize) Error!void {
         const file_id: u32 = @intCast(self.modules.items.len);
         self.diags.current_file = file_id;
-        // O arquivo entra na lista antes do parser para que os diagnósticos de
-        // sintaxe apontem para ele; `program` fica nulo se a análise falhar.
+        // The file enters the list before the parser so that syntax diagnostics
+        // point at it; `program` stays null when parsing fails.
         try self.modules.append(self.a, .{ .source = .{ .path = key, .text = text }, .program = null });
         try self.loaded.append(self.a, key);
         try self.stack.append(self.a, key);
@@ -216,7 +216,7 @@ const Loader = struct {
                     file_id,
                     .import_cycle,
                     import.path_span,
-                    "ciclo de importação: '{s}' já está na cadeia atual",
+                    "import cycle: '{s}' is already in the current chain",
                     .{child_key},
                 );
                 continue;
@@ -228,7 +228,7 @@ const Loader = struct {
                     file_id,
                     .unsupported,
                     import.path_span,
-                    "profundidade máxima de importação ({d}) excedida em '{s}'",
+                    "maximum import depth ({d}) exceeded in '{s}'",
                     .{ max_import_depth, child_key },
                 );
                 try self.loaded.append(self.a, child_key);
@@ -242,10 +242,10 @@ const Loader = struct {
                         file_id,
                         .import_not_found,
                         import.path_span,
-                        "não foi possível importar '{s}': {s}",
+                        "could not import '{s}': {s}",
                         .{ import.path, @errorName(err) },
                     );
-                    // Evita repetir o mesmo erro a cada importação do arquivo.
+                    // Avoids repeating the same error for every import of the file.
                     try self.loaded.append(self.a, child_key);
                     continue;
                 },
@@ -262,8 +262,8 @@ fn indexOf(haystack: []const []const u8, needle: []const u8) ?usize {
     return null;
 }
 
-/// Roda lexer + parser em um buffer. Retorna `null` quando houve erro sintático
-/// (o diagnóstico já foi registrado).
+/// Runs lexer + parser on one buffer. Returns `null` on a syntax error
+/// (the diagnostic is already recorded).
 fn parseSource(a: std.mem.Allocator, source: []const u8, diags: *diagnostics.List) Error!?*ast.Program {
     var lex = lexer.Lexer.init(source);
     const tokens = try lex.tokenize(a);
@@ -281,7 +281,7 @@ fn failUnresolvedImports(result: *Result, program: *const ast.Program) Error!voi
         try result.diags.add(
             .unsupported,
             import.path_span,
-            "importação '{s}' não pode ser resolvida neste modo (use um caminho de arquivo)",
+            "import '{s}' cannot be resolved in this mode (use a file path)",
             .{import.path},
         );
     }
@@ -309,7 +309,7 @@ fn runPipeline(result: *Result, program: *ast.Program, options: Options) Error!v
             try diags.add(
                 .unsupported,
                 program.span,
-                "não foi possível gerar código para o backend '{s}': {s}",
+                "could not generate code for backend '{s}': {s}",
                 .{ options.backend.cliName(), @errorName(err) },
             );
             return;
@@ -319,7 +319,7 @@ fn runPipeline(result: *Result, program: *ast.Program, options: Options) Error!v
     result.output = output;
 }
 
-/// Renderiza todos os diagnósticos, cada um com o arquivo de origem correto.
+/// Renders every diagnostic, each with its correct source file.
 pub fn renderDiagnostics(
     writer: *std.Io.Writer,
     sources: []const Source,
@@ -333,7 +333,7 @@ pub fn renderDiagnostics(
 }
 
 // ---------------------------------------------------------------------------
-// Testes de integração do pipeline (em processo)
+// Pipeline integration tests (in process)
 // ---------------------------------------------------------------------------
 
 const testing = std.testing;
@@ -342,14 +342,14 @@ fn expectClean(source: []const u8, options: Options) !Result {
     var result = try compile(testing.allocator, source, options);
     errdefer result.deinit();
     if (result.diags.hasErrors()) {
-        std.debug.print("diagnósticos inesperados em compilação válida:\n", .{});
+        std.debug.print("unexpected diagnostics in a valid compilation:\n", .{});
         for (result.diags.items.items) |d| std.debug.print("  {d}:{d}: {s}\n", .{ d.span.line, d.span.column, d.message });
         return error.UnexpectedDiagnostics;
     }
     return result;
 }
 
-test "driver: check de programa válido" {
+test "driver: check of a valid program" {
     var result = try expectClean(
         \\fn main() -> i32 {
         \\    let x: i32 = 6 * 7;
@@ -383,7 +383,7 @@ test "driver: emit assembly x86-64" {
     try testing.expect(std.mem.indexOf(u8, asm_text, "syscall") != null);
 }
 
-test "driver: erro de sintaxe interrompe o pipeline" {
+test "driver: syntax error stops the pipeline" {
     var result = try compile(testing.allocator, "fn main( { }", .{});
     defer result.deinit();
     try testing.expect(result.diags.hasErrors());
@@ -391,7 +391,7 @@ test "driver: erro de sintaxe interrompe o pipeline" {
     try testing.expectEqual(diagnostics.Kind.syntax, result.diags.items.items[0].kind);
 }
 
-test "driver: erro semântico não gera artefato" {
+test "driver: semantic error produces no artifact" {
     var result = try compile(testing.allocator, "fn main() -> i32 { let x: bool = 1; return 0; }", .{
         .action = .emit,
     });
@@ -408,7 +408,7 @@ test "driver: require_main desativado permite biblioteca sem main" {
     try testing.expectEqual(@as(usize, 0), result.diags.count());
 }
 
-test "driver: render de diagnósticos inclui arquivo, linha e coluna" {
+test "driver: diagnostic render includes file, line and column" {
     var result = try compile(testing.allocator, "fn main() -> i32 {\n  return z;\n}\n", .{});
     defer result.deinit();
 
@@ -416,11 +416,11 @@ test "driver: render de diagnósticos inclui arquivo, linha e coluna" {
     var writer = std.Io.Writer.fixed(&buf);
     try renderDiagnostics(&writer, result.sources, result.diags);
     const out = writer.buffered();
-    try testing.expect(std.mem.startsWith(u8, out, "<entrada>:2:10: erro: variável 'z' não declarada"));
+    try testing.expect(std.mem.startsWith(u8, out, "<input>:2:10: error: variable 'z' is not declared"));
 }
 
 // ---------------------------------------------------------------------------
-// Testes de carregamento multi-arquivo
+// Multi-file loading tests
 // ---------------------------------------------------------------------------
 
 const Fixtures = struct {
@@ -451,7 +451,7 @@ fn expectKinds(result: Result, expected: []const diagnostics.Kind) !void {
     try testing.expectEqualSlices(diagnostics.Kind, expected, actual.items);
 }
 
-test "driver: importa função de outro arquivo" {
+test "driver: imports a function from another file" {
     var fx = Fixtures.init();
     defer fx.deinit();
     try fx.write("lib.kyn", "fn dobro(x: i32) -> i32 { return x * 2; }\n");
@@ -472,7 +472,7 @@ test "driver: importa função de outro arquivo" {
     try testing.expect(std.mem.indexOf(u8, ir, "define i32 @main()") != null);
 }
 
-test "driver: importação em subdiretório é relativa ao arquivo importador" {
+test "driver: import in a subdirectory is relative to the importing file" {
     var fx = Fixtures.init();
     defer fx.deinit();
     try fx.write("util/math.kyn", "fn quadrado(x: i32) -> i32 { return x * x; }\n");
@@ -487,7 +487,7 @@ test "driver: importação em subdiretório é relativa ao arquivo importador" {
     try testing.expectEqualStrings("util/math.kyn", result.sources[1].path);
 }
 
-test "driver: importação em diamante carrega o módulo uma única vez" {
+test "driver: diamond import loads the module only once" {
     var fx = Fixtures.init();
     defer fx.deinit();
     try fx.write("base.kyn", "fn base() -> i32 { return 1; }\n");
@@ -509,13 +509,13 @@ test "driver: importação em diamante carrega o módulo uma única vez" {
     defer result.deinit();
     try expectKinds(result, &.{});
     try testing.expectEqual(@as(usize, 4), result.sources.len);
-    // `base` aparece uma única vez no IR (sem duplicação de símbolos).
+    // `base` appears only once in the IR (no duplicated symbols).
     const ir = result.output.?;
     const first = std.mem.indexOf(u8, ir, "define i32 @base()").?;
     try testing.expect(std.mem.indexOfPos(u8, ir, first + 1, "define i32 @base()") == null);
 }
 
-test "driver: ciclo de importação é detectado com o arquivo certo" {
+test "driver: import cycle is detected with the right file" {
     var fx = Fixtures.init();
     defer fx.deinit();
     try fx.write("a.kyn",
@@ -532,15 +532,15 @@ test "driver: ciclo de importação é detectado com o arquivo certo" {
     try expectKinds(result, &.{.import_cycle});
     const diag = result.diags.last().?;
     try testing.expectEqual(@as(u32, 1), diag.file);
-    try testing.expect(std.mem.indexOf(u8, diag.message, "ciclo de importação") != null);
+    try testing.expect(std.mem.indexOf(u8, diag.message, "import cycle") != null);
 
     var buf: [1024]u8 = undefined;
     var writer = std.Io.Writer.fixed(&buf);
     try renderDiagnostics(&writer, result.sources, result.diags);
-    try testing.expect(std.mem.startsWith(u8, writer.buffered(), "b.kyn:1:8: erro: ciclo de importação"));
+    try testing.expect(std.mem.startsWith(u8, writer.buffered(), "b.kyn:1:8: error: import cycle"));
 }
 
-test "driver: arquivo importado ausente vira diagnóstico" {
+test "driver: missing imported file becomes a diagnostic" {
     var fx = Fixtures.init();
     defer fx.deinit();
     try fx.write("main.kyn",
@@ -555,13 +555,13 @@ test "driver: arquivo importado ausente vira diagnóstico" {
     try testing.expect(std.mem.indexOf(u8, result.diags.last().?.message, "nao_existe.kyn") != null);
 }
 
-test "driver: arquivo raiz ausente propaga erro de E/S" {
+test "driver: missing root file propagates an I/O error" {
     var fx = Fixtures.init();
     defer fx.deinit();
-    try testing.expectError(error.FileNotFound, fx.compile("ausente.kyn", .{}));
+    try testing.expectError(error.FileNotFound, fx.compile("missing.kyn", .{}));
 }
 
-test "driver: símbolo duplicado entre arquivos aponta o segundo arquivo" {
+test "driver: duplicated symbol across files points at the second file" {
     var fx = Fixtures.init();
     defer fx.deinit();
     try fx.write("lib.kyn", "fn dup() -> i32 { return 1; }\n");
@@ -575,19 +575,19 @@ test "driver: símbolo duplicado entre arquivos aponta o segundo arquivo" {
     defer result.deinit();
     try expectKinds(result, &.{.duplicate_declaration});
     const diag = result.diags.last().?;
-    // A primeira declaração (raiz) é registrada antes; o diagnóstico aponta a
-    // segunda ocorrência, no módulo importado.
+    // The first declaration (root) is recorded first; the diagnostic points at
+    // the second occurrence, in the imported module.
     try testing.expectEqual(@as(u32, 1), diag.file);
-    try testing.expect(std.mem.indexOf(u8, diag.message, "já declarada em 'main.kyn'") != null);
+    try testing.expect(std.mem.indexOf(u8, diag.message, "already declared in 'main.kyn'") != null);
 }
 
-test "driver: erro semântico em módulo importado cita o arquivo de origem" {
+test "driver: semantic error in an imported module cites the source file" {
     var fx = Fixtures.init();
     defer fx.deinit();
-    try fx.write("lib.kyn", "fn quebrado() -> i32 { return ausente; }\n");
+    try fx.write("lib.kyn", "fn broken() -> i32 { return missing; }\n");
     try fx.write("main.kyn",
         \\import "lib.kyn";
-        \\fn main() -> i32 { return quebrado(); }
+        \\fn main() -> i32 { return broken(); }
     );
 
     var result = try fx.compile("main.kyn", .{});
@@ -598,13 +598,13 @@ test "driver: erro semântico em módulo importado cita o arquivo de origem" {
     var buf: [1024]u8 = undefined;
     var writer = std.Io.Writer.fixed(&buf);
     try renderDiagnostics(&writer, result.sources, result.diags);
-    try testing.expect(std.mem.startsWith(u8, writer.buffered(), "lib.kyn:1:31: erro: variável 'ausente' não declarada"));
+    try testing.expect(std.mem.startsWith(u8, writer.buffered(), "lib.kyn:1:29: error: variable 'missing' is not declared"));
 }
 
-test "driver: erro de sintaxe em módulo importado interrompe com diagnóstico" {
+test "driver: syntax error in an imported module stops with a diagnostic" {
     var fx = Fixtures.init();
     defer fx.deinit();
-    try fx.write("lib.kyn", "fn quebrado( { }\n");
+    try fx.write("lib.kyn", "fn broken( { }\n");
     try fx.write("main.kyn",
         \\import "lib.kyn";
         \\fn main() -> i32 { return 0; }
@@ -617,17 +617,17 @@ test "driver: erro de sintaxe em módulo importado interrompe com diagnóstico" 
     try testing.expect(result.output == null);
 }
 
-test "driver: import não resolvido em `compile` (buffer único) é diagnosticado" {
+test "driver: unresolved import in `compile` (single buffer) is diagnosed" {
     var result = try compile(testing.allocator,
         \\import "lib.kyn";
         \\fn main() -> i32 { return 0; }
     , .{});
     defer result.deinit();
     try expectKinds(result, &.{.unsupported});
-    try testing.expect(std.mem.indexOf(u8, result.diags.last().?.message, "caminho de arquivo") != null);
+    try testing.expect(std.mem.indexOf(u8, result.diags.last().?.message, "file path") != null);
 }
 
-test "driver: struct declarado em módulo importado" {
+test "driver: struct declared in an imported module" {
     var fx = Fixtures.init();
     defer fx.deinit();
     try fx.write("ponto.kyn",
@@ -654,7 +654,7 @@ test "driver: struct declarado em módulo importado" {
     try testing.expect(std.mem.indexOf(u8, ir, "store i32 6, ptr") != null);
 }
 
-test "driver: struct duplicado entre módulos cita o arquivo de origem" {
+test "driver: duplicated struct across modules cites the source file" {
     var fx = Fixtures.init();
     defer fx.deinit();
     try fx.write("a.kyn", "struct P { x: i32 }\nfn a() -> i32 { return 1; }\n");
@@ -675,6 +675,6 @@ test "driver: struct duplicado entre módulos cita o arquivo de origem" {
     defer result.deinit();
     try expectKinds(result, &.{.duplicate_declaration});
     const diag = result.diags.last().?;
-    try testing.expectEqual(@as(u32, 1), diag.file); // o módulo importado repete 'P'
-    try testing.expect(std.mem.indexOf(u8, diag.message, "struct 'P' já declarado em 'main.kyn'") != null);
+    try testing.expectEqual(@as(u32, 1), diag.file); // the imported module repeats 'P'
+    try testing.expect(std.mem.indexOf(u8, diag.message, "struct 'P' already declared in 'main.kyn'") != null);
 }

@@ -1,209 +1,206 @@
-# Arquitetura
+# Architecture
 
-## Visão geral
+## Overview
 
-O repositório contém dois conjuntos de código relacionados, em estágios
-diferentes:
+The repository contains two related sets of code, at different stages:
 
-1. **Bootstrap em Zig** (`src/`): compilador funcional para um subconjunto da
-   linguagem, com frontend integrado, dois backends e CLI.
-2. **Protótipos em Kyn** (`src/kyn/`, `src/compiler/`): arquivos experimentais
-   com placeholders, destinados a explorar a implementação do compilador na
-   própria linguagem. Não são executados pelo `kync`.
+1. **Zig bootstrap** (`src/`): a working compiler for a subset of the language,
+   with an integrated frontend, two backends and a CLI.
+2. **Kyn prototypes** (`src/kyn/`, `src/compiler/`): experimental files with
+   placeholders, meant to explore implementing the compiler in the language
+   itself. They are not executed by `kync`.
 
-A presença dos dois conjuntos não significa que exista pipeline self-hosted.
+Having both sets does not mean a self-hosted pipeline exists.
 
-## Pipeline implementado
+## Implemented pipeline
 
 ```text
-Código-fonte .kyn
+.kyn source code
       |
       v
-   Lexer  (tokens tipados + spans, sem cópia de texto)
+   Lexer  (typed tokens + spans, no text copies)
       |
       v
-   Parser (programa completo; falha no primeiro erro sintático)
+   Parser (whole program; fails on the first syntax error)
       |
       v
-   AST    (structs, funções, statements, expressões; slices da entrada)
+   AST    (structs, functions, statements, expressions; slices into the input)
       |
       v
- Semântica (escopos, tipos i32/bool/void, mutabilidade, slots de pilha)
+ Semantics (scopes, i32/bool/str/void/struct types, mutability, stack slots)
       |
       v
-  Backend (interface única)
-      ├── LLVM IR textual   -> src/codegen/llvm.zig
-      └── x86-64 System V   -> src/codegen/x86_64.zig  (as + ld -> executável)
+  Backend (single interface)
+      |-- Textual LLVM IR   -> src/codegen/llvm.zig
+      +-- x86-64 System V   -> src/codegen/x86_64.zig  (as + ld -> executable)
 ```
 
-O driver (`src/driver.zig`) executa o pipeline e centraliza a posse de memória:
-uma arena por compilação guarda AST, tabela de símbolos, diagnósticos e saída do
-backend; `Result.deinit()` libera tudo.
+The driver (`src/driver.zig`) runs the pipeline and centralizes memory
+ownership: one arena per compilation holds the AST, the symbol table, the
+diagnostics and the backend output; `Result.deinit()` releases everything.
 
-## Contratos entre estágios
+## Contracts between stages
 
-- **Tokens**: `Tag` tipada, `text` como slice da entrada e `Span`
-  (offset inicial/final, linha e coluna 1-based). Espaços e `// ...` não chegam
-  ao parser; caracteres desconhecidos viram `.invalid` e são diagnosticados.
-- **AST**: independente de decisões semânticas. Cada nó tem `span`; a semântica
-  anota índices de resolução (`Expr.resolved`, `Stmt.decl_symbol`,
-  `Stmt.Assign.resolved`, `Expr.Call.callee_fn`) sem alterar a estrutura.
-- **Semântica**: produz `Checked` com assinaturas de funções, tipos de retorno,
-  structs (campos e tipos), contagem de slots e uma tabela plana de símbolos.
-  Erros não abortam a análise: são acumulados e o tipo `unknown` interrompe
-  cascatas de diagnóstico. Structs entram em duas passadas (nomes, depois
-  campos), para permitir referência em qualquer ordem.
-- **Módulos**: `driver.compilePath` carrega o arquivo raiz e resolve cada
-  `import` com `std.fs.path.resolveAlloc` a partir do diretório do arquivo
-  importador; caminhos normalizados funcionam como chave de deduplicação. O
-  grafo é percorrido em pré-ordem (raiz primeiro) e achatado em um único
-  `ast.Program` — cada `ast.Function` carrega `file_id`, indexando
-  `Result.sources` para atribuir diagnósticos ao arquivo certo. Ciclos,
-  arquivos ausentes e nomes repetidos são diagnosticados antes do backend.
-- **Backends**: recebem `*ast.Program` + `*sema.Checked` e devolvem texto
-  alocado na arena. `codegen.Error` distingue AST inconsistente
-  (`MiscompiledAst`), subconjunto não suportado (`UnsupportedNode`) e tipo sem
-  representação (`UnsupportedType`).
+- **Tokens**: typed `Tag`, `text` as a slice into the input and `Span`
+  (start/end offsets, 1-based line and column). Whitespace and `// ...` never
+  reach the parser; unknown characters become `.invalid` and are diagnosed.
+- **AST**: independent of semantic decisions. Every node has a `span`;
+  semantics annotates resolution indices (`Expr.resolved`, `Stmt.decl_symbol`,
+  `Stmt.Assign.resolved`, `Expr.Call.callee_fn`) without changing the structure.
+- **Semantics**: produces `Checked` with function signatures, return types,
+  structs (fields and types), slot counts and a flat symbol table. Errors do not
+  abort the analysis: they are accumulated and the `unknown` type stops
+  diagnostic cascades. Structs are handled in two passes (names, then fields) so
+  they can be referenced in any order.
+- **Modules**: `driver.compilePath` loads the root file and resolves each
+  `import` with `std.fs.path.resolveAlloc` starting from the importing file's
+  directory; normalized paths act as the deduplication key. The graph is walked
+  in pre-order (root first) and flattened into a single `ast.Program` — every
+  `ast.Function` carries a `file_id` indexing `Result.sources`, so diagnostics
+  point at the right file. Cycles, missing files and repeated names are
+  diagnosed before the backend.
+- **Backends**: receive `*ast.Program` + `*sema.Checked` and return
+  arena-allocated text. `codegen.Error` distinguishes an inconsistent AST
+  (`MiscompiledAst`), an unsupported subset (`UnsupportedNode`) and a type with
+  no representation (`UnsupportedType`).
 
-## Componentes
+## Components
 
 ### Lexer — `src/lexer/lexer.zig`
 
-Palavras-chave, identificadores, inteiros decimais, operadores de um e dois
-caracteres e pontuação. Mantém slices da entrada; nenhuma alocação por token.
+Keywords, identifiers, decimal integers, one- and two-character operators and
+punctuation. Keeps slices into the input; no allocation per token.
 
 ### Parser — `src/parser/parser.zig`
 
-Constrói o programa completo com precedência e associatividade documentadas em
-`docs/syntax.ebnf`. Erros sintáticos registram diagnóstico com span e retornam
+Builds the whole program with the precedence and associativity documented in
+`docs/syntax.ebnf`. Syntax errors record a diagnostic with a span and return
 `error.ParseError`.
 
-### Loader de módulos — `src/driver.zig`
+### Module loader — `src/driver.zig`
 
-`compilePath` mantém a pilha de DFS (detecção de ciclos), o conjunto de
-caminhos já carregados e a lista de módulos na ordem de carregamento. Cada
-módulo é lexado e parseado com o `current_file` correto nos diagnósticos; se
-algum arquivo falhar, a compilação para com os diagnósticos já atribuídos. Não
-há estado global: toda a memória vem da arena do `Result`.
+`compilePath` keeps the DFS stack (cycle detection), the set of already loaded
+paths and the module list in load order. Each module is lexed and parsed with
+the right `current_file` in diagnostics; if any file fails, the compilation
+stops with the diagnostics already assigned. There is no global state: all
+memory comes from the `Result` arena.
 
 ### Structs (layout) — `src/sema/sema.zig` + backends
 
-Um valor de struct é **nominal** (`Symbol.struct_id` → `Checked.structs`) e pode
-atravessar chamadas **por valor** (Ciclo 9): um campo escalar = uma palavra de
-registrador, na ordem de declaração.
+A struct value is **nominal** (`Symbol.struct_id` → `Checked.structs`) and can
+cross calls **by value** (Cycle 9): one scalar field = one register word, in
+declaration order.
 
-- `Symbol.typ == .aggregate` reserva `1 + n` slots: o primeiro é a base
-  (reservado) e cada campo usa `slot + 1 + índice`, na ordem da declaração.
-- x86-64: cada slot tem 8 bytes; leitura/escrita de campo é `movl` no offset do
-  slot, e a cópia de struct percorre os campos. Parâmetros chegam em um
-  registrador por campo (`%rdi`, `%rsi`, …), chamadas empilham uma palavra por
-  campo e desempilham na ordem inversa, e o **retorno** usa `%eax`, `%edx`,
-  `%ecx`, `%r8d`, `%r9d`, `%r10d` (limite de 6 campos). Campos de literal são
-  avaliados na pilha antes de irem para os registradores de retorno, para que
-  um campo não clobbere o resultado do outro.
-- LLVM IR: substituição escalar para armazenamento (um `alloca` por campo) e
-  parâmetros **achatados** em argumentos escalares (`define i32 @f(i32 %arg0,
-  i32 %arg1)` para `fn f(p: P)`); só o retorno é agregado (`{ i32, i1, … }`
-  montado com `insertvalue` e lido com `extractvalue`). Nenhum
-  `getelementptr` é necessário.
-- `sema.registerWordsOf` é a fonte única do limite de **6 registradores**:
-  conta 1 por campo de struct, 2 por `str` e 1 por escalar; vale para
-  declaração, chamada e retorno de struct.
-- Literais exigem todos os campos exatamente uma vez, o que garante struct
-  sempre inicializado (sem estado parcialmente construído).
+- `Symbol.typ == .aggregate` reserves `1 + n` slots: the first is the base
+  (reserved) and each field uses `slot + 1 + index`, in declaration order.
+- x86-64: every slot has 8 bytes; field read/write is `movl` at the slot offset,
+  and struct copy walks the fields. Parameters arrive in one register per field
+  (`%rdi`, `%rsi`, …), calls push one word per field and pop in reverse order,
+  and the **return** uses `%eax`, `%edx`, `%ecx`, `%r8d`, `%r9d`, `%r10d`
+  (limit of 6 fields). Literal fields are evaluated on the stack before moving
+  to the return registers, so one field cannot clobber another's result.
+- LLVM IR: scalar replacement for storage (one `alloca` per field) and
+  parameters **flattened** into scalar arguments (`define i32 @f(i32 %arg0,
+  i32 %arg1)` for `fn f(p: P)`); only the return is an aggregate (`{ i32, i1, … }`
+  built with `insertvalue` and read with `extractvalue`). No `getelementptr` is
+  needed.
+- `sema.registerWordsOf` is the single source for the **6-register** limit: it
+  counts 1 per struct field, 2 per `str` and 1 per scalar; it applies to
+  declaration, call and struct return.
+- Literals require every field exactly once, which guarantees structs are
+  always initialized (no partially built state).
 
-### Strings e saída de texto (`str`) — `print` + backends
+### Strings and text output (`str`) — `print` + backends
 
-`str` é uma **fatia estática**: ponteiro para bytes constantes + tamanho. Não é
-escalar; existe para dar ao programa uma saída observável (texto) e preparar
-`kyn:core` para E/S real.
+`str` is a **static slice**: pointer to constant bytes + length. It is not a
+scalar; it exists to give programs observable output (text) and to prepare
+`kyn:core` for real I/O.
 
-- `Symbol.typ == .str` reserva dois slots consecutivos: `slot` guarda o
-  ponteiro e `slot + 1` o tamanho (mesma convenção nos dois backends).
-- **`str` por valor em chamadas** (Ciclo 8): parâmetros, argumentos e retornos
-  levam dois registradores, sempre o ponteiro antes do tamanho. No x86-64 os pares
-  são `(%rdi,%rsi)`, `(%rdx,%rcx)` e `(%r8,%r9)`; o retorno vem em `%rax`
-  (ponteiro) e `%rdx` (tamanho). No IR os parâmetros viram `ptr %argN` +
-  `i64 %argN+1` e o retorno é o agregado `{ ptr, i64 }` montado com
-  `insertvalue` e lido com `extractvalue`. O limite de seis registradores é
-  contado em **palavras de registrador** (`Type.registerWords()`): cada `str`
-  ocupa dois, o que permite no máximo três `str` por assinatura.
-- Literais de string são deduplicados por conteúdo (`codegen.StrPool`): cada
-  texto distinto vira um único rótulo, com o número de referências livre.
-- x86-64: bytes em `.section .rodata` como lista de `.byte` (sem escapes);
-  `print` faz `write(1, ptr, len)` por syscall e uma segunda chamada para a
-  quebra de linha (`.Lnl`). Não há dependência de libc.
-- LLVM IR: cada texto vira `@.strN = private unnamed_addr constant [N x i8]`,
-  `print` vira `call i64 @write(i32 1, ptr @.strN, i64 N)` com
-  `declare i64 @write(i32, ptr, i64)`; o verificador do LLVM no CI aceita o IR.
-- `print` e `print_i32` são embutidas (`ast.Expr.Call.builtin`), com a mesma
-  regra: exatamente um argumento (`str`/`i32`), resultado `void` e quebra de
-  linha ao final. Os nomes são reservados para funções declaradas na fonte, e
-  um `let`/`var` com o resultado delas é diagnosticado (`void` não é
-  armazenável).
-- `print_i32` formata em decimal: no backend nativo a rotina `kyn_print_i32`
-  (emitida uma única vez, em `.text`) divide por 10 com `divl` **unsigned** —
-  depois de `negl`, INT_MIN vira `0x80000000` e o texto sai `-2147483648`;
-  no IR, `@kyn_print_i32` faz o mesmo com `urem`/`udiv`, `select` para o módulo
-  e um buffer `[12 x i8]` escrito de trás para frente. Nenhum dos dois usa
-  `itoa`/libc no backend nativo nem estado global.
-- Restrições desta etapa, todas diagnosticadas: campo de struct de tipo `str`,
-  `str` em aritmética/condição/`==`/`!=` (comparar exigiria comparar bytes),
-  `main` com retorno `str`, expressão `str` como statement e assinatura acima
-  de seis registradores (`'str' ocupa dois`).
+- `Symbol.typ == .str` reserves two consecutive slots: `slot` holds the pointer
+  and `slot + 1` the length (the same convention in both backends).
+- **`str` by value in calls** (Cycle 8): parameters, arguments and returns carry
+  two registers, always pointer before length. On x86-64 the pairs are
+  `(%rdi,%rsi)`, `(%rdx,%rcx)` and `(%r8,%r9)`; the return comes in `%rax`
+  (pointer) and `%rdx` (length). In the IR the parameters become `ptr %argN` +
+  `i64 %argN+1` and the return is the `{ ptr, i64 }` aggregate built with
+  `insertvalue` and read with `extractvalue`. The six-register limit is counted
+  in **register words** (`Type.registerWords()`): each `str` takes two, allowing
+  at most three `str` per signature.
+- String literals are deduplicated by content (`codegen.StrPool`): each distinct
+  text becomes a single label, with any number of references.
+- x86-64: bytes in `.section .rodata` as a `.byte` list (no escapes); `print`
+  does `write(1, ptr, len)` through a syscall plus a second call for the line
+  break (`.Lnl`). No libc dependency.
+- LLVM IR: each text becomes `@.strN = private unnamed_addr constant [N x i8]`,
+  `print` becomes `call i64 @write(i32 1, ptr @.strN, i64 N)` with
+  `declare i64 @write(i32, ptr, i64)`; the LLVM verifier in CI accepts the IR.
+- `print` and `print_i32` are builtins (`ast.Expr.Call.builtin`) with the same
+  rule: exactly one argument (`str`/`i32`), `void` result and a line break at
+  the end. The names are reserved for functions declared in the source, and a
+  `let`/`var` with their result is diagnosed (`void` is not storable).
+- `print_i32` formats in decimal: in the native backend the `kyn_print_i32`
+  routine (emitted once, in `.text`) divides by 10 with **unsigned** `divl` —
+  after `negl`, INT_MIN becomes `0x80000000` and the text comes out
+  `-2147483648`; in the IR, `@kyn_print_i32` does the same with `urem`/`udiv`,
+  a `select` for the modulo and a `[12 x i8]` buffer written back to front.
+  Neither uses `itoa`/libc in the native backend, nor global state.
+- Restrictions at this stage, all diagnosed: struct field of type `str`, `str`
+  in arithmetic/condition/`==`/`!=` (comparing would require comparing bytes),
+  `main` returning `str`, `str` expression as a statement and signatures above
+  six registers (`'str' takes two`).
 
-### Semântica — `src/sema/sema.zig`
+### Semantics — `src/sema/sema.zig`
 
-- dois passos: assinaturas primeiro (permite recursão e chamadas antes da
-  declaração), depois corpos;
-- escopos aninhados com shadowing permitido e duplicidade diagnosticada no
-  mesmo escopo;
-- tipos `i32`, `bool`, `str`, `void` e structs nominais; operadores
-  verificados por categoria;
-- atribuição exige `var`;
-- verificação estrutural de retorno (`alwaysReturns`) para funções não-void;
-- validação de `fn main()` (sem parâmetros, retorno `i32` ou `void`);
-- limite de 6 parâmetros/argumentos do backend nativo é diagnosticado.
+- two passes: signatures first (allows recursion and calls before the
+  declaration), then bodies;
+- nested scopes with shadowing allowed and duplicates diagnosed in the same
+  scope;
+- types `i32`, `bool`, `str`, `void` and nominal structs; operators checked by
+  category;
+- assignment requires `var`;
+- structural return check (`alwaysReturns`) for non-void functions;
+- `fn main()` validation (no parameters, `i32` or `void` return);
+- the native backend's 6-parameter/argument limit is diagnosed.
 
 ### Backends — `src/codegen/`
 
-- `llvm.zig`: IR textual com SSA simples, blocos básicos, `phi` para `&&`/`||`,
-  `alloca` para variáveis. Sem ferramenta LLVM no ambiente local, a validação é
-  estrutural (todo bloco termina com `ret`/`br`/`unreachable`) e o CI roda
-  `llvm-as` sobre todas as fixtures (`tools/validate-ir.sh`).
-- `x86_64.zig`: assembly System V sem libc. `_start` chama `kyn_main` e encerra
-  via syscall `exit`. Variáveis em slots de 8 bytes no frame, expressões em
-  `%eax` com pilha de temporários, chamadas com argumentos em
-  `%edi/%esi/%edx/%ecx/%r8d/%r9d`. É o caminho validado por execução.
+- `llvm.zig`: textual IR with simple SSA, basic blocks, `phi` for `&&`/`||`,
+  `alloca` for variables. Without an LLVM tool in the local environment
+  validation is structural (every block ends with `ret`/`br`/`unreachable`) and
+  CI runs `llvm-as` over every fixture (`tools/validate-ir.sh`).
+- `x86_64.zig`: System V assembly without libc. `_start` calls `kyn_main` and
+  exits through the `exit` syscall. Variables in 8-byte frame slots, expressions
+  in `%eax` with a temporary stack, calls with arguments in
+  `%edi/%esi/%edx/%ecx/%r8d/%r9d`. This is the path validated by execution.
 
-### Biblioteca padrão — `std/`
+### Standard library — `std/`
 
-`kyn:core` (independente de SO) e `kyn:std` (dependente de SO) permanecem
-experimentais. Compilam e têm testes, mas não fazem E/S real na maior parte das
-APIs.
+`kyn:core` (OS-independent) and `kyn:std` (OS-dependent) remain experimental.
+They compile and have tests, but most APIs do no real I/O.
 
-## Diretrizes de engenharia
+## Engineering guidelines
 
-- Manter slices e referências à entrada quando a vida útil permitir.
-- Tornar explícita a origem e a duração dos allocators (arena por compilação).
-- Separar interfaces independentes de plataforma das específicas de SO.
-- Manter fixtures da linguagem separadas dos testes unitários do bootstrap.
-- Não prometer determinismo, segurança de memória ou compatibilidade ABI sem
-  testes e contratos verificáveis.
+- Keep slices and references into the input whenever the lifetime allows it.
+- Make the origin and duration of allocators explicit (one arena per
+  compilation).
+- Separate platform-independent interfaces from OS-specific ones.
+- Keep language fixtures separate from the bootstrap unit tests.
+- Do not promise determinism, memory safety or ABI compatibility without
+  verifiable tests and contracts.
 
-## Próximas decisões arquiteturais
+## Next architectural decisions
 
-1. Escolher o backend oficial de longo prazo (LLVM IR validado por ferramenta
-   ou backend nativo próprio) e definir critérios de aceitação para ele.
-2. Ampliar o contrato de módulos (visibilidade, imports qualificados, pacotes);
-   hoje a resolução é por caminho relativo e os símbolos são achatados.
-3. Definir a convenção de struct por valor para **agregados maiores** que a
-   tabela de registradores (hoje limitado a 6 campos) — passagem por pilha ou
-   `sret` — antes de `impl`/métodos com `self` grande.
-4. Adicionar à AST os nós hoje ausentes (`enum`, `impl`, `unsafe`, atributos) e
-   conectar `src/sema/unsafe.zig`.
-5. Definir o modelo de memória executável (ownership, lifetimes, slices) antes
-   de expandir a std.
-6. Definir a comparação de `str` por conteúdo e a concatenação/formatação
-   (hoje diagnosticadas); a passagem de `str` por valor em parâmetros e retornos
-   foi decidida no Ciclo 8 (par ponteiro+tamanho, ver acima).
+1. Choose the long-term official backend (LLVM IR validated by a tool or an
+   own native backend) and define acceptance criteria for it.
+2. Widen the module contract (visibility, qualified imports, packages); today
+   resolution is by relative path and symbols are flattened.
+3. Define the struct-by-value convention for **aggregates larger** than the
+   register table (today limited to 6 fields) — stack passing or `sret` — before
+   `impl`/methods with a large `self`.
+4. Add the still-missing AST nodes (`enum`, `impl`, `unsafe`, attributes) and
+   wire `src/sema/unsafe.zig`.
+5. Define the executable memory model (ownership, lifetimes, slices) before
+   expanding the std.
+6. Define `str` comparison by content and concatenation/formatting (today
+   diagnosed); `str` by value in parameters and returns was decided in Cycle 8
+   (pointer+length pair, see above).

@@ -1,4 +1,0 @@
-// Erro esperado: 'main' só pode retornar 'i32' ou 'void'.
-fn main() -> str {
-    return "kyn";
-}

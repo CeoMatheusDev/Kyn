@@ -1,0 +1,15 @@
+// Expected error: a struct takes one register per field; 4 fields + 3 integers exceed 6.
+struct Four {
+    a: i32,
+    b: i32,
+    c: i32,
+    d: i32,
+}
+
+fn does_not_fit(p: Four, x: i32, y: i32, z: i32) -> i32 {
+    return x + y + z;
+}
+
+fn main() -> i32 {
+    return 0;
+}

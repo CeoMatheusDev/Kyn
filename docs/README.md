@@ -1,26 +1,26 @@
-# Documentação do Kyn
+# Kyn documentation
 
-Esta pasta concentra a documentação técnica do projeto. Os documentos distinguem explicitamente comportamento observado no código, propostas de linguagem e funcionalidades planejadas.
+This folder holds the project's technical documentation. The documents explicitly distinguish behavior observed in the code, language proposals and planned features.
 
-## Índice
+## Index
 
-| Documento | Conteúdo |
+| Document | Contents |
 | --- | --- |
-| [Arquitetura](architecture.md) | Componentes do compilador bootstrap e organização dos módulos |
-| [Estado de implementação](status.md) | O que está presente, parcial ou ausente |
-| [Desenvolvimento](development.md) | Requisitos, build, CLI, validação e fluxo de contribuição |
-| [Especificação](spec.md) | Princípios e decisões de linguagem ainda em evolução |
-| [Referência da linguagem](language_reference.md) | Exemplos de sintaxe `.kyn`, tipos, funções, memória, erros e módulos |
-| [Princípios de design](language_design.md) | Identidade, requisitos e diretrizes arquiteturais da linguagem |
-| [Gramática lexical](grammar.ebnf) | Tokens, palavras-chave e operadores implementados no lexer |
-| [Gramática sintática](syntax.ebnf) | Gramática exata do subconjunto aceito pelo parser atual |
-| [Modelo de memória](memory_model.md) | Diretrizes propostas para memória, ownership e FFI |
+| [Architecture](architecture.md) | Bootstrap compiler components and module organization |
+| [Implementation status](status.md) | What is present, partial or missing |
+| [Development](development.md) | Requirements, build, CLI, validation and contribution flow |
+| [Specification](spec.md) | Principles and language decisions still in evolution |
+| [Language reference](language_reference.md) | `.kyn` syntax examples, types, functions, memory, errors and modules |
+| [Design principles](language_design.md) | Identity, requirements and architectural guidelines of the language |
+| [Lexical grammar](grammar.ebnf) | Tokens, keywords and operators implemented in the lexer |
+| [Syntactic grammar](syntax.ebnf) | Exact grammar of the subset accepted by the current parser |
+| [Memory model](memory_model.md) | Proposed guidelines for memory, ownership and FFI |
 
-## Convenções
+## Conventions
 
-- **Implementado:** comportamento verificável na implementação atual.
-- **Parcial:** existe código inicial, mas o fluxo não está completo.
-- **Proposto:** decisão de projeto ainda não implementada ou validada.
-- **Planejado:** item de roadmap, sem garantia de entrega.
+- **Implemented:** behavior verifiable in the current implementation.
+- **Partial:** initial code exists, but the flow is not complete.
+- **Proposed:** design decision not yet implemented or validated.
+- **Planned:** roadmap item, with no delivery guarantee.
 
-A documentação deve acompanhar o código. Quando houver divergência, registre a divergência e atualize a documentação após confirmar o comportamento real.
+Documentation must follow the code. When they diverge, record the divergence and update the documentation after confirming the real behavior.

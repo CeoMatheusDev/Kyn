@@ -15,7 +15,7 @@ pub const Socket = struct {
     }
 };
 
-test "net: connect/send/close compilam e não abrem socket real" {
+test "net: connect/send/close compile and open no real socket" {
     const std = @import("std");
     var s = try Socket.connect("localhost", 80);
     try std.testing.expectEqual(@as(usize, 0), try s.send("ping"));

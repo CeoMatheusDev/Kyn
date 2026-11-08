@@ -1,0 +1,30 @@
+// `bool` and `i32` fields coexist in a struct by value (i1 in LLVM IR).
+// expect-stdout: 42
+// expect-stdout: -1
+// expect-exit: 42
+struct Result {
+    ok: bool,
+    code: i32,
+}
+
+fn evaluate(n: i32) -> Result {
+    if n > 0 {
+        return Result { ok: 1 < 2, code: 0 };
+    }
+    return Result { ok: 2 < 1, code: n };
+}
+
+fn code(r: Result) -> i32 {
+    if r.ok {
+        return r.code + 42;
+    }
+    return r.code;
+}
+
+fn main() -> i32 {
+    let a = evaluate(5);
+    print_i32(code(a));
+    let b = evaluate(0 - 1);
+    print_i32(code(b));
+    return 42;
+}

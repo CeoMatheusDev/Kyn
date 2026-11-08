@@ -1,4 +1,4 @@
-// String vazia: `print("")` escreve apenas a quebra de linha.
+// Empty string: `print("")` writes only the line break.
 // expect-exit: 0
 // expect-stdout:
 fn main() -> i32 {

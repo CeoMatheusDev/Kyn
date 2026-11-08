@@ -1,5 +1,5 @@
-// Erro esperado: arquivo importado não existe.
-import "nao_existe.kyn";
+// Expected error: the imported file does not exist.
+import "missing.kyn";
 
 fn main() -> i32 {
     return 0;

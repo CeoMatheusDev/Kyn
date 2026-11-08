@@ -1,4 +1,4 @@
-// std/core/ringbuffer.kyn — RingBuffer atômico lock-free (v2.0.0-beta.1)
+// std/core/ringbuffer.kyn — lock-free atomic RingBuffer (v2.0.0-beta.1)
 import "core";
 import "std/core/atomics.kyn";
 

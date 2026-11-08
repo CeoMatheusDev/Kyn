@@ -1,82 +1,82 @@
-# Desenvolvimento
+# Development
 
-## Requisitos
+## Requirements
 
-- **Zig 0.17.0** (declarado em `build.zig.zon`; o campo `minimum_zig_version` é
-  verificado pelo próprio Zig).
+- **Zig 0.17.0** (declared in `build.zig.zon`; the `minimum_zig_version` field is
+  checked by Zig itself).
 - Git.
-- Para a suíte de ponta a ponta nativa: `bash`, GNU `as` e GNU `ld` em Linux
-  x86-64. Sem essas ferramentas, `tools/e2e.sh` informa e é ignorado; os testes
-  unitários continuam sendo a validação base.
+- For the native end-to-end suite: `bash`, GNU `as` and GNU `ld` on Linux
+  x86-64. Without those tools `tools/e2e.sh` reports it and is skipped; the unit
+  tests remain the base validation.
 
-Confirme a versão instalada:
+Confirm the installed version:
 
 ```sh
-zig version   # esperado: 0.17.0
+zig version   # expected: 0.17.0
 ```
 
-Quando não houver Zig instalado no sistema, uma alternativa é o pacote PyPI
-`ziglang`, que distribui binários oficiais (a versão `0.17.0.post0` corresponde
-ao mesmo compilador 0.17.0):
+When Zig is not installed on the system, one alternative is the PyPI package
+`ziglang`, which distributes official binaries (version `0.17.0.post0`
+corresponds to the same 0.17.0 compiler):
 
 ```sh
 python3 -m pip download ziglang==0.17.0.post0 --no-deps -d /tmp/zig
-python3 -m zipfile -e /tmp/zig/*.whl /caminho/instalacao
-/caminho/instalacao/ziglang/zig version
+python3 -m zipfile -e /tmp/zig/*.whl /install/path
+/install/path/ziglang/zig version
 ```
 
-## Clonar e compilar
+## Clone and build
 
 ```sh
 git clone https://github.com/CeoMatheusDev/Kyn.git
 cd Kyn
 
-zig build            # gera zig-out/bin/kync
+zig build            # produces zig-out/bin/kync
 zig build run -- --help
 ```
 
-## Comandos de build
+## Build commands
 
-| Comando | Efeito |
+| Command | Effect |
 | --- | --- |
-| `zig build` | Compila e instala `zig-out/bin/kync`. |
-| `zig build test` | Executa os testes unitários do compilador e da std experimental. |
-| `zig build e2e` | Compila fixtures, monta com `as`, liga com `ld` e confere códigos de saída e o texto impresso (`// expect-stdout:`). |
-| `zig build validate-ir` | Valida o LLVM IR com `llvm-as`/`clang`; sem LLVM, avisa e ignora. |
-| `zig build validate-ir-strict` | Igual ao anterior, mas falha se não houver LLVM (usado no CI). |
-| `zig build run -- <args>` | Executa o `kync` recém-compilado com os argumentos informados. |
+| `zig build` | Compiles and installs `zig-out/bin/kync`. |
+| `zig build test` | Runs the compiler unit tests and the experimental std tests. |
+| `zig build e2e` | Compiles fixtures, assembles with `as`, links with `ld` and checks exit codes and printed text (`// expect-stdout:`). |
+| `zig build validate-ir` | Validates the LLVM IR with `llvm-as`/`clang`; without LLVM it warns and skips. |
+| `zig build validate-ir-strict` | Same as above, but fails when LLVM is missing (used in CI). |
+| `zig build run -- <args>` | Runs the freshly built `kync` with the given arguments. |
 
-## CLI `kync`
+## The `kync` CLI
 
 ```text
-kync <comando> [opções] <arquivo.kyn>      # carrega o arquivo e seus imports
+kync <command> [options] <file.kyn>      # loads the file and its imports
 
-check <arquivo>   valida sintaxe e semântica, sem gerar código
-emit <arquivo>    emite o artefato do backend selecionado
+check <file>      validates syntax and semantics, no code generation
+emit <file>       emits the selected backend artifact
 
---llvm            LLVM IR textual (padrão)
---asm             assembly x86-64 (Linux, System V)
--o <arquivo>      grava a saída em arquivo (padrão: stdout)
---lib             não exige 'fn main' (unidade de biblioteca)
--h, --help        ajuda
--V, --version     versão e backends
+--llvm            textual LLVM IR (default)
+--asm             x86-64 assembly (Linux, System V)
+-o <file>         writes the output to a file (default: stdout)
+--lib             does not require 'fn main' (library unit)
+-h, --help        help
+-V, --version     version and backends
 ```
 
-Códigos de saída (contrato observado nos testes de fumaça manuais):
+Exit codes (contract observed in the manual smoke tests):
 
-| Código | Significado |
+| Code | Meaning |
 | --- | --- |
-| `0` | sucesso |
-| `1` | erro de sintaxe ou semântica (diagnósticos em stderr) |
-| `2` | uso inválido (comando/opção/argumento) |
-| `3` | falha de E/S (ler fonte ou gravar artefato) |
+| `0` | success |
+| `1` | syntax or semantic error (diagnostics on stderr) |
+| `2` | invalid usage (command/option/argument) |
+| `3` | I/O failure (reading the source or writing the artifact) |
 
-Importações: `import "caminho.kyn";` aparece antes das funções e o caminho é
-resolvido em relação ao diretório do arquivo importador. Cada arquivo é lido uma
-única vez (importações em diamante são mescladas), ciclos e arquivos ausentes
-viram diagnóstico (código `1`) e os diagnósticos citam o arquivo de origem.
+Imports: `import "path.kyn";` appears before the functions and the path is
+resolved relative to the importing file's directory. Each file is read once
+(diamond imports are merged), cycles and missing files become diagnostics (code
+`1`) and diagnostics cite the source file.
 
-Exemplos:
+Examples:
 
 ```sh
 zig-out/bin/kync check tests/e2e/modules/import_nested/main.kyn
@@ -85,121 +85,118 @@ zig-out/bin/kync emit --llvm tests/e2e/positive/fib.kyn -o /tmp/fib.ll
 zig-out/bin/kync emit --asm  tests/e2e/positive/fib.kyn -o /tmp/fib.s
 as /tmp/fib.s -o /tmp/fib.o && ld /tmp/fib.o -o /tmp/fib && /tmp/fib; echo $?
 
-# saída de texto: `print` escreve a string e a quebra de linha
+# text output: `print` writes the string and the line break
 zig-out/bin/kync emit --asm tests/e2e/positive/print_basic.kyn -o /tmp/p.s
 as /tmp/p.s -o /tmp/p.o && ld /tmp/p.o -o /tmp/p && /tmp/p       # kyn / bootstrap
 
-# valores calculados: `print_i32` formata em decimal (com sinal)
-zig-out/bin/kync emit --asm tests/e2e/positive/print_int_extremos.kyn -o /tmp/n.s
+# computed values: `print_i32` formats in decimal (with sign)
+zig-out/bin/kync emit --asm tests/e2e/positive/print_int_extremes.kyn -o /tmp/n.s
 as /tmp/n.s -o /tmp/n.o && ld /tmp/n.o -o /tmp/n && /tmp/n       # 2147483647 / -2147483648 / 214748364
 ```
 
-## Validação
+## Validation
 
-O projeto só declara uma etapa concluída quando existe teste executável:
+The project only declares a step complete when there is an executable test:
 
-1. **Testes unitários** (`zig build test`): lexer, spans, diagnósticos, AST,
-   parser, semântica, backends e driver, além dos testes da std experimental.
-2. **Ponta a ponta** (`zig build e2e`): cada fixture positiva vira binário
-   nativo; o código de saída é comparado com `// expect-exit: N` e o stdout com
-   as linhas `// expect-stdout: ...` (na ordem, uma diretiva por linha — é assim
-   que as fixtures de `str`/`print`/`print_i32` são validadas). O mesmo vale
-   para programas
-   multi-arquivo em `tests/e2e/modules/<caso>/main.kyn`; as
-   fixtures de `tests/integration/case_N.kyn` devem terminar com código `N`;
-   cada fixture negativa deve falhar com código `1` e mensagem `erro:`; em
-   `tests/e2e/modules_negative/<caso>/` o arquivo opcional `expect-error.txt`
-   exige um trecho específico na mensagem (ciclo, arquivo ausente, símbolo
-   duplicado).
+1. **Unit tests** (`zig build test`): lexer, spans, diagnostics, AST, parser,
+   semantics, backends and driver, plus the experimental std tests.
+2. **End to end** (`zig build e2e`): every positive fixture becomes a native
+   binary; the exit code is compared with `// expect-exit: N` and stdout with the
+   `// expect-stdout: ...` lines (in order, one directive per line — that is how
+   the `str`/`print`/`print_i32` fixtures are validated). The same applies to
+   multi-file programs in `tests/e2e/modules/<case>/main.kyn`; the fixtures in
+   `tests/integration/case_N.kyn` must exit with code `N`; every negative
+   fixture must fail with code `1` and an `error:` message; in
+   `tests/e2e/modules_negative/<case>/` the optional `expect-error.txt` file
+   requires a specific excerpt in the message (cycle, missing file, duplicated
+   symbol).
+3. **LLVM IR** (`zig build validate-ir-strict`): runs `llvm-as` (or `clang`) over
+   the IR of every supported fixture, including the multi-file programs and the
+   `struct`/`print`/`print_i32`, `str` and struct-by-value fixtures (83
+   modules). LLVM is not installed in the default development environment, so
+   locally the `validate-ir` step only warns; CI installs LLVM and uses the
+   **strict** variant, which fails if the verifier is missing or rejects any
+   module.
 
-3. **LLVM IR** (`zig build validate-ir-strict`): roda `llvm-as` (ou `clang`)
-   sobre o IR de todas as fixtures suportadas, incluindo os programas
-   multi-arquivo e as fixtures de `struct`/`print`/`print_i32`, `str` e struct por valor (83 módulos).
-   Não há LLVM instalado no ambiente
-   de desenvolvimento padrão, então localmente o passo `validate-ir` apenas
-   avisa; o CI instala LLVM e usa a variante **estrita**, que falha se o
-   verificador estiver ausente ou rejeitar qualquer módulo.
+The LLVM backend unit tests only check structure (terminated blocks, types,
+instructions). Proof that the IR is accepted by an LLVM tool comes from CI, not
+from the local tests.
 
-Os testes unitários do backend LLVM verificam apenas estrutura (blocos
-terminados, tipos, instruções). A prova de que o IR é aceito por uma ferramenta
-LLVM vem do CI, não dos testes locais.
+## Continuous integration
 
-## Integração contínua
+`.github/workflows/ci.yml` runs on `push` (main and `arena/**`),
+`pull_request` and manually. On `ubuntu-24.04` the workflow:
 
-`.github/workflows/ci.yml` roda em `push` (main e `arena/**`), `pull_request` e
-manualmente. Em `ubuntu-24.04` o workflow:
-
-1. instala `python3-venv` e `llvm`;
-2. instala Zig 0.17.0 a partir do wheel oficial do PyPI (o mesmo caminho
-   descrito acima) e o expõe no `PATH`;
-3. executa `zig fmt --check build.zig src std`;
-4. executa `zig build test` (204 testes) e `zig build e2e` (102 casos);
-5. executa `zig build validate-ir-strict` (IR de 83 módulos aceito por
+1. installs `python3-venv` and `llvm`;
+2. installs Zig 0.17.0 from the official PyPI wheel (the same path described
+   above) and exposes it on `PATH`;
+3. runs `zig fmt --check build.zig src std`;
+4. runs `zig build test` (204 tests) and `zig build e2e` (102 cases);
+5. runs `zig build validate-ir-strict` (IR of 83 modules accepted by
    `llvm-as`).
 
-A ausência de LLVM no CI **falha** o build, por isso a validação do IR não pode
-ser ignorada silenciosamente.
+A missing LLVM in CI **fails** the build, so IR validation cannot be skipped
+silently.
 
-## Publicação (SemVer)
+## Release (SemVer)
 
-A versão vive só em `build.zig.zon` e é incrementada a cada ciclo integrado:
+The version lives only in `build.zig.zon` and is bumped on every integrated
+cycle:
 
-- `MAJOR` muda quando a especificação da linguagem ganha contrato estável
-  (1.0.0 é o marco de estabilização).
-- `MINOR` acompanha cada conjunto de recursos integrado (`0.3.7`, `0.4.0`, …).
-- pré-release `-alpha.N` cobre ciclos incrementais dentro do mesmo `MINOR`.
+- `MAJOR` changes when the language specification gains a stable contract
+  (1.0.0 is the stabilization milestone).
+- `MINOR` follows each integrated feature set (`0.3.7`, `0.4.0`, …).
+- the `-alpha.N` pre-release covers incremental cycles within the same `MINOR`.
 
-Um ciclo só recebe tag depois que o CI de `main` fica verde com
-`zig fmt --check`, `zig build test`, `zig build e2e` e
-`zig build validate-ir-strict`. As tags são anotadas
-(`git tag -a vX.Y.Z-alpha.N`) e acompanhadas de uma release no GitHub com
-destaques, evidências de validação e a lista do que **ainda não existe**.
-Primeira tag publicada: `v0.3.7-alpha.1` (commit `1c80a7b`).
+A cycle only gets a tag after the `main` CI is green with `zig fmt --check`,
+`zig build test`, `zig build e2e` and `zig build validate-ir-strict`. Tags are
+annotated (`git tag -a vX.Y.Z-alpha.N`) and accompanied by a GitHub release with
+highlights, validation evidence and the list of what **does not exist yet**.
+First published tag: `v0.3.7-alpha.1` (commit `1c80a7b`).
 
-## Estrutura
+## Structure
 
 ```text
-build.zig              # fonte única de build, testes e e2e
-build.zig.zon          # versão mínima do Zig, versão do projeto
+build.zig              # single source for build, tests and e2e
+build.zig.zon          # minimum Zig version, project version
 src/
-  root.zig             # API pública (módulo "kyn")
-  main.zig             # CLI kync
-  driver.zig           # pipeline lexer -> parser -> sema -> backend + loader de imports
-  span.zig             # offsets/linha/coluna
-  diagnostics.zig      # diagnósticos e renderização
-  lexer/lexer.zig      # tokens com spans
-  ast/ast.zig          # AST (structs, funções, statements, expressões)
-  parser/parser.zig    # parser completo do subconjunto
-  sema/sema.zig        # resolução de nomes, tipos, mutabilidade, slots
-  sema/unsafe.zig      # política de unsafe/repr(C) (ainda não conectada)
-  codegen/codegen.zig  # interface de backend
-  codegen/llvm.zig     # backend LLVM IR textual
-  codegen/x86_64.zig   # backend nativo x86-64 (montável/executável)
-  ffi/ffi.zig          # experimento de FFI C
-std/                   # biblioteca padrão experimental (kyn:core, kyn:std)
-tests/                 # fixtures .kyn (integração e e2e)
-tools/e2e.sh           # validação de ponta a ponta
+  root.zig             # public API ("kyn" module)
+  main.zig             # kync CLI
+  driver.zig           # lexer -> parser -> sema -> backend pipeline + import loader
+  span.zig             # offsets/line/column
+  diagnostics.zig      # diagnostics and rendering
+  lexer/lexer.zig      # tokens with spans
+  ast/ast.zig          # AST (structs, functions, statements, expressions)
+  parser/parser.zig    # complete parser for the subset
+  sema/sema.zig        # name resolution, types, mutability, slots
+  sema/unsafe.zig      # unsafe/repr(C) policy (not wired yet)
+  codegen/codegen.zig  # backend interface
+  codegen/llvm.zig     # textual LLVM IR backend
+  codegen/x86_64.zig   # native x86-64 backend (assemblable/executable)
+  ffi/ffi.zig          # C FFI experiment
+std/                   # experimental standard library (kyn:core, kyn:std)
+tests/                 # .kyn fixtures (integration and e2e)
+tools/e2e.sh           # end-to-end validation
 ```
 
-## Fluxo recomendado
+## Recommended flow
 
-1. Crie uma branch de trabalho.
-2. Faça uma alteração pequena e focada.
-3. Adicione ou atualize testes que cubram o comportamento.
-4. Execute `zig build test` e, se mexeu em backend/semântica,
-   `zig build e2e`.
-5. Atualize a documentação afetada (`docs/status.md`, `docs/syntax.ebnf`,
+1. Create a working branch.
+2. Make one small, focused change.
+3. Add or update tests covering the behavior.
+4. Run `zig build test` and, if you touched backend/semantics, `zig build e2e`.
+5. Update the affected documentation (`docs/status.md`, `docs/syntax.ebnf`,
    `CHANGELOG.md`, `DEVELOPMENT_STATE.md`).
-6. No pull request, informe o que foi executado e o que não foi validado.
+6. In the pull request, state what was executed and what was not validated.
 
-## Convenções de implementação
+## Implementation conventions
 
-- Prefira spans e slices da entrada a cópias de strings.
-- Documente quem possui cada alocação; a AST, a tabela de símbolos, os
-  diagnósticos e a saída do backend vivem na arena de uma compilação
-  (`driver.compile`), liberada por `Result.deinit`.
-- Separe erros de sintaxe, erros semânticos e falhas internas de backend
+- Prefer spans and slices into the input over string copies.
+- Document who owns each allocation; the AST, symbol table, diagnostics and
+  backend output live in one compilation's arena (`driver.compile`), released by
+  `Result.deinit`.
+- Separate syntax errors, semantic errors and internal backend failures
   (`codegen.Error`).
-- Não introduza APIs de biblioteca padrão sem contrato e teste.
-- Não marque recursos como concluídos apenas porque existe um arquivo com o
-  nome correspondente.
+- Do not introduce standard library APIs without contract and tests.
+- Do not mark a feature as done just because a file with the matching name
+  exists.

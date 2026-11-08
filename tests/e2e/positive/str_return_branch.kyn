@@ -1,0 +1,23 @@
+// Branches may return different 'str' and the loop repeats the call.
+// expect-stdout: short
+// expect-stdout: short
+// expect-stdout: short
+// expect-stdout: long
+// expect-exit: 0
+fn name(n: i32) -> str {
+    if n > 5 {
+        return "long";
+    }
+    return "short";
+}
+
+fn main() -> i32 {
+    var i: i32 = 1;
+    while i <= 3 {
+        print(name(i));
+        i = i + 1;
+    }
+    let g: str = name(9);
+    print(g);
+    return 0;
+}

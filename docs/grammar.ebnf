@@ -1,6 +1,6 @@
-(* Kyn — gramática lexical implementada.
-   Reflete src/lexer/lexer.zig: tokens, palavras-chave e operadores.
-   Espaços em branco e comentários de linha são descartados pelo lexer. *)
+(* Kyn — implemented lexical grammar.
+   Mirrors src/lexer/lexer.zig: tokens, keywords and operators.
+   Whitespace and line comments are discarded by the lexer. *)
 
 program    = { token } ;
 
@@ -12,12 +12,13 @@ token      = identifier
            | punctuation ;
 
 identifier = ( letter | "_" ), { letter | digit | "_" } ;
-integer    = digit, { digit } ;   (* valor convertido para i64 pelo parser *)
+integer    = digit, { digit } ;   (* value converted to i64 by the parser *)
 
-(* Literal de string: conteúdo entre aspas duplas, sem escapes e sem quebra de
-   linha. O token guarda o texto sem as aspas; um literal aberto vira
-   "string_unterminated" e o parser reporta erro com a posição. É usado como
-   caminho de `import` e como expressão do tipo `str` (argumento de `print`). *)
+(* String literal: content between double quotes, no escapes and no line
+   break. The token keeps the text without the quotes; an open literal becomes
+   "string_unterminated" and the parser reports an error with the position. It
+   is used as an `import` path and as an expression of type `str` (`print`
+   argument). *)
 string_literal = '"', { any_char - ( '"' | "\n" | "\r" ) }, '"' ;
 
 keyword    = "fn" | "let" | "var" | "return"
@@ -31,14 +32,14 @@ operator   = "->"
 
 punctuation = "(" | ")" | "{" | "}" | ":" | ";" | "," | "." ;
 
-whitespace = " " | "\t" | "\r" | "\n" ;          (* descartado *)
-comment    = "//", { any_char - "\n" } ;         (* descartado *)
+whitespace = " " | "\t" | "\r" | "\n" ;          (* discarded *)
+comment    = "//", { any_char - "\n" } ;         (* discarded *)
 
-(* Um caractere fora das regras acima produz o token "invalid", que o parser
-   converte em diagnóstico com a posição exata. '&' e '|' isolados são
-   inválidos: apenas '&&' e '||' existem. *)
+(* A character outside the rules above produces the "invalid" token, which the
+   parser turns into a diagnostic with the exact position. Isolated '&' and '|'
+   are invalid: only '&&' and '||' exist. *)
 
 letter     = "a"…"z" | "A"…"Z" ;
 digit      = "0"…"9" ;
 
-(* A entrada é tratada como bytes ASCII. Bytes não-ASCII são "invalid". *)
+(* The input is treated as ASCII bytes. Non-ASCII bytes are "invalid". *)

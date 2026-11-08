@@ -1,3 +1,0 @@
-fn triplo() -> i32 {
-    return 3;
-}

@@ -1,6 +1,6 @@
-//! CLI `kync` — compilador bootstrap do Kyn.
+//! The `kync` CLI — the Kyn bootstrap compiler.
 //!
-//! Comandos e códigos de saída são contrato observável; consulte também
+//! Commands and exit codes are an observable contract; see also
 //! `docs/development.md`.
 
 const std = @import("std");
@@ -10,32 +10,32 @@ const driver = kyn.driver;
 const codegen = kyn.codegen;
 
 const usage =
-    \\kync — compilador Kyn (bootstrap)
+    \\kync — Kyn compiler (bootstrap)
     \\
-    \\Uso:
-    \\  kync <comando> [opções] <arquivo.kyn>
+    \\Usage:
+    \\  kync <command> [options] <file.kyn>
     \\
-    \\Comandos:
-    \\  check <arquivo>   valida sintaxe e semântica, sem gerar código
-    \\  emit <arquivo>    emite o artefato do backend selecionado
-    \\  help              mostra esta ajuda
-    \\  version           mostra a versão e os backends disponíveis
+    \\Commands:
+    \\  check <file>      validate syntax and semantics without generating code
+    \\  emit <file>       emit the selected backend artifact
+    \\  help              show this help
+    \\  version           show the version and available backends
     \\
-    \\Opções de emit:
-    \\  --llvm            LLVM IR textual (padrão)
-    \\  --asm             assembly x86-64 (Linux, System V; montável com as/ld)
-    \\  -o <arquivo>      grava a saída no arquivo (padrão: stdout)
+    \\emit options:
+    \\  --llvm            textual LLVM IR (default)
+    \\  --asm             x86-64 assembly (Linux, System V; assemblable with as/ld)
+    \\  -o <file>         write the output to a file (default: stdout)
     \\
-    \\Opções gerais:
-    \\  --lib             não exige 'fn main' (compila unidade de biblioteca)
-    \\  -h, --help        mostra esta ajuda
-    \\  -V, --version     mostra a versão
+    \\general options:
+    \\  --lib             do not require 'fn main' (compile a library unit)
+    \\  -h, --help        show this help
+    \\  -V, --version     show the version
     \\
-    \\Códigos de saída:
-    \\  0  sucesso
-    \\  1  erros de compilação (sintaxe ou semântica)
-    \\  2  uso inválido
-    \\  3  falha de E/S (leitura da fonte ou escrita do artefato)
+    \\Exit codes:
+    \\  0  success
+    \\  1  compilation errors (syntax or semantics)
+    \\  2  invalid usage
+    \\  3  I/O failure (reading the source or writing the artifact)
     \\
 ;
 
@@ -105,7 +105,7 @@ pub fn main(init: std.process.Init) !void {
     } else if (std.mem.eql(u8, command, "emit")) {
         action = .emit;
     } else {
-        cli.printStderr("erro: comando desconhecido '{s}'\n\n", .{command});
+        cli.printStderr("error: unknown command '{s}'\n\n", .{command});
         cli.writeStderr(usage);
         std.process.exit(exit_usage);
     }
@@ -130,29 +130,29 @@ pub fn main(init: std.process.Init) !void {
         } else if (std.mem.eql(u8, arg, "-o")) {
             i += 1;
             if (i >= collected.len) {
-                cli.writeStderr("erro: '-o' exige um caminho de saída\n");
+                cli.writeStderr("error: '-o' requires an output path\n");
                 std.process.exit(exit_usage);
             }
             output_path = collected[i];
         } else if (std.mem.startsWith(u8, arg, "-")) {
-            cli.printStderr("erro: opção desconhecida '{s}'\n", .{arg});
+            cli.printStderr("error: unknown option '{s}'\n", .{arg});
             std.process.exit(exit_usage);
         } else if (source_path == null) {
             source_path = arg;
         } else {
-            cli.printStderr("erro: argumento inesperado '{s}'\n", .{arg});
+            cli.printStderr("error: unexpected argument '{s}'\n", .{arg});
             std.process.exit(exit_usage);
         }
     }
 
     const path = source_path orelse {
-        cli.writeStderr("erro: nenhum arquivo de entrada informado\n\n");
+        cli.writeStderr("error: no input file given\n\n");
         cli.writeStderr(usage);
         std.process.exit(exit_usage);
     };
 
     if (action == .check and output_path != null) {
-        cli.writeStderr("erro: '-o' só é válido com o comando 'emit'\n");
+        cli.writeStderr("error: '-o' is only valid with the 'emit' command\n");
         std.process.exit(exit_usage);
     }
 
@@ -162,11 +162,11 @@ pub fn main(init: std.process.Init) !void {
         .require_main = require_main,
     }) catch |err| switch (err) {
         error.OutOfMemory => {
-            cli.writeStderr("erro: memória insuficiente\n");
+            cli.writeStderr("error: out of memory\n");
             std.process.exit(exit_io);
         },
         else => {
-            cli.printStderr("erro: não foi possível ler '{s}': {s}\n", .{ path, @errorName(err) });
+            cli.printStderr("error: could not read '{s}': {s}\n", .{ path, @errorName(err) });
             std.process.exit(exit_io);
         },
     };
@@ -180,18 +180,18 @@ pub fn main(init: std.process.Init) !void {
     }
 
     if (action == .check) {
-        cli.printStderr("ok: '{s}' passou na verificação\n", .{path});
+        cli.printStderr("ok: '{s}' passed the check\n", .{path});
         std.process.exit(exit_success);
     }
 
     const output = result.output orelse {
-        cli.writeStderr("erro interno: backend não produziu saída\n");
+        cli.writeStderr("internal error: backend produced no output\n");
         std.process.exit(exit_io);
     };
 
     if (output_path) |dest| {
         std.Io.Dir.cwd().writeFile(init.io, .{ .sub_path = dest, .data = output }) catch |err| {
-            cli.printStderr("erro: não foi possível gravar '{s}': {s}\n", .{ dest, @errorName(err) });
+            cli.printStderr("error: could not write '{s}': {s}\n", .{ dest, @errorName(err) });
             std.process.exit(exit_io);
         };
     } else {
@@ -203,8 +203,8 @@ pub fn main(init: std.process.Init) !void {
     std.process.exit(exit_success);
 }
 
-/// Copia os argumentos para a arena do processo, já que o iterador pode
-/// reutilizar seu buffer interno entre chamadas.
+/// Copies the arguments into the process arena, since the iterator may
+/// reuse its internal buffer between calls.
 fn collectArgs(arena: std.mem.Allocator, args: std.process.Args) ![]const []const u8 {
     var it = try std.process.Args.Iterator.initAllocator(args, arena);
     defer it.deinit();
@@ -216,7 +216,7 @@ fn collectArgs(arena: std.mem.Allocator, args: std.process.Args) ![]const []cons
 
     var slice = try list.toOwnedSlice(arena);
     if (slice.len > 0) {
-        // argv[0] é o caminho do executável; a CLI trata apenas os seguintes.
+        // argv[0] is the executable path; the CLI only handles what follows.
         slice = slice[1..];
     }
     return slice;

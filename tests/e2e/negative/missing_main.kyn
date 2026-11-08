@@ -1,4 +1,4 @@
-// Erro esperado: programa sem 'fn main'.
+// Expected error: program without 'fn main'.
 fn helper() -> i32 {
     return 1;
 }

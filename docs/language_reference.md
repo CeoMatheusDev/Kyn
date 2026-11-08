@@ -1,18 +1,22 @@
-# Referência preliminar da linguagem Kyn
+# Preliminary Kyn language reference
 
-**Status:** proposta ilustrativa — não normativa.  
-**Extensão pretendida:** `.kyn`
+**Status:** illustrative proposal — not normative.  
+**Intended extension:** `.kyn`
 
-Este documento reúne exemplos e decisões preliminares para a experiência de programação em Kyn. A sintaxe abaixo ainda não é suportada integralmente pelo compilador atual. Alguns nomes de módulos, funções e tipos são ilustrativos e não representam APIs existentes na biblioteca padrão.
+This document gathers examples and preliminary decisions for the programming
+experience in Kyn. The syntax below is not fully supported by the current
+compiler yet. Some module, function and type names are illustrative and do not
+represent APIs that exist in the standard library.
 
-> **O que já compila:** consulte [status.md](status.md) para o subconjunto
-> implementado e [syntax.ebnf](syntax.ebnf) para a gramática exata aceita pelo
-> parser. Os exemplos deste documento são visão de design e não devem ser
-> usados como teste de compilabilidade.
+> **What already compiles:** see [status.md](status.md) for the implemented
+> subset and [syntax.ebnf](syntax.ebnf) for the exact grammar accepted by the
+> parser. The examples in this document are design vision and must not be used as
+> a compilability test.
 
-## 1. Arquivo e estrutura mínima
+## 1. File and minimal structure
 
-Um programa-fonte utiliza a extensão `.kyn`. A forma pretendida de um programa simples é:
+A source program uses the `.kyn` extension. The intended shape of a simple
+program is:
 
 ```kyn
 // main.kyn
@@ -25,12 +29,13 @@ fn main() -> i32 {
 }
 ```
 
-O ponto de entrada `main`, a assinatura aceita e a convenção de retorno ainda precisam ser especificados formalmente.
+The `main` entry point, the accepted signature and the return convention still
+have to be formally specified.
 
-## 2. Importações e módulos
+## 2. Imports and modules
 
-**Implementado hoje:** a importação é um caminho de arquivo relativo ao arquivo
-que a declara, colocada antes das funções:
+**Implemented today:** an import is a file path relative to the file that
+declares it, placed before the functions:
 
 ```kyn
 // main.kyn
@@ -38,30 +43,29 @@ import "util/format.kyn";
 import "lib/math.kyn";
 
 fn main() -> i32 {
-    return dobro(21);
+    return double(21);
 }
 ```
 
 ```kyn
 // lib/math.kyn
-fn dobro(x: i32) -> i32 {
+fn double(x: i32) -> i32 {
     return x * 2;
 }
 ```
 
-Regras observadas: o caminho é um literal de string entre aspas; cada arquivo é
-carregado uma única vez; ciclos, arquivos ausentes e funções declaradas em mais
-de um arquivo produzem diagnóstico com `arquivo:linha:coluna` do arquivo de
-origem. Os símbolos de todos os módulos são reunidos em um único escopo global
-(*flattening*), portanto nomes de função devem ser únicos no programa.
+Observed rules: the path is a string literal between quotes; each file is loaded
+once; cycles, missing files and functions declared in more than one file produce
+a diagnostic with the `file:line:column` of the source file. Symbols from every
+module are gathered into a single global scope (*flattening*), so function names
+must be unique in the program.
 
-**Visão de design (não implementada):** importações por pacote (`import
-std.io;`), visibilidade (`pub`), aliases, imports seletivos e
-empacotamento/manifesto de módulos.
+**Design vision (not implemented):** package imports (`import std.io;`),
+visibility (`pub`), aliases, selective imports and module packaging/manifest.
 
-## 3. Funções
+## 3. Functions
 
-Declarações usam `fn`, parâmetros tipados e `->` para o tipo de retorno:
+Declarations use `fn`, typed parameters and `->` for the return type:
 
 ```kyn
 fn add(left: i32, right: i32) -> i32 {
@@ -73,11 +77,12 @@ fn initialize() -> void {
 }
 ```
 
-A sintaxe de funções genéricas, parâmetros por valor ou referência, convenções de chamada e funções externas ainda precisa de definição normativa.
+The syntax of generic functions, by-value or by-reference parameters, calling
+conventions and external functions still needs a normative definition.
 
-## 4. Variáveis e mutabilidade
+## 4. Variables and mutability
 
-A convenção proposta diferencia bindings imutáveis e mutáveis:
+The proposed convention separates immutable and mutable bindings:
 
 ```kyn
 fn main() -> void {
@@ -89,137 +94,137 @@ fn main() -> void {
 }
 ```
 
-A inferência de tipos pode ser considerada futuramente, mas anotações explícitas devem permanecer disponíveis. Regras de shadowing e inicialização ainda precisam ser definidas.
+Type inference may be considered in the future, but explicit annotations must
+remain available. Shadowing and initialization rules still have to be defined.
 
-## 5. Tipos primitivos
+## 5. Primitive types
 
-Conjunto inicial sugerido:
+Suggested initial set:
 
-| Família | Tipos propostos |
+| Family | Proposed types |
 | --- | --- |
-| Inteiros com sinal | `i8`, `i16`, `i32`, `i64`, `i128` |
-| Inteiros sem sinal | `u8`, `u16`, `u32`, `u64`, `u128` |
-| Largura da arquitetura | `isize`, `usize` |
-| Ponto flutuante | `f32`, `f64` |
-| Booleano | `bool` |
-| Caractere | `char` |
-| Texto | `str` |
-| Sem valor de retorno | `void` |
+| Signed integers | `i8`, `i16`, `i32`, `i64`, `i128` |
+| Unsigned integers | `u8`, `u16`, `u32`, `u64`, `u128` |
+| Architecture width | `isize`, `usize` |
+| Floating point | `f32`, `f64` |
+| Boolean | `bool` |
+| Character | `char` |
+| Text | `str` |
+| No return value | `void` |
 
-**Implementado hoje:** `i32` (32 bits com sinal, overflow de literal
-diagnosticado), `bool` e `void`, além de `str` para literais estáticos.
+**Implemented today:** `i32` (32-bit signed, literal overflow diagnosed), `bool`
+and `void`, plus `str` for static literals.
 
-`str` é, nesta etapa, uma **fatia estática**: ponteiro para bytes constantes +
-tamanho, guardada em dois slots. Ele existe para dar saída de texto ao programa:
+At this stage `str` is a **static slice**: pointer to constant bytes + length,
+kept in two slots. It exists to give the program text output:
 
 ```kyn
 fn main() -> i32 {
-    print("kyn");          // escreve "kyn" e uma quebra de linha
+    print("kyn");          // writes "kyn" and a line break
     var s: str = "a";
     s = "b";
-    let t = s;             // cópia da fatia (ponteiro + tamanho)
-    print(t);              // escreve "b"
+    let t = s;             // copy of the slice (pointer + length)
+    print(t);              // writes "b"
     return 0;
 }
 ```
 
-`str` também **atravessa chamadas por valor**: cada parâmetro, argumento e
-retorno `str` leva dois registradores (ponteiro e tamanho), e o limite de seis
-registradores por chamada conta cada `str` como dois.
+`str` also **crosses calls by value**: every `str` parameter, argument and return
+carries two registers (pointer and length), and the six-register limit per call
+counts each `str` as two.
 
 ```kyn
-fn eco(s: str) -> str {
+fn echo(s: str) -> str {
     return s;
 }
 
-fn titulo() -> str {
+fn title() -> str {
     return "kyn";
 }
 
 fn main() -> i32 {
-    print(eco(titulo()));  // escreve "kyn"
+    print(echo(title()));  // writes "kyn"
     return 0;
 }
 ```
 
-`print` é uma função embutida (`print(expr)` exige exatamente um `str`, devolve
-`void`, escreve o texto e a quebra de linha); o nome é reservado para funções
-declaradas na fonte. `print_i32(expr)` segue a mesma regra com um argumento
-`i32` e escreve o número em decimal, inclusive `-2147483648`:
+`print` is a builtin function (`print(expr)` requires exactly one `str`, returns
+`void`, writes the text and the line break); the name is reserved for functions
+declared in the source. `print_i32(expr)` follows the same rule with an `i32`
+argument and writes the number in decimal, including `-2147483648`:
 
 ```kyn
 fn main() -> i32 {
     let a = 20;
     let b = 22;
-    print("soma");     // "soma"
+    print("sum");      // "sum"
     print_i32(a + b);  // "42"
     print_i32(0 - a);  // "-20"
     return 0;
 }
 ```
 
-Limites atuais, todos diagnosticados: campo de struct de tipo `str`, `str` em
-aritmética, condição ou `==`/`!=` (comparar exigiria comparar bytes),
-concatenação, formatação, `main` com retorno `str`, mais de seis registradores
-em parâmetros/argumentos (cada `str` conta dois) e expressão `str` sem uso
-(`print(...)` ou atribuição).
+Current limits, all diagnosed: struct field of type `str`, `str` in arithmetic,
+condition or `==`/`!=` (comparing would require comparing bytes), concatenation,
+formatting, `main` returning `str`, more than six registers in
+parameters/arguments (each `str` counts two) and an unused `str` expression
+(`print(...)` or assignment).
 
-Ainda não são contratos estáveis: tamanhos e alinhamento dos demais tipos,
-overflow em tempo de execução, conversões implícitas, representação de `char` e
-o modelo de lifetime de `str` (por enquanto só existem literais estáticos).
+Not stable contracts yet: sizes and alignments of the other types, run-time
+overflow, implicit conversions, `char` representation and the `str` lifetime
+model (for now only static literals exist).
 
-## 6. Estruturas e métodos
+## 6. Structures and methods
 
-**Implementado hoje:** `struct` com campos escalares, literais `Nome { campo:
-valor }` (todos os campos, exatamente uma vez), acesso `p.campo`, atribuição
-`p.campo = v` (somente em `var`) e cópia por valor entre variáveis:
+**Implemented today:** `struct` with scalar fields, literals `Name { field:
+value }` (every field exactly once), `p.field` access, `p.field = v` assignment
+(only on `var`) and copy by value between variables:
 
 ```kyn
-struct Ponto {
+struct Point {
     x: i32,
     y: i32,
 }
 
 fn main() -> i32 {
-    var p: Ponto = Ponto { x: 3, y: 4 };
+    var p: Point = Point { x: 3, y: 4 };
     p.x = p.x + p.y;
-    let q: Ponto = p;
+    let q: Point = p;
     return q.x;
 }
 ```
 
-Structs atravessam chamadas **por valor**, com um registrador por campo:
+Structs cross calls **by value**, with one register per field:
 
 ```kyn
-struct Ponto {
+struct Point {
     x: i32,
     y: i32,
 }
 
-fn origem() -> Ponto {
-    return Ponto { x: 3, y: 4 };
+fn origin() -> Point {
+    return Point { x: 3, y: 4 };
 }
 
-fn soma(p: Ponto) -> i32 {
+fn sum(p: Point) -> i32 {
     return p.x + p.y;
 }
 
 fn main() -> i32 {
-    let a = origem();  // retorno de struct
-    return soma(a);    // parâmetro por valor (7)
+    let a = origin();  // struct return
+    return sum(a);     // by-value parameter (7)
 }
 ```
 
-O limite de seis registradores vale para parâmetros/argumentos e para o retorno
-(portanto, no máximo seis campos), contando `str` como dois.
+The six-register limit applies to parameters/arguments and to the return (hence
+at most six fields), counting `str` as two.
 
-Limites atuais, todos diagnosticados: campo de tipo struct (struct aninhado);
-`struct` vazio; struct como condição, operando aritmético ou de comparação;
-literal de struct fora de
-inicialização/atribuição.
+Current limits, all diagnosed: field of struct type (nested struct); empty
+`struct`; struct as a condition, arithmetic operand or comparison; struct literal
+outside initialization/assignment.
 
-**Visão de design (não implementada):** o exemplo abaixo mostra agregados com
-tipos não escalares e métodos associados:
+**Design vision (not implemented):** the example below shows aggregates with
+non-scalar types and associated methods:
 
 ```kyn
 struct Vector3 {
@@ -247,11 +252,12 @@ impl Vector3 {
 }
 ```
 
-A sintaxe de inicialização, métodos associados, receiver, visibilidade e layout de estruturas ainda precisa ser formalizada.
+The initialization syntax, associated methods, receiver, visibility and struct
+layout still have to be formalized.
 
-## 7. Enumerações e resultados
+## 7. Enumerations and results
 
-`enum` pode representar alternativas discriminadas:
+`enum` can represent discriminated alternatives:
 
 ```kyn
 enum FileError {
@@ -261,25 +267,27 @@ enum FileError {
 }
 ```
 
-Uma família de tipos como `Result<T, E>` é proposta para erros explícitos:
+A type family such as `Result<T, E>` is proposed for explicit errors:
 
 ```kyn
 fn read_file(path: str) -> Result<[]u8, FileError> {
-    // Implementação ilustrativa.
+    // Illustrative implementation.
 }
 ```
 
-Os construtores de sucesso e erro, pattern matching, propagação de erro e representação ABI ainda não estão definidos.
+The success and error constructors, pattern matching, error propagation and ABI
+representation are not defined yet.
 
-## 8. Coleções, slices e ponteiros
+## 8. Collections, slices and pointers
 
-A notação `[]T` é usada nestes exemplos como uma proposta de slice:
+The `[]T` notation is used in these examples as a slice proposal:
 
 ```kyn
 let bytes: []u8;
 ```
 
-A forma `*T` é reservada como notação proposta para ponteiro cru. Referências são representadas por `&T` e referências mutáveis por `&mut T`:
+The `*T` form is reserved as the proposed notation for a raw pointer. References
+are represented by `&T` and mutable references by `&mut T`:
 
 ```kyn
 fn increment(value: &mut i32) -> void {
@@ -287,11 +295,14 @@ fn increment(value: &mut i32) -> void {
 }
 ```
 
-Essas notações não definem, por si só, validade, lifetime, aliasing, nullability ou segurança de dereferência. Esses contratos precisam ser especificados antes de serem considerados recursos implementados.
+Those notations do not by themselves define validity, lifetime, aliasing,
+nullability or dereference safety. Those contracts have to be specified before
+they can be considered implemented features.
 
-## 9. Alocação e ciclo de vida
+## 9. Allocation and lifetime
 
-O objetivo é que alocações dinâmicas sejam explícitas e que o programador possa selecionar a estratégia de alocação:
+The goal is for dynamic allocations to be explicit and for the programmer to be
+able to choose the allocation strategy:
 
 ```kyn
 fn main() -> i32 {
@@ -305,22 +316,24 @@ fn main() -> i32 {
 }
 ```
 
-`Allocator`, `heap_allocator`, `alloc` e `free` são nomes ilustrativos, não uma API padronizada disponível. O contrato final precisa definir falha de alocação, alinhamento, overflow, ownership, dupla liberação e duração do allocator.
+`Allocator`, `heap_allocator`, `alloc` and `free` are illustrative names, not a
+standardized available API. The final contract must define allocation failure,
+alignment, overflow, ownership, double free and allocator duration.
 
-Objetivos do modelo de memória:
+Memory model goals:
 
-- evitar garbage collector obrigatório;
-- tornar alocação e liberação observáveis;
-- permitir allocators customizados;
-- definir ownership e transferência de propriedade;
-- especificar empréstimos compartilhados e exclusivos;
-- documentar layout, alinhamento e interoperabilidade.
+- avoid a mandatory garbage collector;
+- make allocation and release observable;
+- allow custom allocators;
+- define ownership and ownership transfer;
+- specify shared and exclusive borrows;
+- document layout, alignment and interoperability.
 
-Consulte [memory_model.md](memory_model.md).
+See [memory_model.md](memory_model.md).
 
-## 10. Controle de fluxo
+## 10. Control flow
 
-Exemplo de condicionais:
+Conditional example:
 
 ```kyn
 fn calculate(value: i32) -> i32 {
@@ -334,7 +347,7 @@ fn calculate(value: i32) -> i32 {
 }
 ```
 
-Exemplo de repetição:
+Loop example:
 
 ```kyn
 fn count() -> void {
@@ -349,37 +362,44 @@ fn count() -> void {
 }
 ```
 
-As regras de escopo, expressões booleanas, break, continue, for e avaliação de curto-circuito precisam ser definidas.
+The rules for scoping, boolean expressions, break, continue, for and
+short-circuit evaluation still have to be defined.
 
-## 11. Segurança e operações unsafe
+## 11. Safety and unsafe operations
 
-A linguagem pretende oferecer operações de baixo nível sem misturá-las silenciosamente com operações seguras. Um formato possível para delimitar operações não verificáveis estaticamente é:
+The language intends to offer low-level operations without silently mixing them
+with safe operations. One possible format to delimit operations that cannot be
+statically verified is:
 
 ```kyn
 unsafe {
-    // Operações cujo contrato depende do programador.
+    // Operations whose contract depends on the programmer.
 }
 ```
 
-A sintaxe e a semântica desse bloco ainda são propostas. A especificação deverá listar quais operações exigem `unsafe`, quais invariantes devem ser mantidos e como a FFI participa desse modelo.
+The syntax and semantics of that block are still proposals. The specification
+must list which operations require `unsafe`, which invariants must hold and how
+FFI takes part in that model.
 
-## 12. Interoperabilidade com C
+## 12. Interoperability with C
 
-A interoperabilidade exige contratos explícitos para:
+Interoperability requires explicit contracts for:
 
-- convenção de chamada;
-- layout e alinhamento;
-- tipos compatíveis com C;
-- ownership de buffers e strings;
-- tratamento de erros entre fronteiras;
-- duração de callbacks e ponteiros;
-- símbolos exportados e importados.
+- calling convention;
+- layout and alignment;
+- C-compatible types;
+- ownership of buffers and strings;
+- error handling across boundaries;
+- lifetime of callbacks and pointers;
+- exported and imported symbols.
 
-Atributos como `#[repr(C)]` são apenas uma possibilidade de sintaxe em avaliação, não uma garantia disponível hoje.
+Attributes such as `#[repr(C)]` are only one possible syntax under evaluation,
+not a guarantee available today.
 
-## 13. Exemplo integrado
+## 13. Integrated example
 
-O exemplo reúne importação, estrutura, função, referência e fluxo de controle:
+The example combines imports, a structure, a function, a reference and control
+flow:
 
 ```kyn
 import std.io;
@@ -415,9 +435,10 @@ fn main() -> i32 {
 }
 ```
 
-Este exemplo é uma visão de design. Não deve ser usado como teste de compilabilidade do estado atual.
+This example is a design vision. It must not be used as a compilability test of
+the current state.
 
-## 14. Organização sugerida de um projeto
+## 14. Suggested project organization
 
 ```text
 project/
@@ -438,27 +459,29 @@ project/
 └── build/
 ```
 
-Essa árvore é uma convenção sugerida. O formato de manifesto `kyn.toml`, descoberta de módulos, diretórios de saída e organização de testes ainda não foram implementados como padrão.
+That tree is a suggested convention. The `kyn.toml` manifest format, module
+discovery, output directories and test organization have not been implemented as
+a standard yet.
 
-## 15. Decisões pendentes antes de congelar a sintaxe
+## 15. Pending decisions before freezing the syntax
 
-1. Gramática completa de declarações, tipos, expressões e padrões.
-2. Precedência e associatividade de operadores.
-3. Conversões numéricas e regras de overflow.
-4. Semântica de `str`, slices e arrays.
-5. Ownership, moves, borrowing e lifetimes.
-6. Ponteiros crus, nullability e contexto `unsafe`.
-7. Generics, traits/interfaces e monomorfização.
-8. Módulos, visibilidade e resolução de dependências.
-9. Layout, alinhamento, ABI e FFI.
-10. Semântica de erros e tipos algébricos.
-11. Modelo de concorrência e garantias contra data races.
-12. Convenção do ponto de entrada e modelo de runtime.
+1. Complete grammar of declarations, types, expressions and patterns.
+2. Operator precedence and associativity.
+3. Numeric conversions and overflow rules.
+4. Semantics of `str`, slices and arrays.
+5. Ownership, moves, borrowing and lifetimes.
+6. Raw pointers, nullability and the `unsafe` context.
+7. Generics, traits/interfaces and monomorphization.
+8. Modules, visibility and dependency resolution.
+9. Layout, alignment, ABI and FFI.
+10. Error semantics and algebraic types.
+11. Concurrency model and data-race guarantees.
+12. Entry point convention and runtime model.
 
-## Referências relacionadas
+## Related references
 
-- [Princípios de design](language_design.md)
-- [Especificação geral](spec.md)
-- [Modelo de memória](memory_model.md)
-- [Arquitetura do compilador](architecture.md)
-- [Estado de implementação](status.md)
+- [Design principles](language_design.md)
+- [Overall specification](spec.md)
+- [Memory model](memory_model.md)
+- [Compiler architecture](architecture.md)
+- [Implementation status](status.md)

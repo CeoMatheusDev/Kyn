@@ -1,17 +1,17 @@
 //! Parser do bootstrap em Zig.
 //!
 //! Contrato:
-//! - Consome tokens do lexer (sem whitespace/comentários) e constrói a AST
+//! - Consumes lexer tokens (no whitespace/comments) and builds the AST
 //!   completa do programa.
-//! - Falha no primeiro erro sintático: registra um diagnóstico com span e
-//!   retorna `error.ParseError`. Erros de alocação retornam o erro original.
-//! - Toda a AST é alocada na arena recebida em `init`.
+//! - Fails on the first syntax error: records a diagnostic with a span and
+//!   returns `error.ParseError`. Allocation errors return the original error.
+//! - The whole AST is allocated in the arena received by `init`.
 //!
 //! Subconjunto suportado (ver `docs/syntax.ebnf` e `docs/status.md`):
-//!   `fn`, `let`/`var` com inicializador obrigatório, atribuição, `return`,
-//!   `if`/`else`, `while`, blocos e expressões com precedência (`||`, `&&`,
-//!   `==`/`!=`, comparações, `+`/`-`, `*`/`/`/`%`, unários `-`/`!`), literais
-//!   inteiros e booleanos, variáveis e chamadas diretas de função.
+//!   `fn`, `let`/`var` with a mandatory initializer, assignment, `return`,
+//!   `if`/`else`, `while`, blocks and expressions with precedence (`||`, `&&`,
+//!   `==`/`!=`, comparisons, `+`/`-`, `*`/`/`/`%`, unary `-`/`!`), integer and
+//!   boolean literals, variables and direct function calls.
 
 const std = @import("std");
 const ast = @import("../ast/ast.zig");
@@ -26,9 +26,9 @@ pub const Parser = struct {
     tokens: []const lexer.Token,
     diags: *diagnostics.List,
     pos: usize = 0,
-    /// `Nome { ... }` só é literal de struct com esta flag ativa. Condições de
+    /// `Name { ... }` is only a struct literal with this flag on. `if`/`while`
     /// `if`/`while` a desativam, porque `if cond {` e `while cond {` usariam o
-    /// mesmo prefixo (identificador seguido de `{`).
+    /// same prefix (identifier followed by `{`).
     allow_struct_literal: bool = true,
 
     pub fn init(arena: std.mem.Allocator, tokens: []const lexer.Token, diags: *diagnostics.List) Parser {
@@ -83,7 +83,7 @@ pub const Parser = struct {
     fn expect(self: *Parser, tag: lexer.Tag, label: []const u8) Error!lexer.Token {
         const tok = self.current();
         if (tok.tag != tag) {
-            return self.fail(.syntax, tok.span, "esperado {s}, encontrado {s}", .{ label, tok.describe() });
+            return self.fail(.syntax, tok.span, "expected {s}, found {s}", .{ label, tok.describe() });
         }
         return self.take();
     }
@@ -91,7 +91,7 @@ pub const Parser = struct {
     fn expectIdentifier(self: *Parser, label: []const u8) Error!lexer.Token {
         const tok = self.current();
         if (tok.tag != .identifier) {
-            return self.fail(.syntax, tok.span, "esperado {s}, encontrado {s}", .{ label, tok.describe() });
+            return self.fail(.syntax, tok.span, "expected {s}, found {s}", .{ label, tok.describe() });
         }
         return self.take();
     }
@@ -112,7 +112,7 @@ pub const Parser = struct {
                         return self.fail(
                             .syntax,
                             tok.span,
-                            "'import' deve vir antes das declarações de 'struct' e 'fn'",
+                            "'import' must come before 'struct' and 'fn' declarations",
                             .{},
                         );
                     }
@@ -131,7 +131,7 @@ pub const Parser = struct {
                     return self.fail(
                         .syntax,
                         tok.span,
-                        "esperado 'import', declaração 'struct' ou 'fn' no nível superior, encontrado {s}",
+                        "expected 'import', 'struct' declaration or 'fn' at top level, found {s}",
                         .{tok.describe()},
                     );
                 },
@@ -149,11 +149,11 @@ pub const Parser = struct {
     }
 
     /// struct_decl = "struct", identifier, "{", { field, "," }, "}" ;
-    /// Campos exigem tipo explícito; a vírgula final é opcional.
+    /// Fields require an explicit type; the trailing comma is optional.
     fn parseStruct(self: *Parser) Error!*ast.StructDecl {
         const kw_tok = try self.expect(.kw_struct, "'struct'");
-        const name_tok = try self.expectIdentifier("nome do struct após 'struct'");
-        _ = try self.expect(.lbrace, "'{' para iniciar os campos do struct");
+        const name_tok = try self.expectIdentifier("struct name after 'struct'");
+        _ = try self.expect(.lbrace, "'{' to start the struct fields");
 
         var fields: std.ArrayList(ast.Field) = .empty;
         while (!self.at(.rbrace)) {
@@ -161,13 +161,13 @@ pub const Parser = struct {
                 return self.fail(
                     .syntax,
                     self.current().span,
-                    "struct '{s}' não fechado: falta '}}' antes do fim do arquivo",
+                    "struct '{s}' is not closed: missing '}}' before end of file",
                     .{name_tok.text},
                 );
             }
             const field_name = try self.expectIdentifier("nome do campo");
-            _ = try self.expect(.colon, "':' e o tipo do campo");
-            const type_name = try self.parseTypeName("tipo do campo");
+            _ = try self.expect(.colon, "':' and the field type");
+            const type_name = try self.parseTypeName("field type");
             try fields.append(self.arena, .{
                 .name = field_name.text,
                 .name_span = field_name.span,
@@ -183,12 +183,12 @@ pub const Parser = struct {
                 return self.fail(
                     .syntax,
                     tok.span,
-                    "esperado ',' entre campos do struct ou '}}' para fechar, encontrado {s}",
+                    "expected ',' between struct fields or '}}' to close, found {s}",
                     .{tok.describe()},
                 );
             }
         }
-        const close = try self.expect(.rbrace, "'}' para fechar o struct");
+        const close = try self.expect(.rbrace, "'}' to close the struct");
 
         const decl = try self.arena.create(ast.StructDecl);
         decl.* = .{
@@ -206,19 +206,19 @@ pub const Parser = struct {
 
         const path_tok = self.current();
         if (path_tok.tag == .string_unterminated) {
-            return self.fail(.syntax, path_tok.span, "literal de string não terminado no caminho de importação", .{});
+            return self.fail(.syntax, path_tok.span, "unterminated string literal in the import path", .{});
         }
         if (path_tok.tag != .string) {
             return self.fail(
                 .syntax,
                 path_tok.span,
-                "esperado caminho de importação entre aspas, encontrado {s}",
+                "expected a quoted import path, found {s}",
                 .{path_tok.describe()},
             );
         }
         self.advance();
 
-        const semi = try self.expect(.semicolon, "';' após o caminho de importação");
+        const semi = try self.expect(.semicolon, "';' after the import path");
 
         return .{
             .path = path_tok.text,
@@ -229,8 +229,8 @@ pub const Parser = struct {
 
     fn parseFunction(self: *Parser) Error!*ast.Function {
         const fn_tok = try self.expect(.kw_fn, "'fn'");
-        const name_tok = try self.expectIdentifier("nome de função após 'fn'");
-        _ = try self.expect(.lparen, "'(' após o nome da função");
+        const name_tok = try self.expectIdentifier("function name after 'fn'");
+        _ = try self.expect(.lparen, "'(' after the function name");
 
         var params: std.ArrayList(ast.Param) = .empty;
         if (!self.at(.rparen)) {
@@ -243,15 +243,15 @@ pub const Parser = struct {
                 break;
             }
         }
-        _ = try self.expect(.rparen, "')' para encerrar os parâmetros");
+        _ = try self.expect(.rparen, "')' to close the parameters");
 
         var return_type: ?ast.TypeName = null;
         if (self.at(.arrow)) {
             self.advance();
-            return_type = try self.parseTypeName("tipo de retorno após '->'");
+            return_type = try self.parseTypeName("return type after '->'");
         }
 
-        const block = try self.parseBlock("'{' para iniciar o corpo da função");
+        const block = try self.parseBlock("'{' to start the function body");
 
         const func = try self.arena.create(ast.Function);
         func.* = .{
@@ -266,9 +266,9 @@ pub const Parser = struct {
     }
 
     fn parseParam(self: *Parser) Error!ast.Param {
-        const name_tok = try self.expectIdentifier("nome do parâmetro");
-        _ = try self.expect(.colon, "':' e o tipo do parâmetro");
-        const type_name = try self.parseTypeName("tipo do parâmetro");
+        const name_tok = try self.expectIdentifier("parameter name");
+        _ = try self.expect(.colon, "':' and the parameter type");
+        const type_name = try self.parseTypeName("parameter type");
         return .{
             .name = name_tok.text,
             .type_name = type_name,
@@ -291,11 +291,11 @@ pub const Parser = struct {
         var stmts: std.ArrayList(*ast.Stmt) = .empty;
         while (!self.at(.rbrace)) {
             if (self.at(.eof)) {
-                return self.fail(.syntax, self.current().span, "bloco não fechado: falta o fechamento antes do fim do arquivo", .{});
+                return self.fail(.syntax, self.current().span, "block is not closed: missing closing brace before end of file", .{});
             }
             try stmts.append(self.arena, try self.parseStatement());
         }
-        const close = try self.expect(.rbrace, "'}' para fechar o bloco");
+        const close = try self.expect(.rbrace, "'}' to close the block");
         return .{
             .stmts = try stmts.toOwnedSlice(self.arena),
             .span = open.span.merge(close.span),
@@ -310,7 +310,7 @@ pub const Parser = struct {
             .kw_if => self.parseIf(),
             .kw_while => self.parseWhile(),
             .lbrace => blk: {
-                const block = try self.parseBlock("'{' para iniciar o bloco");
+                const block = try self.parseBlock("'{' to start the block");
                 const stmt = try ast.Stmt.create(self.arena, block.span, .{ .block = block.stmts });
                 break :blk stmt;
             },
@@ -326,12 +326,12 @@ pub const Parser = struct {
     fn parseVarDecl(self: *Parser) Error!*ast.Stmt {
         const kw_tok = self.take(); // let | var
         const mutable = kw_tok.tag == .kw_var;
-        const name_tok = try self.expectIdentifier("nome da variável");
+        const name_tok = try self.expectIdentifier("variable name");
 
         var type_name: ?ast.TypeName = null;
         if (self.at(.colon)) {
             self.advance();
-            type_name = try self.parseTypeName("tipo da variável");
+            type_name = try self.parseTypeName("variable type");
         }
 
         if (!self.at(.assign)) {
@@ -340,14 +340,14 @@ pub const Parser = struct {
             return self.fail(
                 .unsupported,
                 tok.span,
-                "'{s}' sem inicializador ainda não é suportado; informe um valor inicial",
+                "'{s}' without an initializer is not supported yet; provide an initial value",
                 .{what},
             );
         }
         self.advance(); // =
 
         const init_expr = try self.parseExpression();
-        const semi = try self.expect(.semicolon, "';' após a declaração");
+        const semi = try self.expect(.semicolon, "';' after the declaration");
 
         return ast.Stmt.create(self.arena, kw_tok.span.merge(semi.span), .{
             .let_decl = .{
@@ -361,10 +361,10 @@ pub const Parser = struct {
     }
 
     fn parseAssign(self: *Parser) Error!*ast.Stmt {
-        const name_tok = try self.expectIdentifier("nome da variável");
-        _ = try self.expect(.assign, "'=' na atribuição");
+        const name_tok = try self.expectIdentifier("variable name");
+        _ = try self.expect(.assign, "'=' in the assignment");
         const value = try self.parseExpression();
-        const semi = try self.expect(.semicolon, "';' após a atribuição");
+        const semi = try self.expect(.semicolon, "';' after the assignment");
         return ast.Stmt.create(self.arena, name_tok.span.merge(semi.span), .{
             .assign = .{
                 .name = name_tok.text,
@@ -380,14 +380,14 @@ pub const Parser = struct {
         if (!self.at(.semicolon)) {
             value = try self.parseExpression();
         }
-        const semi = try self.expect(.semicolon, "';' após 'return'");
+        const semi = try self.expect(.semicolon, "';' after 'return'");
         return ast.Stmt.create(self.arena, kw_tok.span.merge(semi.span), .{ .return_stmt = value });
     }
 
     fn parseIf(self: *Parser) Error!*ast.Stmt {
         const kw_tok = try self.expect(.kw_if, "'if'");
         const cond = try self.parseCondition();
-        const then_block = try self.parseBlock("'{' para iniciar o bloco do 'if'");
+        const then_block = try self.parseBlock("'{' to start the 'if' block");
 
         var else_body: ?ast.Stmt.ElseBranch = null;
         var end_span = then_block.span;
@@ -398,7 +398,7 @@ pub const Parser = struct {
                 else_body = .{ .if_stmt = nested };
                 end_span = nested.span;
             } else {
-                const else_block = try self.parseBlock("'{' para iniciar o bloco do 'else'");
+                const else_block = try self.parseBlock("'{' to start the 'else' block");
                 else_body = .{ .block = else_block.stmts };
                 end_span = else_block.span;
             }
@@ -416,7 +416,7 @@ pub const Parser = struct {
     fn parseWhile(self: *Parser) Error!*ast.Stmt {
         const kw_tok = try self.expect(.kw_while, "'while'");
         const cond = try self.parseCondition();
-        const block = try self.parseBlock("'{' para iniciar o bloco do 'while'");
+        const block = try self.parseBlock("'{' to start the 'while' block");
         return ast.Stmt.create(self.arena, kw_tok.span.merge(block.span), .{
             .while_stmt = .{ .cond = cond, .body = block.stmts },
         });
@@ -424,7 +424,7 @@ pub const Parser = struct {
 
     fn parseExprStatement(self: *Parser) Error!*ast.Stmt {
         const expr = try self.parseExpression();
-        const semi = try self.expect(.semicolon, "';' após a expressão");
+        const semi = try self.expect(.semicolon, "';' after the expression");
         return ast.Stmt.create(self.arena, expr.span.merge(semi.span), .{ .expr_stmt = expr });
     }
 
@@ -432,8 +432,8 @@ pub const Parser = struct {
         return self.parseBinary(1);
     }
 
-    /// Expressão de condição: sem `Nome { ... }` para não consumir o `{` do
-    /// bloco que segue.
+    /// Condition expression: no `Name { ... }` so it does not consume the `{` of
+    /// the following block.
     fn parseCondition(self: *Parser) Error!*ast.Expr {
         const saved = self.allow_struct_literal;
         self.allow_struct_literal = false;
@@ -523,7 +523,7 @@ pub const Parser = struct {
             .string_unterminated => return self.fail(
                 .syntax,
                 tok.span,
-                "literal de string não terminado",
+                "unterminated string literal",
                 .{},
             ),
             .kw_true, .kw_false => {
@@ -545,26 +545,26 @@ pub const Parser = struct {
             .lparen => {
                 self.advance();
                 const inner = try self.parseExpression();
-                _ = try self.expect(.rparen, "')' para fechar a expressão");
+                _ = try self.expect(.rparen, "')' to close the expression");
                 return inner;
             },
             .invalid => return self.fail(
                 .syntax,
                 tok.span,
-                "caractere inválido '{s}' na expressão",
+                "invalid character '{s}' in expression",
                 .{if (tok.text.len > 0) tok.text else "?"},
             ),
             else => return self.fail(
                 .syntax,
                 tok.span,
-                "esperado expressão, encontrado {s}",
+                "expected an expression, found {s}",
                 .{tok.describe()},
             ),
         }
     }
 
     fn parseCall(self: *Parser, callee: lexer.Token) Error!*ast.Expr {
-        _ = try self.expect(.lparen, "'(' na chamada de função");
+        _ = try self.expect(.lparen, "'(' in the function call");
         var args: std.ArrayList(*ast.Expr) = .empty;
         if (!self.at(.rparen)) {
             while (true) {
@@ -576,7 +576,7 @@ pub const Parser = struct {
                 break;
             }
         }
-        const close = try self.expect(.rparen, "')' para encerrar os argumentos");
+        const close = try self.expect(.rparen, "')' to close the arguments");
         return ast.Expr.create(self.arena, callee.span.merge(close.span), .{
             .call = .{
                 .callee = callee.text,
@@ -586,12 +586,12 @@ pub const Parser = struct {
         });
     }
 
-    /// Consome `.campo` encadeados sobre `base` e devolve o nó mais externo.
+    /// Consumes chained `.field` accesses over `base` and returns the outermost node.
     fn parseFieldChain(self: *Parser, base: *ast.Expr) Error!*ast.Expr {
         var expr = base;
         while (self.at(.dot)) {
             self.advance();
-            const field_tok = try self.expectIdentifier("nome do campo após '.'");
+            const field_tok = try self.expectIdentifier("field name after '.'");
             const node = try ast.Expr.create(self.arena, expr.span.merge(field_tok.span), .{
                 .field_access = .{
                     .base = expr,
@@ -604,16 +604,16 @@ pub const Parser = struct {
         return expr;
     }
 
-    /// `Nome { campo: valor, ... }` — a vírgula final é opcional.
+    /// `Name { field: value, ... }` — the trailing comma is optional.
     fn parseStructLiteral(self: *Parser, name_tok: lexer.Token) Error!*ast.Expr {
-        _ = try self.expect(.lbrace, "'{' para iniciar o literal de struct");
+        _ = try self.expect(.lbrace, "'{' to start the struct literal");
         var fields: std.ArrayList(ast.Expr.FieldInit) = .empty;
         while (!self.at(.rbrace)) {
             if (self.at(.eof)) {
                 return self.fail(
                     .syntax,
                     self.current().span,
-                    "literal de struct não fechado: falta '}}' antes do fim do arquivo",
+                    "struct literal is not closed: missing '}}' before end of file",
                     .{},
                 );
             }
@@ -634,12 +634,12 @@ pub const Parser = struct {
                 return self.fail(
                     .syntax,
                     tok.span,
-                    "esperado ',' entre campos do literal ou '}}' para fechar, encontrado {s}",
+                    "expected ',' between literal fields or '}}' to close, found {s}",
                     .{tok.describe()},
                 );
             }
         }
-        const close = try self.expect(.rbrace, "'}' para fechar o literal de struct");
+        const close = try self.expect(.rbrace, "'}' to close the struct literal");
         return ast.Expr.create(self.arena, name_tok.span.merge(close.span), .{
             .struct_literal = .{
                 .type_name = .{ .name = name_tok.text, .span = name_tok.span },
@@ -648,26 +648,26 @@ pub const Parser = struct {
         });
     }
 
-    /// `base.campo = valor;` ou expressão iniciada por acesso a campo.
+    /// `base.field = value;` or an expression starting with a field access.
     fn parseFieldAssignOrExpr(self: *Parser) Error!*ast.Stmt {
-        const name_tok = try self.expectIdentifier("nome da variável");
+        const name_tok = try self.expectIdentifier("variable name");
         const base = try ast.Expr.create(self.arena, name_tok.span, .{ .identifier = name_tok.text });
         const target = try self.parseFieldChain(base);
 
         if (!self.at(.assign)) {
-            const semi = try self.expect(.semicolon, "';' após a expressão");
+            const semi = try self.expect(.semicolon, "';' after the expression");
             return ast.Stmt.create(self.arena, target.span.merge(semi.span), .{ .expr_stmt = target });
         }
 
-        // Só `alvo.campo = valor` é aceito; cadeias mais profundas ficam para a
-        // semântica diagnosticar (struct com campo struct ainda não existe).
+        // Only `target.field = value` is accepted; deeper chains are left to
+        // semantics (a struct with a struct field does not exist yet).
         const access = switch (target.kind) {
             .field_access => |access| access,
-            else => return self.fail(.syntax, target.span, "atribuição inválida", .{}),
+            else => return self.fail(.syntax, target.span, "invalid assignment", .{}),
         };
         self.advance(); // =
         const value = try self.parseExpression();
-        const semi = try self.expect(.semicolon, "';' após a atribuição");
+        const semi = try self.expect(.semicolon, "';' after the assignment");
         return ast.Stmt.create(self.arena, name_tok.span.merge(semi.span), .{
             .field_assign = .{
                 .base = access.base,
@@ -685,8 +685,8 @@ pub const Parser = struct {
 
 const testing = std.testing;
 
-/// Arena alocada no heap para manter o endereço estável enquanto o parser e a
-/// semântica guardam `std.mem.Allocator` derivados dela.
+/// Heap-allocated arena that keeps the address stable while the parser and
+/// semantics hold `std.mem.Allocator`s derived from it.
 const Parsed = struct {
     arena: *std.heap.ArenaAllocator,
     program: ?*ast.Program,
@@ -714,7 +714,7 @@ const Parsed = struct {
     }
 };
 
-test "parser: programa mínimo com retorno" {
+test "parser: minimal program with return" {
     var parsed = try Parsed.parse("fn main() -> i32 { return 1; }");
     defer parsed.deinit();
     try testing.expectEqual(@as(usize, 0), parsed.diags.count());
@@ -728,7 +728,7 @@ test "parser: programa mínimo com retorno" {
     try testing.expectEqual(@as(i64, 1), fn_decl.body[0].kind.return_stmt.?.kind.int_literal.value);
 }
 
-test "parser: múltiplas funções e parâmetros" {
+test "parser: multiple functions and parameters" {
     const source =
         \\fn add(a: i32, b: i32) -> i32 { return a + b; }
         \\fn main() -> void { return; }
@@ -748,7 +748,7 @@ test "parser: múltiplas funções e parâmetros" {
     try testing.expect(main.body[0].kind.return_stmt == null);
 }
 
-test "parser: declarações let e var com anotação e inferência" {
+test "parser: let and var declarations with annotation and inference" {
     const source =
         \\fn main() -> i32 {
         \\    let x: i32 = 10;
@@ -772,7 +772,7 @@ test "parser: declarações let e var com anotação e inferência" {
     try testing.expect(y.mutable);
 }
 
-test "parser: precedência de operadores" {
+test "parser: operator precedence" {
     // 1 + 2 * 3 => add(1, mul(2, 3))
     var parsed = try Parsed.parse("fn main() -> i32 { return 1 + 2 * 3; }");
     defer parsed.deinit();
@@ -786,7 +786,7 @@ test "parser: precedência de operadores" {
     try testing.expectEqual(@as(i64, 3), mul.rhs.kind.int_literal.value);
 }
 
-test "parser: associatividade à esquerda" {
+test "parser: left associativity" {
     // 10 - 3 - 2 => sub(sub(10, 3), 2)
     var parsed = try Parsed.parse("fn main() -> i32 { return 10 - 3 - 2; }");
     defer parsed.deinit();
@@ -797,7 +797,7 @@ test "parser: associatividade à esquerda" {
     try testing.expectEqual(@as(i64, 2), outer.rhs.kind.int_literal.value);
 }
 
-test "parser: comparações têm precedência menor que aritmética" {
+test "parser: comparisons bind looser than arithmetic" {
     // 1 + 2 < 5 => lt(add(1,2), 5)
     var parsed = try Parsed.parse("fn main() -> bool { return 1 + 2 < 5; }");
     defer parsed.deinit();
@@ -806,7 +806,7 @@ test "parser: comparações têm precedência menor que aritmética" {
     try testing.expectEqual(ast.Expr.BinaryOp.add, ret.kind.binary.lhs.kind.binary.op);
 }
 
-test "parser: unários e parênteses" {
+test "parser: unary operators and parentheses" {
     var parsed = try Parsed.parse("fn main() -> i32 { return -(1 + 2) * 3; }");
     defer parsed.deinit();
     const ret = parsed.program.?.functions[0].body[0].kind.return_stmt.?;
@@ -853,7 +853,7 @@ test "parser: else if encadeado" {
     try testing.expect(nested.kind.if_stmt.else_body != null);
 }
 
-test "parser: chamada de função com argumentos" {
+test "parser: function call with arguments" {
     var parsed = try Parsed.parse("fn main() -> i32 { return add(1, 2); }");
     defer parsed.deinit();
     try testing.expectEqual(@as(usize, 0), parsed.diags.count());
@@ -863,7 +863,7 @@ test "parser: chamada de função com argumentos" {
     try testing.expectEqual(@as(usize, 2), call.args.len);
 }
 
-test "parser: spans apontam linha e coluna do erro" {
+test "parser: spans point at the error line and column" {
     var parsed = try Parsed.parse("fn main() -> i32 {\n    return 1\n}\n");
     defer parsed.deinit();
     try testing.expectEqual(@as(usize, 1), parsed.diags.count());
@@ -872,42 +872,42 @@ test "parser: spans apontam linha e coluna do erro" {
     try testing.expectEqual(@as(u32, 3), diag.span.line);
 }
 
-test "parser: erro em declaração sem inicializador" {
+test "parser: error on declaration without initializer" {
     var parsed = try Parsed.parse("fn main() -> void { let x: i32; }");
     defer parsed.deinit();
     try testing.expectEqual(@as(usize, 1), parsed.diags.count());
     try testing.expectEqual(diagnostics.Kind.unsupported, parsed.diags.last().?.kind);
 }
 
-test "parser: erro em statement no nível superior" {
+test "parser: error on top-level statement" {
     var parsed = try Parsed.parse("let x = 1;");
     defer parsed.deinit();
     try testing.expectEqual(@as(usize, 1), parsed.diags.count());
     try testing.expectEqual(diagnostics.Kind.syntax, parsed.diags.last().?.kind);
 }
 
-test "parser: caractere inválido gera diagnóstico" {
+test "parser: invalid character produces a diagnostic" {
     var parsed = try Parsed.parse("fn main() -> i32 { return @; }");
     defer parsed.deinit();
     try testing.expectEqual(@as(usize, 1), parsed.diags.count());
     try testing.expectEqual(diagnostics.Kind.syntax, parsed.diags.last().?.kind);
 }
 
-test "parser: bloco não fechado é diagnosticado" {
+test "parser: unclosed block is diagnosed" {
     var parsed = try Parsed.parse("fn main() -> i32 { return 1;");
     defer parsed.deinit();
     try testing.expectEqual(@as(usize, 1), parsed.diags.count());
-    try testing.expect(std.mem.indexOf(u8, parsed.diags.last().?.message, "não fechado") != null);
+    try testing.expect(std.mem.indexOf(u8, parsed.diags.last().?.message, "not closed") != null);
 }
 
-test "parser: literal fora de 64 bits é diagnosticado" {
+test "parser: literal outside 64 bits is diagnosed" {
     var parsed = try Parsed.parse("fn main() -> i32 { return 99999999999999999999; }");
     defer parsed.deinit();
     try testing.expectEqual(@as(usize, 1), parsed.diags.count());
     try testing.expectEqual(diagnostics.Kind.integer_overflow, parsed.diags.last().?.kind);
 }
 
-test "parser: imports antes das funções" {
+test "parser: imports before functions" {
     var parsed = try Parsed.parse(
         \\import "lib/math";
         \\import "util.kyn";
@@ -923,7 +923,7 @@ test "parser: imports antes das funções" {
     try testing.expectEqual(@as(usize, 1), parsed.program.?.functions.len);
 }
 
-test "parser: import depois de função é rejeitado" {
+test "parser: import after a function is rejected" {
     var parsed = try Parsed.parse(
         \\fn main() -> i32 { return 0; }
         \\import "lib/math";
@@ -931,31 +931,31 @@ test "parser: import depois de função é rejeitado" {
     defer parsed.deinit();
     try testing.expectEqual(@as(usize, 1), parsed.diags.count());
     try testing.expectEqual(diagnostics.Kind.syntax, parsed.diags.last().?.kind);
-    try testing.expect(std.mem.indexOf(u8, parsed.diags.last().?.message, "antes das declarações") != null);
+    try testing.expect(std.mem.indexOf(u8, parsed.diags.last().?.message, "must come before") != null);
 }
 
-test "parser: import exige string entre aspas" {
+test "parser: import requires a quoted string" {
     var parsed = try Parsed.parse("import lib;");
     defer parsed.deinit();
     try testing.expectEqual(@as(usize, 1), parsed.diags.count());
     try testing.expectEqual(diagnostics.Kind.syntax, parsed.diags.last().?.kind);
 }
 
-test "parser: import exige ponto e vírgula" {
+test "parser: import requires a semicolon" {
     var parsed = try Parsed.parse("import \"lib/math\"");
     defer parsed.deinit();
     try testing.expectEqual(@as(usize, 1), parsed.diags.count());
     try testing.expectEqual(diagnostics.Kind.syntax, parsed.diags.last().?.kind);
 }
 
-test "parser: string não terminada em import gera diagnóstico específico" {
+test "parser: unterminated string in import gives a specific diagnostic" {
     var parsed = try Parsed.parse("import \"lib/math;");
     defer parsed.deinit();
     try testing.expectEqual(@as(usize, 1), parsed.diags.count());
-    try testing.expect(std.mem.indexOf(u8, parsed.diags.last().?.message, "não terminado") != null);
+    try testing.expect(std.mem.indexOf(u8, parsed.diags.last().?.message, "unterminated") != null);
 }
 
-test "parser: declaração de struct com campos e vírgula final" {
+test "parser: struct declaration with fields and trailing comma" {
     var parsed = try Parsed.parse(
         \\struct Ponto {
         \\    x: i32,
@@ -974,7 +974,7 @@ test "parser: declaração de struct com campos e vírgula final" {
     try testing.expectEqual(@as(u32, 3), program.structs[0].fields[1].name_span.line);
 }
 
-test "parser: struct depois de função é aceito (ordem livre)" {
+test "parser: struct after a function is accepted (free order)" {
     var parsed = try Parsed.parse(
         \\fn main() -> i32 { return 0; }
         \\struct Tardio { v: i32 }
@@ -984,21 +984,21 @@ test "parser: struct depois de função é aceito (ordem livre)" {
     try testing.expectEqual(@as(usize, 1), parsed.program.?.structs.len);
 }
 
-test "parser: struct sem fechamento gera diagnóstico" {
+test "parser: unclosed struct produces a diagnostic" {
     var parsed = try Parsed.parse("struct P { x: i32 ");
     defer parsed.deinit();
     try testing.expectEqual(@as(usize, 1), parsed.diags.count());
     try testing.expectEqual(diagnostics.Kind.syntax, parsed.diags.last().?.kind);
 }
 
-test "parser: campo sem tipo é rejeitado" {
+test "parser: field without a type is rejected" {
     var parsed = try Parsed.parse("struct P { x }");
     defer parsed.deinit();
     try testing.expectEqual(@as(usize, 1), parsed.diags.count());
     try testing.expectEqual(diagnostics.Kind.syntax, parsed.diags.last().?.kind);
 }
 
-test "parser: literal de struct e acesso a campo" {
+test "parser: struct literal and field access" {
     var parsed = try Parsed.parse(
         \\struct Ponto { x: i32, y: i32 }
         \\fn main() -> i32 {
@@ -1027,7 +1027,7 @@ test "parser: literal de struct e acesso a campo" {
     try testing.expectEqualStrings("p", ret.base.kind.identifier);
 }
 
-test "parser: condições de if/while aceitam acesso a campo sem virar literal" {
+test "parser: if/while conditions accept field access without becoming a literal" {
     var parsed = try Parsed.parse(
         \\struct C { v: i32 }
         \\fn main() -> i32 {
@@ -1044,17 +1044,17 @@ test "parser: condições de if/while aceitam acesso a campo sem virar literal" 
     try testing.expectEqualStrings("v", while_stmt.cond.kind.binary.lhs.kind.field_access.name);
 }
 
-test "parser: 'import' depois de struct é rejeitado" {
+test "parser: 'import' after struct is rejected" {
     var parsed = try Parsed.parse(
         \\struct P { x: i32 }
         \\import "lib.kyn";
     );
     defer parsed.deinit();
     try testing.expectEqual(@as(usize, 1), parsed.diags.count());
-    try testing.expect(std.mem.indexOf(u8, parsed.diags.last().?.message, "antes das declarações") != null);
+    try testing.expect(std.mem.indexOf(u8, parsed.diags.last().?.message, "must come before") != null);
 }
 
-test "parser: literal de string é expressão (argumento de print)" {
+test "parser: string literal is an expression (print argument)" {
     var parsed = try Parsed.parse(
         \\fn main() -> i32 {
         \\    print("kyn");
@@ -1070,7 +1070,7 @@ test "parser: literal de string é expressão (argumento de print)" {
     try testing.expectEqualStrings("kyn", call.args[0].kind.str_literal);
 }
 
-test "parser: string vazia é uma expressão válida" {
+test "parser: empty string is a valid expression" {
     var parsed = try Parsed.parse(
         \\fn main() -> i32 {
         \\    print("");
@@ -1083,17 +1083,17 @@ test "parser: string vazia é uma expressão válida" {
     try testing.expectEqual(@as(usize, 0), call.args[0].kind.str_literal.len);
 }
 
-test "parser: string não terminada na expressão gera diagnóstico" {
+test "parser: unterminated string in an expression gives a diagnostic" {
     var parsed = try Parsed.parse(
         "fn main() -> i32 {\n    print(\"sem fim);\n    return 0;\n}",
     );
     defer parsed.deinit();
     try testing.expectEqual(@as(usize, 1), parsed.diags.count());
     try testing.expectEqual(diagnostics.Kind.syntax, parsed.diags.items.items[0].kind);
-    try testing.expect(std.mem.indexOf(u8, parsed.diags.items.items[0].message, "não terminado") != null);
+    try testing.expect(std.mem.indexOf(u8, parsed.diags.items.items[0].message, "unterminated") != null);
 }
 
-test "parser: chamada a print_i32 com expressão aritmética" {
+test "parser: print_i32 call with an arithmetic expression" {
     var parsed = try Parsed.parse(
         \\fn main() -> i32 {
         \\    print_i32(6 * 7);

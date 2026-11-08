@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   build-test:
-    name: build, testes e validação de IR
+    name: build, tests and IR validation
     runs-on: ubuntu-24.04
     timeout-minutes: 25
 
@@ -25,12 +25,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Dependências do sistema (venv para a toolchain, LLVM para o IR)
+      - name: System dependencies (venv for the toolchain, LLVM for the IR)
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends python3-venv llvm
 
-      - name: Instalar Zig 0.17.0 (wheel oficial no PyPI)
+      - name: Install Zig 0.17.0 (official PyPI wheel)
         run: |
           set -euo pipefail
           python3 -m venv "$RUNNER_TEMP/zig-venv"
@@ -41,23 +41,23 @@ jobs:
           mkdir -p "$RUNNER_TEMP/bin"
           ln -sf "$ZIG_BIN" "$RUNNER_TEMP/bin/zig"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
-          echo "Zig instalado em $ZIG_BIN"
+          echo "Zig installed at $ZIG_BIN"
 
-      - name: Ferramentas disponíveis
+      - name: Available tools
         run: |
           zig version
           as --version | head -1
           ld --version | head -1
           (llvm-as --version || /usr/lib/llvm-*/bin/llvm-as --version) | head -3
 
-      - name: Formatação (zig fmt --check)
+      - name: Formatting (zig fmt --check)
         run: zig fmt --check build.zig src std
 
-      - name: Testes unitários
+      - name: Unit tests
         run: zig build test --summary all
 
-      - name: Ponta a ponta (assembly -> as/ld -> execução)
+      - name: End to end (assembly -> as/ld -> execution)
         run: zig build e2e
 
-      - name: Validar LLVM IR com llvm-as (estrito)
+      - name: Validate LLVM IR with llvm-as (strict)
         run: zig build validate-ir-strict

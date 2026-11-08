@@ -1,0 +1,23 @@
+// 'str' by value in parameters: pointer and length in two registers.
+// expect-stdout: hello,
+// expect-stdout: kyn
+// expect-stdout: n=
+// expect-stdout: 42
+// expect-exit: 5
+fn greeting(name: str) -> i32 {
+    print("hello,");
+    print(name);
+    return 2;
+}
+
+fn tag(prefix: str, n: i32) -> i32 {
+    print(prefix);
+    print_i32(n);
+    return 3;
+}
+
+fn main() -> i32 {
+    let a = greeting("kyn");
+    let b = tag("n=", 42);
+    return a + b;
+}

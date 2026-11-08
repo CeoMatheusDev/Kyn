@@ -1,0 +1,35 @@
+// Struct by value in returns: one register per field (%eax, %edx, ...).
+// expect-stdout: 7
+// expect-stdout: 27
+// expect-stdout: 7
+// expect-exit: 27
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn origin() -> Point {
+    return Point { x: 3, y: 4 };
+}
+
+fn shift(p: Point, d: i32) -> Point {
+    return Point { x: p.x + d, y: p.y + d };
+}
+
+fn echo(p: Point) -> Point {
+    return p;
+}
+
+fn sum(p: Point) -> i32 {
+    return p.x + p.y;
+}
+
+fn main() -> i32 {
+    let p = origin();
+    print_i32(sum(p));
+    let q = shift(p, 10);
+    print_i32(sum(q));
+    // A call returning a struct as the argument of another call.
+    print_i32(sum(echo(echo(p))));
+    return sum(q);
+}

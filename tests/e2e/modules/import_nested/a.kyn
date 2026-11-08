@@ -1,6 +1,6 @@
-// Importa de um subdiretório; o caminho é relativo a este arquivo.
+// Imports from a subdirectory; the path is relative to this file.
 import "sub/b.kyn";
 
-fn passo(x: i32) -> i32 {
-    return dez(x);
+fn step(x: i32) -> i32 {
+    return ten(x);
 }

@@ -1,4 +1,4 @@
-// Erro semântico esperado: anotação incompatível com o inicializador.
+// Expected semantic error: annotation incompatible with the initializer.
 fn main() -> i32 {
     let flag: bool = 1 + 1;
     return 0;
