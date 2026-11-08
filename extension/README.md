@@ -1,7 +1,6 @@
 # Kyn Language Support for Visual Studio Code
 
-Lightweight VS Code support for Kyn, backed by the real `kync` compiler. No
-language server or third-party runtime dependency is required.
+Lightweight VS Code support for Kyn, backed by the real `kync` compiler. Semantic navigation consumes the compiler's resolved symbol index; no third-party runtime dependency is required.
 
 ## Features
 
@@ -65,22 +64,21 @@ native backend.
 ## Development
 
 1. Open the `extension/` directory in VS Code.
-2. Run `npm run check` and `npm test` to validate the extension and symbol index.
-3. Press `F5` to launch an Extension Development Host.
-4. Open a `.kyn` file in a workspace containing `zig-out/bin/kync`.
-5. Introduce a syntax or semantic error and verify it appears in Problems.
-6. Run the emit commands from the Command Palette.
+2. Build the compiler with `zig build`.
+3. Run `npm run check` and `npm test` to validate the extension and semantic snapshot resolver.
+4. Press `F5` to launch an Extension Development Host.
+5. Open a `.kyn` file in a workspace containing `zig-out/bin/kync`.
+6. Introduce a syntax or semantic error and verify it appears in Problems.
+7. Test Go to Definition (`F12`) and Find All References (`Shift+F12`) on a resolved function or variable.
 
 There are no npm runtime dependencies. Package with `vsce package` after
 installing the VS Code Extension Manager CLI.
 
 ## Current limitations
 
-This is compiler integration, not a language server. Completion is static and
-document symbols are syntax-based. Go-to-definition, rename, references,
-formatting, debugging and incremental compiler protocol are not implemented.
-Each check starts the compiler process; edits are debounced and superseded
-checks for the same document are terminated.
+This is compiler integration, not an LSP implementation. Go to Definition and Find All References use the semantic snapshot emitted by `kync symbols --json --lib <file>`; they follow resolved function, method, variable, struct, enum-case and field identities within the root file's import graph. Workspace symbol search compiles open Kyn documents and merges their snapshots. Completion remains static and the document outline remains syntax-based. Rename, semantic completion, formatting, debugging, a persistent compiler process and incremental document synchronization are not implemented.
+
+Each semantic request starts a compiler process. The current unsaved root buffer is passed through a temporary file in the same directory; dirty imported buffers are not overlaid and are analyzed from disk. A semantic error prevents publication of a new snapshot.
 
 The extension follows the syntax accepted by the current bootstrap compiler.
 Do not advertise unsupported language constructs as implemented.
