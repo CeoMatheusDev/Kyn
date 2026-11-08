@@ -360,10 +360,14 @@ class WorkspaceSymbolIndex {
 }
 
 function activate(context) {
-  const client = new KynClient(context);\n  const symbolIndex = new WorkspaceSymbolIndex();
+  const client = new KynClient(context);
+  const symbolIndex = new WorkspaceSymbolIndex();
   context.subscriptions.push(
     vscode.languages.registerCompletionItemProvider(SELECTOR, { provideCompletionItems: completions }, ".", ":", " "),
-    vscode.languages.registerDocumentSymbolProvider(SELECTOR, { provideDocumentSymbols: symbols }),\n    vscode.languages.registerDefinitionProvider(SELECTOR, { provideDefinition: (doc, pos) => symbolIndex.definition(doc, pos) }),\n    vscode.languages.registerReferenceProvider(SELECTOR, { provideReferences: (doc, pos, ctx) => symbolIndex.references(doc, pos, ctx.includeDeclaration) }),\n    vscode.languages.registerWorkspaceSymbolProvider({ provideWorkspaceSymbols: query => symbolIndex.workspaceSymbols(query) }),
+    vscode.languages.registerDocumentSymbolProvider(SELECTOR, { provideDocumentSymbols: symbols }),
+    vscode.languages.registerDefinitionProvider(SELECTOR, { provideDefinition: (doc, pos) => symbolIndex.definition(doc, pos) }),
+    vscode.languages.registerReferenceProvider(SELECTOR, { provideReferences: (doc, pos, ctx) => symbolIndex.references(doc, pos, ctx.includeDeclaration) }),
+    vscode.languages.registerWorkspaceSymbolProvider({ provideWorkspaceSymbols: query => symbolIndex.workspaceSymbols(query) }),
     vscode.workspace.onDidOpenTextDocument(doc => { symbolIndex.invalidate(); client.schedule(doc, true); }),
     vscode.workspace.onDidChangeTextDocument(event => {
       if (vscode.workspace.getConfiguration("kyn", event.document.uri).get("checkOnType", true)) client.schedule(event.document);
@@ -378,7 +382,10 @@ function activate(context) {
       if (child) child.kill();
       client.pending.delete(key); client.children.delete(key); client.clearRoot(doc.uri);
     }),
-    vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration("kyn")) { symbolIndex.invalidate(); client.checkOpen(); } }),\n    vscode.workspace.onDidCreateFiles(() => symbolIndex.invalidate()),\n    vscode.workspace.onDidDeleteFiles(() => symbolIndex.invalidate()),\n    vscode.workspace.onDidRenameFiles(() => symbolIndex.invalidate()),
+    vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration("kyn")) { symbolIndex.invalidate(); client.checkOpen(); } }),
+    vscode.workspace.onDidCreateFiles(() => symbolIndex.invalidate()),
+    vscode.workspace.onDidDeleteFiles(() => symbolIndex.invalidate()),
+    vscode.workspace.onDidRenameFiles(() => symbolIndex.invalidate()),
     vscode.commands.registerCommand("kyn.checkCurrentFile", () => {
       const editor = vscode.window.activeTextEditor;
       if (editor) client.schedule(editor.document, true);
