@@ -48,7 +48,7 @@ functional self-hosting.
 | Parser | `src/parser/parser.zig` | Whole program, `import` before declarations, `struct`, `enum` with optional payload, `switch` arms (`Case`, `Case(name)`, `else`), struct literals and field access, enum constructors (`Shape.Circle(5)`), precedence and associativity, errors with span | Unit and negative tests |
 | Modules | `src/driver.zig` | `compilePath` loads the import graph in pre-order, normalizes paths, deduplicates and flattens into one `Program` | Tests with a temporary directory + 3 executed e2e fixtures + 3 negative ones |
 | Semantics | `src/sema/sema.zig` | Nested scopes, name resolution, types `i32`/`bool`/`str`/`void`/struct/enum, enum cases (unique name and case, `i32` payload only), enum nominality in annotations and assignments, exhaustive `switch` (missing cases listed, unreachable `else`, unknown/duplicated case, payload binding rules), struct fields and literals, `str` and struct by value in parameters/returns (nominal identity preserved), six-register limit through `registerWordsOf` (`str` = 2, struct field = 1), `print`/`print_i32` builtins (arity and type checked, reserved names), mutability, calls, stack slots, `main` validation | Unit tests |
-| LLVM IR backend | `src/codegen/llvm.zig` | Textual IR derived from the AST (arithmetic, comparisons, `&&`/`||` with `phi`, `if`, `while`, calls, `switch` lowered to `switch i32` on the tag with one block per arm); enums as two `alloca i32` slots (tag + payload); structs through scalar replacement (one `alloca` per field); `str` in `@.strN` with `declare i64 @write(i32, ptr, i64)`, `str` by value as `ptr`+`i64` in parameters and `{ ptr, i64 }` return, struct by value with parameters flattened into scalars and aggregate return `{ i32, i1, … }` (`insertvalue`/`extractvalue`); `print` calling `write` and `print_i32` through `@kyn_print_i32` (`urem`/`udiv`) | Structural tests locally; accepted by `llvm-as` in CI (83/83 modules) |
+| LLVM IR backend | `src/codegen/llvm.zig` | Textual IR derived from the AST (arithmetic, comparisons, `&&`/`||` with `phi`, `if`, `while`, calls, `switch` lowered to `switch i32` on the tag with one block per arm); enums as two `alloca i32` slots (tag + payload); structs through scalar replacement (one `alloca` per field); `str` in `@.strN` with `declare i64 @write(i32, ptr, i64)`, `str` by value as `ptr`+`i64` in parameters and `{ ptr, i64 }` return, struct by value with parameters flattened into scalars and aggregate return `{ i32, i1, … }` (`insertvalue`/`extractvalue`); `print` calling `write` and `print_i32` through `@kyn_print_i32` (`urem`/`udiv`) | Structural tests locally; 86/86 modules accepted by the LLVM verifier (LLVM 22 through `llvmlite` locally, `llvm-as` in CI) |
 | x86-64 backend | `src/codegen/x86_64.zig` | System V assembly without libc, `_start` + `exit` syscall; enums in two slots (tag + payload) with `switch` as `cmpl`/`je` chains; struct in consecutive slots (base + one per field); `str` in two slots, `str` parameters/returns in register pairs (`(%rdi,%rsi)`, `(%rdx,%rcx)`, `(%r8,%r9)`; return in `%rax`/`%rdx`), struct by value with one register per field (return in `%eax`/`%edx`/`%ecx`/`%r8d`/`%r9d`/`%r10d`), text in `.rodata` and `print` through the `write` syscall; `print_i32` with a single decimal routine (unsigned `divl`) | Executed: `as` + `ld` + exit code and stdout checked |
 | FFI | `src/ffi/ffi.zig` | Isolated `extern "c" printf` experiment | Not integrated |
 | `unsafe`/`repr(C)` | `src/sema/unsafe.zig` | Isolated, tested policy; the AST still has no such nodes | Unit tests of the module |
@@ -125,12 +125,13 @@ closures, `for`, visibility (`pub`), qualified/selective imports and packages.
   missing file, duplicated symbol) with the expected message.
 - `zig fmt --check build.zig src std` — no differences.
 - `zig build validate-ir` (local, no LLVM) — warns and skips, as documented for
-  the development environment; the same script covers 83 modules when
-  `llvm-as`/`clang` is available.
+  the development environment; the same script covers 86 modules when
+  `llvm-as`/`clang` is available, and all 86 were verified here against LLVM 22
+  through `llvmlite` (`parse_assembly` + `verify`).
 - CI (`.github/workflows/ci.yml`) — runs `42427966554` (PR #23) and
   `42428126584` (`main` after merge) green with `zig fmt --check`, `zig build
   test` (228 tests), `zig build e2e` (113 cases, with stdout checked) and
-  `zig build validate-ir-strict` (83 modules accepted by `llvm-as`, including
+  `zig build validate-ir-strict` (86 modules accepted by `llvm-as`, including
   the `{ ptr, i64 }` aggregates of `str` and the `{ i32, i1, … }` of structs).
   The strict step fails if the verifier is missing or rejects any module.
 

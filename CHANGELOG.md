@@ -56,6 +56,9 @@ Enums with payload and exhaustive `switch`, in both backends.
   (`enum_non_exhaustive`, `enum_unknown_case`, `enum_else_unreachable`,
   `enum_payload_missing`, `enum_payload_binding`, `enum_in_parameter`,
   `enum_in_field`, `enum_operator`).
+- **IR evidence:** the 86 modules emitted by `validate-ir` (28 positive, 50
+  integration, 8 module programs) are accepted by the LLVM verifier — LLVM 22
+  locally through `llvmlite` (`parse_assembly` + `verify`) and `llvm-as` in CI.
 - **Docs:** `docs/syntax.ebnf` and `docs/grammar.ebnf` describe `enum`, `switch`
   and `=>`; `docs/tutorial.md` gained section 11 ("Enums and `switch`", 19
   sections and 21 verified blocks, the new one executed through `as`/`ld`);
