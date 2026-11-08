@@ -247,8 +247,8 @@ They compile and have tests, but most APIs do no real I/O.
 3. Define the struct-by-value convention for **aggregates larger** than the
    register table (today limited to 6 fields, receiver included) — stack passing
    or `sret` — which also lifts the "large `self`" limitation of methods.
-4. Add the still-missing AST nodes (`unsafe`, attributes, pointers) and wire
-   `src/sema/unsafe.zig`; extract the data layout and calling convention into an
+4. Add the still-missing AST nodes for `unsafe` and attributes, and wire
+   `src/sema/unsafe.zig`; extract data layout and calling convention into an
    explicit target description (see `docs/embedded.md` §3).
 5. Define the executable memory model (ownership, lifetimes, slices) before
    expanding the std.
