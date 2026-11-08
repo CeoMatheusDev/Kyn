@@ -1,0 +1,24 @@
+// expect-exit: 34
+// Operadores bitwise: & | ^ ~ << >>
+fn main() -> i32 {
+    let a: u8 = 240 as u8;  // 11110000
+    let b: u8 = 170 as u8;  // 10101010
+
+    // AND: 11110000 & 10101010 = 10100000 = 160
+    let and: u8 = a & b;
+    // OR:  11110000 | 10101010 = 11111010 = 250
+    let or: u8 = a | b;
+    // XOR: 11110000 ^ 10101010 = 01011010 = 90
+    let xor: u8 = a ^ b;
+    // NOT: ~240 = 15
+    let not: u8 = ~a;
+    // SHL: 1 << 4 = 16
+    let shl: u8 = (1 as u8) << (4 as u8);
+    // SHR: 240 >> 4 = 15
+    let shr: u8 = (240 as u8) >> (4 as u8);
+
+    // Combinar todos em um unico i32 para retorno
+    let result: u32 = (and as u32) + (or as u32) + (xor as u32) + (not as u32) + (shl as u32) + (shr as u32);
+    // 160 + 250 + 90 + 15 + 16 + 15 = 546
+    return result as i32;
+}

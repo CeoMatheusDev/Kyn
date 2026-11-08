@@ -1,0 +1,17 @@
+// expect-exit: 157
+// Conversao explicita as e inteiros de largura fixa
+fn main() -> i32 {
+    let a: u8 = 255 as u8;
+    let b: i16 = -42 as i16;
+
+    // Widening: u8 -> u32
+    let wide: u32 = a as u32;     // 255
+    // Widening signed: i16 -> i32
+    let wide_s: i32 = b as i32;   // -42
+    // Narrowing explicit: u32 -> u8
+    let narrow: u8 = (200 as u32) as u8;  // 200
+
+    // Usar todos os valores para evitar que sejam otimizados
+    let sum: i32 = (wide as i32) + wide_s + (narrow as i32);  // 255 + (-42) + 200 = 413
+    return sum;
+}

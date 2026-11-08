@@ -18,6 +18,14 @@ const Span = @import("../span.zig").Span;
 
 pub const Type = enum {
     i32,
+    i64,
+    i16,
+    i8,
+    u64,
+    u32,
+    u16,
+    u8,
+    usize,
     bool,
     void,
     /// Struct value (nominal identity in `Symbol.struct_id`). Not a scalar:
@@ -36,6 +44,14 @@ pub const Type = enum {
     pub fn name(self: Type) []const u8 {
         return switch (self) {
             .i32 => "i32",
+            .i64 => "i64",
+            .i16 => "i16",
+            .i8 => "i8",
+            .u64 => "u64",
+            .u32 => "u32",
+            .u16 => "u16",
+            .u8 => "u8",
+            .usize => "usize",
             .bool => "bool",
             .void => "void",
             .aggregate => "struct",
@@ -47,23 +63,61 @@ pub const Type = enum {
 
     pub fn fromName(text: []const u8) ?Type {
         if (std.mem.eql(u8, text, "i32")) return .i32;
+        if (std.mem.eql(u8, text, "i64")) return .i64;
+        if (std.mem.eql(u8, text, "i16")) return .i16;
+        if (std.mem.eql(u8, text, "i8")) return .i8;
+        if (std.mem.eql(u8, text, "u64")) return .u64;
+        if (std.mem.eql(u8, text, "u32")) return .u32;
+        if (std.mem.eql(u8, text, "u16")) return .u16;
+        if (std.mem.eql(u8, text, "u8")) return .u8;
+        if (std.mem.eql(u8, text, "usize")) return .usize;
         if (std.mem.eql(u8, text, "bool")) return .bool;
         if (std.mem.eql(u8, text, "void")) return .void;
         if (std.mem.eql(u8, text, "str")) return .str;
         return null;
     }
 
+    /// True when the type is a fixed-width integer (signed or unsigned).
+    pub fn isInteger(self: Type) bool {
+        return switch (self) {
+            .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .usize => true,
+            else => false,
+        };
+    }
+
     /// Types that can exist as an expression/variable value. `str` is a
     /// slice (two slots), not a scalar, but it has a value: it can initialize,
     /// be copied, returned and passed as an argument.
     pub fn isValue(self: Type) bool {
-        return self == .i32 or self == .bool or self == .str;
+        return self.isInteger() or self == .bool or self == .str;
+    }
+
+    /// Bit width of an integer type in bits; 0 for non-integers.
+    pub fn bitWidth(self: Type) u32 {
+        return switch (self) {
+            .i8, .u8 => 8,
+            .i16, .u16 => 16,
+            .i32, .u32, .usize => 32,
+            .i64, .u64 => 64,
+            else => 0,
+        };
+    }
+
+    /// True when the type is signed.
+    pub fn isSigned(self: Type) bool {
+        return switch (self) {
+            .i8, .i16, .i32, .i64, .usize => true, // usize treated as signed for shift amount
+            .u8, .u16, .u32, .u64 => false,
+            else => false,
+        };
     }
 
     /// Register words consumed by the calling convention: `str` takes two
-    /// consecutive registers (pointer and length).
+    /// consecutive registers (pointer and length). 64-bit integers take two.
     pub fn registerWords(self: Type) usize {
-        return if (self == .str) 2 else 1;
+        if (self == .str) return 2;
+        if (self == .u64 or self == .i64 or self == .usize) return 2;
+        return 1;
     }
 };
 
@@ -1630,6 +1684,18 @@ pub const Checker = struct {
                         }
                         return .bool;
                     },
+                    .bitnot => {
+                        if (!operand.isInteger()) {
+                            try self.diags.add(
+                                .type_mismatch,
+                                expr.span,
+                                "operator '~' expects an integer type, found '{s}'",
+                                .{operand.name()},
+                            );
+                            return .unknown;
+                        }
+                        return operand;
+                    },
                 }
             },
 
@@ -1834,6 +1900,35 @@ pub const Checker = struct {
 
                 return .aggregate;
             },
+
+            .cast => |*cast_expr| {
+                const src_type = try self.checkExpr(cast_expr.expr);
+                if (src_type == .unknown) return .unknown;
+
+                const dst_type = try self.resolveTypeName(cast_expr.type_name);
+                if (dst_type == .unknown) return .unknown;
+
+                // Only integer <-> integer conversions are supported at this
+                // stage. bool and str cannot be cast.
+                if (!src_type.isInteger() and src_type != .bool) {
+                    try self.diags.add(
+                        .type_mismatch,
+                        cast_expr.expr.span,
+                        "cannot cast from '{s}' to an integer type", .{src_type.name()},
+                    );
+                    return .unknown;
+                }
+                if (!dst_type.isInteger()) {
+                    try self.diags.add(
+                        .type_mismatch,
+                        cast_expr.type_name.span,
+                        "cast target '{s}' is not an integer type", .{dst_type.name()},
+                    );
+                    return .unknown;
+                }
+
+                return dst_type;
+            },
         }
     }
 
@@ -1880,28 +1975,29 @@ pub const Checker = struct {
             return .unknown;
         }
 
-        const both_i32 = lhs == .i32 and rhs == .i32;
         const both_bool = lhs == .bool and rhs == .bool;
 
         if (op.isArithmetic()) {
-            if (!both_i32) {
+            // Arithmetic: both operands must be the same integer type (not bool).
+            if (lhs == .bool or rhs == .bool or !lhs.isInteger() or !rhs.isInteger() or lhs != rhs) {
                 try self.diags.add(
                     .type_mismatch,
                     span,
-                    "operator '{s}' expects two 'i32', found '{s}' and '{s}'",
+                    "operator '{s}' expects two operands of the same integer type, found '{s}' and '{s}'",
                     .{ op.spelling(), lhs.name(), rhs.name() },
                 );
                 return .unknown;
             }
-            return .i32;
+            return lhs;
         }
 
         if (op.isComparison()) {
-            if (!both_i32) {
+            // Relational comparisons: both operands must be the same integer type.
+            if (lhs == .bool or rhs == .bool or !lhs.isInteger() or !rhs.isInteger() or lhs != rhs) {
                 try self.diags.add(
                     .type_mismatch,
                     span,
-                    "operator '{s}' expects two 'i32', found '{s}' and '{s}'",
+                    "operator '{s}' expects two operands of the same integer type, found '{s}' and '{s}'",
                     .{ op.spelling(), lhs.name(), rhs.name() },
                 );
                 return .unknown;
@@ -1922,7 +2018,36 @@ pub const Checker = struct {
             return .bool;
         }
 
-        // == and !=
+        if (op.isBitwise() and !op.isShift()) {
+            // Bitwise AND/XOR/OR: both operands must be the same integer type.
+            if (lhs == .bool or rhs == .bool or !lhs.isInteger() or !rhs.isInteger() or lhs != rhs) {
+                try self.diags.add(
+                    .type_mismatch,
+                    span,
+                    "operator '{s}' expects two operands of the same integer type, found '{s}' and '{s}'",
+                    .{ op.spelling(), lhs.name(), rhs.name() },
+                );
+                return .unknown;
+            }
+            return lhs;
+        }
+
+        if (op.isShift()) {
+            // Shift: lhs is an integer, rhs is an integer shift amount. Result
+            // has the type of lhs.
+            if (!lhs.isInteger() or !rhs.isInteger()) {
+                try self.diags.add(
+                    .type_mismatch,
+                    span,
+                    "operator '{s}' expects an integer value and an integer shift amount, found '{s}' and '{s}'",
+                    .{ op.spelling(), lhs.name(), rhs.name() },
+                );
+                return .unknown;
+            }
+            return lhs;
+        }
+
+        // == and != (fallback for value types that are not bitwise)
         if (lhs != rhs or !lhs.isValue()) {
             try self.diags.add(
                 .type_mismatch,
@@ -2453,7 +2578,7 @@ test "sema: argument with the wrong type" {
 }
 
 test "sema: unknown type" {
-    var f = try Fixture.check("fn main() -> i32 { let x: u8 = 1; return 0; }", .{});
+    var f = try Fixture.check("fn main() -> i32 { let x: i128 = 1; return 0; }", .{});
     defer f.deinit();
     try expectOnly(&f, .unknown_type);
 }

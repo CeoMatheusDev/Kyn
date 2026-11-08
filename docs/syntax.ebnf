@@ -36,9 +36,10 @@ impl_decl        = "impl", identifier, "{", { function_decl }, "}" ;
 parameters       = parameter, { ",", parameter } ;
 parameter        = identifier, ":", type_expr ;
 
-(* Accepted by semantics: i32, bool, str, void, names of declared structs and
-   names of declared enums. An enum crosses calls by value (tag + payload, two
-   registers); a struct field of enum type is diagnosed as unsupported. *)
+(* Accepted by semantics: i8/i16/i32/i64, u8/u16/u32/u64, usize, bool, str,
+   void, names of declared structs and names of declared enums. An enum crosses
+   calls by value (tag + payload, two registers); a struct field of enum type is
+   diagnosed as unsupported. *)
 type_expr        = identifier ;
 
 block            = "{", { statement }, "}" ;
@@ -81,20 +82,29 @@ expression_stmt  = expression, ";" ;
    1  ||            (bool, short-circuit)
    2  &&            (bool, short-circuit)
    3  == !=         (same type, produces bool)
-   4  < <= > >=     (i32, produces bool)
-   5  + -           (i32, left-associative)
-   6  * / %         (i32, left-associative)
-   7  unary - !     (prefix)
-   8  primaries *)
+   4  < <= > >=     (same integer type, produces bool)
+   5  |             (bitwise OR, same integer type)
+   6  ^             (bitwise XOR, same integer type)
+   7  &             (bitwise AND, same integer type)
+   8  << >>         (bit shifts, same integer type)
+   9  + -           (same integer type, left-associative)
+   10 * / %         (same integer type, left-associative)
+   11 unary - ! ~   (prefix; ~ is bitwise NOT on integers)
+   12 primaries *)
 
-expression       = logical_or ;
+expression       = cast_expr ;
+cast_expr        = logical_or, { "as", type_expr } ;
 logical_or       = logical_and, { "||", logical_and } ;
 logical_and      = equality, { "&&", equality } ;
 equality         = comparison, { ( "==" | "!=" ), comparison } ;
-comparison       = additive, { ( "<" | "<=" | ">" | ">=" ), additive } ;
+comparison       = bitor, { ( "<" | "<=" | ">" | ">=" ), bitor } ;
+bitor            = bitxor, { "|", bitxor } ;
+bitxor           = bitand, { "^", bitand } ;
+bitand           = shift, { "&", shift } ;
+shift            = additive, { ( "<<" | ">>" ), additive } ;
 additive         = multiplicative, { ( "+" | "-" ), multiplicative } ;
 multiplicative   = unary, { ( "*" | "/" | "%" ), unary } ;
-unary            = ( "-" | "!" ), unary | postfix ;
+unary            = ( "-" | "!" | "~" ), unary | postfix ;
 
 (* Dotted postfix. `Name.Case(...)` is an enum constructor; `value.method(...)`
    is a method call whose receiver (the base) is passed as argument 1; a dotted

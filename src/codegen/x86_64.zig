@@ -530,6 +530,7 @@ const FnEmitter = struct {
                         try self.print("    sete %al\n", .{});
                         try self.print("    movzbl %al, %eax\n", .{});
                     },
+                    .bitnot => try self.print("    notl %eax\n", .{}),
                 }
             },
 
@@ -581,7 +582,110 @@ const FnEmitter = struct {
             // `str` is two slots (pointer + length), handled by
             // `emitStrStore` and `emitPrint`.
             .str_literal => return error.UnsupportedNode,
+
+            // `expr as Type` — explicit integer width conversion.
+            .cast => |cast_expr| {
+                const src_type = try self.exprType(cast_expr.expr);
+                if (src_type == .unknown) return error.MiscompiledAst;
+
+                const dst_width = try self.intWidthOfTypeName(cast_expr.type_name);
+                const src_width = src_type.bitWidth();
+                if (dst_width == 0 or src_width == 0) return error.UnsupportedType;
+
+                try self.emitExpr(cast_expr.expr);
+
+                const src_reg = try self.regForWidth(src_width);
+                const dst_reg = try self.regForWidth(dst_width);
+
+                if (dst_width == src_width) {
+                    // No-op: value already in the right-width register.
+                    if (!std.mem.eql(u8, src_reg, dst_reg)) try self.print("    mov {s}, {s}", .{src_reg, dst_reg});
+                    try self.out.appendSlice(self.arena, "\n");
+                    return;
+                }
+
+                if (dst_width < src_width) {
+                    // Truncation: no instruction needed; the low part of the
+                    // source register already holds the truncated value.
+                } else if (src_type.isSigned()) {
+                    // Sign extension.
+                    try self.print("    movsx {s}, {s}", .{src_reg, dst_reg});
+                    try self.out.appendSlice(self.arena, "\n");
+                } else {
+                    // Zero extension.
+                    try self.print("    movzx {s}, {s}", .{src_reg, dst_reg});
+                    try self.out.appendSlice(self.arena, "\n");
+                }
+            },
         }
+    }
+
+    /// Determines the type of an expression without emitting code, walking only
+    /// the constructs that can appear as the source of a `cast`.
+    fn exprType(self: *FnEmitter, expr: *const ast.Expr) Error!sema.Type {
+        return switch (expr.kind) {
+            .int_literal => .i32,
+            .bool_literal => .bool,
+            .identifier => {
+                const sym = self.symbolAt(expr.resolved orelse return error.MiscompiledAst);
+                return sym.typ;
+            },
+            .binary => |binary| self.exprType(binary.lhs),
+            .unary => |unary| {
+                if (unary.op == .not) return .bool;
+                return self.exprType(unary.operand);
+            },
+            .call => |call| {
+                const index = call.callee_fn orelse return error.MiscompiledAst;
+                return self.checked.functions[index].return_type;
+            },
+            .cast => |cast_expr| {
+                const width = try self.intWidthOfTypeName(cast_expr.type_name);
+                return try self.typeOfWidth(width);
+            },
+            .field_access => |access| {
+                const base = self.symbolAt(access.base.resolved orelse return error.MiscompiledAst);
+                if (base.typ != .aggregate) return error.MiscompiledAst;
+                const field_index = access.field_index orelse return error.MiscompiledAst;
+                return self.checked.structs[base.struct_id].fields[field_index].typ;
+            },
+            else => .unknown,
+        };
+    }
+
+    /// Returns the register name for a given integer bit width.
+    fn regForWidth(self: *FnEmitter, width: u32) Error![]const u8 {
+        _ = self;
+        return switch (width) {
+            8 => "%al",
+            16 => "%ax",
+            32 => "%eax",
+            64 => "%rax",
+            else => error.UnsupportedType,
+        };
+    }
+
+    /// Resolves a type name written in `expr as Type` to its bit width.
+    fn intWidthOfTypeName(self: *FnEmitter, tn: ast.TypeName) Error!u32 {
+        _ = self;
+        const name = tn.name;
+        if (std.mem.eql(u8, name, "i8") or std.mem.eql(u8, name, "u8")) return 8;
+        if (std.mem.eql(u8, name, "i16") or std.mem.eql(u8, name, "u16")) return 16;
+        if (std.mem.eql(u8, name, "i32") or std.mem.eql(u8, name, "u32")) return 32;
+        if (std.mem.eql(u8, name, "i64") or std.mem.eql(u8, name, "u64") or std.mem.eql(u8, name, "usize")) return 64;
+        return error.UnsupportedType;
+    }
+
+    /// Maps an integer bit width back to a sema.Type for result typing.
+    fn typeOfWidth(self: *FnEmitter, width: u32) Error!sema.Type {
+        _ = self;
+        return switch (width) {
+            8 => .i8,
+            16 => .i16,
+            32 => .i32,
+            64 => .i64,
+            else => error.UnsupportedType,
+        };
     }
 
     /// Copies a struct value into the slots of `dst`: literal (each field
@@ -824,6 +928,11 @@ const FnEmitter = struct {
                 try self.print("    {s} %al\n", .{setcc});
                 try self.print("    movzbl %al, %eax\n", .{});
             },
+            .bitand => try self.print("    andl %ecx, %eax\n", .{}),
+            .bitor => try self.print("    orl %ecx, %eax\n", .{}),
+            .bitxor => try self.print("    xorl %ecx, %eax\n", .{}),
+            .shl => try self.print("    shll %cl, %eax\n", .{}),
+            .shr => try self.print("    shrl %cl, %eax\n", .{}),
             .and_op, .or_op => unreachable,
         }
     }
