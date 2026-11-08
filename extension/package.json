@@ -1,0 +1,48 @@
+{
+  "name": "kyn-language",
+  "displayName": "Kyn Language Support",
+  "description": "Syntax highlighting and editor support for the Kyn programming language.",
+  "version": "0.1.0",
+  "publisher": "ceomatheusdev",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "kyn",
+    "language",
+    "syntax"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "kyn",
+        "aliases": [
+          "Kyn",
+          "kyn"
+        ],
+        "extensions": [
+          ".kyn"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "kyn",
+        "scopeName": "source.kyn",
+        "path": "./syntaxes/kyn.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "kyn",
+        "path": "./snippets/kyn.json"
+      }
+    ]
+  }
+}
