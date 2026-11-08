@@ -90,6 +90,7 @@ class KynClient {
       try {
         await fs.promises.writeFile(temporaryPath, doc.getText(), "utf8");
       } catch (error) {
+        if (temporaryPath) void fs.promises.unlink(temporaryPath).catch(() => {});
         this.fail(error, "temporary source file");
         return;
       }
@@ -107,7 +108,7 @@ class KynClient {
     this.output.appendLine("[check] " + doc.uri.fsPath);
     let child;
     try { child = cp.spawn(executable, args, { cwd, windowsHide: true, shell: false }); }
-    catch (error) { this.fail(error, executable); return; }
+    catch (error) { cleanup(); this.fail(error, executable); return; }
     this.children.set(key, child);
     let stderr = "", stdout = "", bytes = 0, overflow = false;
     const collect = (target, chunk) => {
@@ -160,6 +161,7 @@ class KynClient {
     if (!doc || doc.languageId !== "kyn" || doc.uri.scheme !== "file") {
       void vscode.window.showInformationMessage("Open a local .kyn file first."); return;
     }
+    if (doc.isDirty && !(await doc.save())) return;
     const suffix = backend === "--llvm" ? ".ll" : ".s";
     const output = path.join(path.dirname(doc.uri.fsPath), path.basename(doc.uri.fsPath, path.extname(doc.uri.fsPath)) + suffix);
     const executable = compilerOf(doc), cwd = cwdOf(doc);
