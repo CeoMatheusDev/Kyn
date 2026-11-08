@@ -144,14 +144,14 @@ const Builder = struct {
 
     fn functionId(self: *Builder, index: ?u32) !?[]const u8 {
         if (index) |i| {
-            if (i < self.checked.functions.len) return try self.symbolId("function", i);
+            if (@as(usize, i) < self.checked.functions.len) return try self.symbolId("function", i);
         }
         return null;
     }
 
     fn variableId(self: *Builder, index: ?u32) !?[]const u8 {
         if (index) |i| {
-            if (i < self.checked.symbols.len) return try self.symbolId("variable", i);
+            if (@as(usize, i) < self.checked.symbols.len) return try self.symbolId("variable", i);
         }
         return null;
     }
@@ -159,7 +159,7 @@ const Builder = struct {
     fn caseId(self: *Builder, enum_index: ?u32, case_index: ?u32) !?[]const u8 {
         if (enum_index) |ei| {
             if (case_index) |ci| {
-                if (ei < self.checked.enums.len and ci < self.checked.enums[ei].cases.len) {
+                if (@as(usize, ei) < self.checked.enums.len and @as(usize, ci) < self.checked.enums[ei].cases.len) {
                     return try self.pairId("case", ei, ci);
                 }
             }
@@ -185,7 +185,7 @@ const Builder = struct {
             else => {},
         }
         if (owner) |struct_index| {
-            if (struct_index < self.checked.structs.len and index < self.checked.structs[struct_index].fields.len) {
+            if (@as(usize, struct_index) < self.checked.structs.len and @as(usize, index) < self.checked.structs[struct_index].fields.len) {
                 return try self.pairId("field", struct_index, index);
             }
         }
@@ -220,7 +220,7 @@ const Builder = struct {
             },
             .struct_literal => |literal| {
                 if (literal.resolved_struct) |id| {
-                    if (id < self.checked.structs.len) {
+                    if (@as(usize, id) < self.checked.structs.len) {
                         try self.addReference(try self.symbolId("struct", id), file, literal.type_name.span, "construct");
                         const fields = self.checked.structs[id].fields;
                         for (literal.fields) |init| {
