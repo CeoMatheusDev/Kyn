@@ -135,5 +135,9 @@
     "language-configuration.json",
     "README.md",
     "LICENSE*"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CeoMatheusDev/Kyn"
+  }
 }
