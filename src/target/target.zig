@@ -36,7 +36,7 @@ pub const Target = struct {
     pointer_bits: u8,
     stack_alignment: u8,
     red_zone: bool,
-    has_libc: bool,
+    requires_libc: bool,
     position_independent: bool,
     code_model: CodeModel,
     entry_symbol: []const u8,
@@ -49,12 +49,12 @@ pub const Target = struct {
 
         switch (self.operating_system) {
             .linux => {
-                if (self.abi != .linux_sysv or !self.has_libc or self.code_model != .small) {
+                if (self.abi != .linux_sysv or self.requires_libc or self.code_model != .small) {
                     return error.InvalidTarget;
                 }
             },
             .none => {
-                if (self.abi != .x86_64_kernel or self.has_libc or self.red_zone or
+                if (self.abi != .x86_64_kernel or self.requires_libc or self.red_zone or
                     self.code_model != .kernel)
                 {
                     return error.InvalidTarget;
@@ -74,7 +74,7 @@ pub const x86_64_linux = Target{
     .pointer_bits = 64,
     .stack_alignment = 16,
     .red_zone = true,
-    .has_libc = true,
+    .requires_libc = false,
     .position_independent = false,
     .code_model = .small,
     .entry_symbol = "_start",
@@ -91,7 +91,7 @@ pub const x86_64_freestanding = Target{
     .pointer_bits = 64,
     .stack_alignment = 16,
     .red_zone = false,
-    .has_libc = false,
+    .requires_libc = false,
     .position_independent = false,
     .code_model = .kernel,
     .entry_symbol = "_start",
@@ -108,13 +108,13 @@ pub fn fromTriple(triple: []const u8) ?Target {
 test "target: Linux x86_64 contract is valid" {
     try x86_64_linux.validate();
     try @import("std").testing.expect(x86_64_linux.red_zone);
-    try @import("std").testing.expect(x86_64_linux.has_libc);
+    try @import("std").testing.expect(!x86_64_linux.requires_libc);
 }
 
 test "target: freestanding x86_64 contract disables runtime assumptions" {
     try x86_64_freestanding.validate();
     try @import("std").testing.expect(!x86_64_freestanding.red_zone);
-    try @import("std").testing.expect(!x86_64_freestanding.has_libc);
+    try @import("std").testing.expect(!x86_64_freestanding.requires_libc);
     try @import("std").testing.expectEqual(CodeModel.kernel, x86_64_freestanding.code_model);
 }
 
