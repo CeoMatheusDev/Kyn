@@ -3,7 +3,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
-  validateSnapshot, filePathOf, targetAt, findSymbol, referencesFor
+  validateSnapshot, filePathOf, targetAt, findSymbol, referencesFor, remapSnapshotOffsets
 } = require("../src/index");
 
 const snapshot = {
@@ -40,4 +40,20 @@ test("returns compiler-identity references and optional declaration", () => {
   assert.deepEqual(referencesFor(snapshot, "variable:0", false).map(x => x.role), ["read", "read"]);
   assert.deepEqual(referencesFor(snapshot, "variable:0", true).map(x => x.id || x.target),
     ["variable:0", "variable:0", "variable:0"]);
+});
+
+test("converts UTF-8 byte spans to VS Code UTF-16 offsets", () => {
+  const source = 'fn main() { print("😀"); twice(); }';
+  const byteStart = Buffer.from(source, "utf8").indexOf(Buffer.from("twice"));
+  const utf16Start = source.indexOf("twice");
+  const sample = {
+    schema: 1,
+    files: [{ id: 0, path: "/workspace/unicode.kyn" }],
+    symbols: [{ id: "function:0", name: "twice", kind: "function", file: 0, start: byteStart, end: byteStart + 5 }],
+    references: [{ target: "function:0", file: 0, start: byteStart, end: byteStart + 5 }]
+  };
+  remapSnapshotOffsets(sample, new Map([[0, source]]));
+  assert.equal(sample.symbols[0].start, utf16Start);
+  assert.equal(sample.symbols[0].end, utf16Start + 5);
+  assert.equal(sample.references[0].start, utf16Start);
 });
