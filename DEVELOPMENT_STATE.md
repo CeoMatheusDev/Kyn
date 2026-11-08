@@ -6,15 +6,18 @@
 `4234c07`), PR #15 (`str`/`print`, `89ca6ce`), PR #17 (`print_i32`,
 `87903db`), PR #18 (docs, `3be9df0`), PR #19 (`str` by value, `9ec07be`),
 PR #20–#22 (records, `2a68d9a`/`da92f44`/`d6eb534`), PR #23 (struct by value,
-`1c80a7b`) and PR #24 (release records, `288eb3f`) merged into `main`
-(2026-11-07). Tags: **`v0.3.7-alpha.1`** at `1c80a7b` (first tag, with a GitHub
-release).
+`1c80a7b`), PR #24 (release records, `288eb3f`) and PR #26 (`enum` + `switch`,
+`9125bff`) merged into `main` (2026-11-07/08). Tags: **`v0.3.7-alpha.1`** at
+`1c80a7b` (first tag, with a GitHub release) and **`v0.3.9-alpha.1`** at
+`9125bff` (enums with payload and exhaustive `switch`, with a GitHub release).
 **Project version:** `0.3.9-alpha.1`
 **Last validation:** 2026-11-07 — local (Zig 0.17.0 + GNU `as`/`ld`, Linux
 x86-64): `zig build`, `zig build test` (228 tests), `zig build e2e` (113/113,
 with stdout checked, including `str`, struct by value and enums with `switch`)
-and `zig fmt --check`; `validate-ir` locally without LLVM (documented skip),
-strict validation of the IR modules done in CI; the 21 code blocks of
+and `zig fmt --check`; `validate-ir` locally without LLVM (documented skip) but
+all 86 emitted modules verified against LLVM 22 through `llvmlite`
+(`parse_assembly` + `verify`), and the strict step revalidated them with
+`llvm-as` in CI; the 21 code blocks of
 `docs/tutorial.md` checked with `kync check` (16 compile, 1 is a library file, 1
 imports a module, 3 fail with the documented error) — the new enum/`switch`
 block also runs through `as`/`ld` (prints `5`, exits `5`).
