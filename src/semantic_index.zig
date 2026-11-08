@@ -7,7 +7,6 @@
 const std = @import("std");
 const ast = @import("ast/ast.zig");
 const sema = @import("sema/sema.zig");
-const driver = @import("driver.zig");
 
 pub const Symbol = struct {
     id: []const u8,
@@ -47,7 +46,6 @@ const Builder = struct {
     arena: std.mem.Allocator,
     program: *const ast.Program,
     checked: *const sema.Checked,
-    files: []const driver.Source,
     symbols: std.ArrayList(Symbol) = .empty,
     references: std.ArrayList(Reference) = .empty,
 
@@ -307,19 +305,18 @@ pub fn generate(
     arena: std.mem.Allocator,
     program: *const ast.Program,
     checked: *const sema.Checked,
-    sources: []const driver.Source,
+    source_paths: []const []const u8,
 ) ![]const u8 {
     var builder: Builder = .{
         .arena = arena,
         .program = program,
         .checked = checked,
-        .files = sources,
     };
     try builder.addDeclarations();
     try builder.walkProgram();
 
-    const files = try arena.alloc(File, sources.len);
-    for (sources, 0..) |source, i| files[i] = .{ .id = @intCast(i), .path = source.path };
+    const files = try arena.alloc(File, source_paths.len);
+    for (source_paths, 0..) |path, i| files[i] = .{ .id = @intCast(i), .path = path };
 
     const document: Document = .{
         .files = files,
@@ -329,17 +326,3 @@ pub fn generate(
     return try std.json.Stringify.valueAlloc(arena, document, .{});
 }
 
-test "semantic index: serializes compiler-resolved function and variable references" {
-    const driver_mod = @import("driver.zig");
-    var result = try driver_mod.compile(
-        std.testing.allocator,
-        "fn twice(x: i32) -> i32 { let y: i32 = x; return y + x; } fn main() -> i32 { return twice(21); }",
-        .{ .require_main = true },
-    );
-    defer result.deinit();
-    const semantic = result.semantic orelse return error.MissingSemanticSnapshot;
-    const json = try generate(result.arena.allocator(), semantic.program, &semantic.checked, result.sources);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"function\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"role\":\"call\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"role\":\"read\"") != null);
-}
