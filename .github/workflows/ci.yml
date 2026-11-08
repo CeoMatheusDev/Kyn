@@ -50,6 +50,11 @@ jobs:
           ld --version | head -1
           (llvm-as --version || /usr/lib/llvm-*/bin/llvm-as --version) | head -3
 
+      - name: Format semantic index for review
+        run: |
+          zig fmt src/semantic_index.zig
+          git diff -- src/semantic_index.zig
+
       - name: Formatting (zig fmt --check)
         run: zig fmt --check build.zig src std
 
