@@ -69,8 +69,9 @@ delivery gates and validation requirements; [embedded analysis](docs/embedded.md
 remains the later firmware track.
 
 - [ ] Freeze the current Linux x86-64 System V behavior with regression tests.
-- [ ] Add target description and data-layout contracts; move OS policy out of
-      instruction selection without breaking the existing `--asm` path.
+- [ ] Consume the initial target descriptor in the CLI/driver and add explicit
+      target selection; then introduce data-layout contracts and move OS policy
+      out of instruction selection without breaking the existing `--asm` path.
 - [ ] Emit freestanding x86-64 ELF relocatable objects, symbols and relocations;
       accept an external linker script and configurable entry symbol.
 - [ ] Define the Kyn kernel ABI: no red zone, explicit stack alignment,
@@ -129,3 +130,13 @@ remains the later firmware track.
 
 A step must only be considered complete when the corresponding code exists, the
 tests are executable and the documentation describes the observed behavior.
+
+
+### Current x86-64 implementation checkpoint
+
+- [x] Add the initial typed target model for Linux/System V and freestanding
+      x86-64, including validation of the kernel red-zone and runtime contract.
+- [ ] Execute the new target tests in the Zig 0.17.0 build and preserve the
+      result as CI evidence.
+- [ ] Wire target selection through the CLI and compilation driver; do not
+      advertise freestanding code generation until a backend consumes it.
