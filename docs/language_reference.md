@@ -114,8 +114,10 @@ Suggested initial set:
 `u8`/`u16`/`u32`/`u64`, `usize`), `bool` and `void`, plus `str` for static
 literals. Arithmetic, ordering and bitwise operators require operands of the
 same integer type; shifts accept an independently typed integer count. Integer
-literals default to `i32`; literal overflow is diagnosed. Full native behavior
-at every declared width is still pending (see `status.md`).
+literals default to `i32`; literal overflow is diagnosed. Executed native
+regressions now cover selected 8-/16-/32-/64-bit operations and internal wide
+arguments; overflow, division-by-zero and out-of-range shifts still need
+portable language contracts (see `status.md`).
 
 ### Numeric conversion (`as`)
 
@@ -132,7 +134,10 @@ let d: u8 = (300 as u32) as u8;    // narrowing (truncate)
 
 Only fixed-width integer names are accepted as cast targets: `i8`, `i16`,
 `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `usize`. Casting to `bool`, `str` or
-`void` is rejected by semantics. A same-width cast (`u8 as u8`) is a no-op.
+`void` is rejected by semantics. A same-width cast reinterprets the bits;
+for narrow native values the result is normalized to the destination's
+signedness. Unary `-` accepts integer operands at their own width, including
+modular unsigned values, but rejects `bool`.
 
 ### Bitwise operators
 
@@ -334,8 +339,10 @@ fn main() -> i32 {
 }
 ```
 
-The six-register limit applies to parameters/arguments and to the return (hence
-at most six fields), counting `str` as two.
+The six-register limit applies to parameters/arguments and to the struct return
+(hence at most six fields). Arguments of type `str`, `i64`, `u64` or `usize`
+count as two; pointers and individual struct fields count as one. Wide scalar
+returns use a single 64-bit result register. This is not a C-compatible ABI.
 
 Current limits, all diagnosed: field of struct type (nested struct); empty
 `struct`; struct as a condition, arithmetic operand or comparison; struct literal

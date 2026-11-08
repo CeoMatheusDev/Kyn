@@ -1,0 +1,38 @@
+// expect-exit: 0
+// expect-stdout: wide
+// Six-word ABI: i64/u64/usize use low/high register pairs; ptr and each
+// struct field use one full register. Nested calls and str must survive.
+struct Box { value: i64, tag: u16, address: ptr }
+
+fn increment(n: i64) -> i64 { return n + (1 as i64); }
+fn advance(n: usize) -> usize { return n + (2 as usize); }
+fn inspect(n: i64, s: str, flag: i32, tail: u8) -> i64 {
+    print(s);
+    return n + (flag as i64) + (tail as i64);
+}
+fn middle(first: i32, big: u64, size: usize, last: i32) -> u64 {
+    return big + (size as u64) + (first as u64) + (last as u64);
+}
+fn make(address: ptr, value: i64) -> Box {
+    return Box { value: value, tag: 7 as u16, address: address };
+}
+fn copy(b: Box) -> Box { return b; }
+
+fn main() -> i32 {
+    let high: i64 = (1 as i64) << (40 as u8);
+    let checked: i64 = inspect(increment(high), "wide", 3, 4 as u8);
+    if checked != high + (8 as i64) { return 1; }
+    let unsigned: u64 = middle(2, (1 as u64) << (42 as u8), (1 as usize) << (40 as u8), 5);
+    if unsigned != ((1 as u64) << (42 as u8)) + ((1 as u64) << (40 as u8)) + (7 as u64) { return 2; }
+    if (advance((1 as usize) << (40 as u8)) as u64) != (((1 as u64) << (40 as u8)) + (2 as u64)) { return 6; }
+
+    var original: i64 = high;
+    var b: Box = make(&original, checked);
+    b.value = b.value + (1 as i64);
+    let result: Box = copy(b);
+    if result.value != high + (9 as i64) { return 3; }
+    if result.tag != (7 as u16) || result.address != &original { return 4; }
+    let p: ptr = &b;
+    if (*p).value != result.value { return 5; }
+    return 0;
+}

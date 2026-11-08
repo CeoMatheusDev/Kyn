@@ -119,7 +119,7 @@ fn main() -> void {
 | Command | What it does |
 |---|---|
 | `kync check <file.kyn>` | Analyzes the whole program and reports diagnostics; writes no output. |
-| `kync emit --asm <file.kyn> -o out.s` | Emits x86-64 assembly (Linux, System V, no libc). |
+| `kync emit --asm <file.kyn> -o out.s` | Emits Linux x86-64 assembly (Kyn register ABI, no libc). |
 | `kync emit --llvm <file.kyn> -o out.ll` | Emits textual LLVM IR. |
 | `kync emit --lib <...>` | Emits the experimental library module. |
 | `kync --version` | Shows the version and available backends. |
@@ -362,10 +362,12 @@ Call contract (the same in both backends):
 - Structs return with one register per field (`%eax`, `%edx`, `%ecx`, `%r8d`,
   `%r9d`, `%r10d` on x86-64; aggregate `{ i32, … }` in the LLVM IR).
 - The 6-register limit applies to parameters/arguments and to the struct return
-  (hence: up to 6 fields).
-- `str` counts two registers; a struct with four fields plus three `i32`
-  already exceeds the limit and is diagnosed in the declaration **and** in the
-  call.
+  (hence: up to 6 fields). Wide scalar integers (`i64`, `u64`, `usize`) count
+  two registers for arguments (low/high 32-bit halves), but return in `%rax`.
+- `str` counts two registers; pointers and individual struct fields count one
+  full register. A struct with four fields plus three `i32` already exceeds the
+  limit and is diagnosed in the declaration **and** in the call. This is a
+  Kyn-specific convention, not a C calling convention.
 
 ---
 
@@ -709,7 +711,7 @@ Common messages and what they mean:
 Two backends, one semantics:
 
 ```sh
-# Native: System V assembly, no libc, its own _start
+# Native: Linux x86-64, Kyn-internal register ABI, no libc, its own _start
 kync emit --asm program.kyn -o program.s
 as program.s -o program.o
 ld program.o -o program
@@ -836,7 +838,7 @@ The compiler's exact supported subset is maintained in [Implementation status](s
 - **Text:** `str` is a static pointer-plus-length value. Printing and equality/inequality are implemented; concatenation, interpolation, formatting and relational comparisons are not.
 - **Language abstractions:** no generics, slices, closures, `comptime`, error unions or complete error-handling model.
 - **Safety and ABI:** no integrated `unsafe` syntax, stable ownership model, complete `repr(C)` contract or integrated C FFI.
-- **Targets:** the executable native backend targets Linux x86-64 System V. Other architectures, Windows and freestanding/embedded targets are not implemented.
+- **Targets:** the executable native backend targets Linux x86-64 and uses a Kyn-internal register ABI, not the C ABI. Other architectures, Windows and freestanding/embedded targets are not implemented.
 - **Tooling:** the VS Code extension currently provides declarative syntax support only. There is no LSP, semantic completion, navigation, formatter or debugger.
 
 Do not infer support from files in `src/compiler/`, `src/kyn/`, `std/` or from design documents. Those areas include prototypes and experiments.

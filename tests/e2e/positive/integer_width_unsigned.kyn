@@ -1,0 +1,29 @@
+// expect-exit: 0
+// u64/usize values with nonzero high halves and the unsigned half of the ABI.
+fn identity(n: u64) -> u64 { return n; }
+
+fn main() -> i32 {
+    let high: u64 = (1 as u64) << (63 as u8);
+    let low: u64 = (1 as u64) << (40 as u8);
+    let value: u64 = identity(high | low);
+    if high <= low { return 1; }
+    if value / high != (1 as u64) { return 2; }
+    if value % high != low { return 3; }
+    if value >> (40 as u8) != (((1 as u64) << (23 as u8)) | (1 as u64)) { return 4; }
+    if ~(high) != high - (1 as u64) { return 5; }
+    if -(1 as u64) != ~(0 as u64) { return 6; }
+    if high << (1 as u8) != (0 as u64) { return 7; }
+
+    let all: u64 = ~(0 as u64);
+    if all / (2 as u64) != high - (1 as u64) { return 8; }
+    if all % (2 as u64) != (1 as u64) { return 9; }
+    if all + (1 as u64) != (0 as u64) { return 13; }
+    let as_signed: i64 = high as i64;
+    if as_signed >= (0 as i64) { return 10; }
+    let max32: u32 = (0 - 1) as u32;
+    if (max32 as u64) >= ((1 as u64) << (32 as u8)) { return 11; }
+
+    let size: usize = (1 as usize) << (40 as u8);
+    if (size as u64) != low { return 12; }
+    return 0;
+}

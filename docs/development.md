@@ -56,7 +56,7 @@ symbols <file>    emits compiler-resolved symbols and references as JSON
 emit <file>       emits the selected backend artifact
 
 --llvm            textual LLVM IR (default)
---asm             x86-64 assembly (Linux, System V)
+--asm             x86-64 assembly (Linux, Kyn register ABI)
 -o <file>         writes the output to a file (default: stdout)
 --lib             does not require 'fn main' (library unit)
 --json            JSON output for the symbols command
@@ -138,10 +138,14 @@ requests and manual dispatch. On `ubuntu-24.04` the workflow:
 5. runs `zig build validate-ir-strict` (LLVM verifier required), then
    `zig build e2e` if IR validation succeeds.
 
-The local results are 272/272 unit tests, 151/151 E2E cases and 106/106
-LLVM 20-verified modules. The independent required GitHub CI succeeded on
-[PR #38](https://github.com/CeoMatheusDev/Kyn/pull/38) (run 42529572145) and
-on `main` commit `ac49f66` (run 42529755898), including strict `llvm-as`.
+On the integer-width branch, local results are 276 compiler + 7 std tests,
+157/157 E2E cases and 110/110 LLVM 20-verified modules via `llvmlite`. The
+independent required CI previously passed for
+[PR #38](https://github.com/CeoMatheusDev/Kyn/pull/38) (run 42529572145),
+[PR #39](https://github.com/CeoMatheusDev/Kyn/pull/39) (run 42530026620) and
+post-merge `main` (run 42530205764), including strict `llvm-as`.
+[PR #40](https://github.com/CeoMatheusDev/Kyn/pull/40) independently passed
+both jobs (run 42531409558); post-merge `main` CI must be checked separately.
 
 A missing LLVM in CI **fails** the build, so IR validation cannot be skipped
 silently.

@@ -27,7 +27,7 @@ const usage =
     \\
     \\emit options:
     \\  --llvm            textual LLVM IR (default)
-    \\  --asm             x86-64 assembly (Linux, System V; assemblable with as/ld)
+    \\  --asm             x86-64 assembly (Linux, Kyn register ABI; as/ld)
     \\  -o <file>         write the output to a file (default: stdout)
     \\
     \\general options:

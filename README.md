@@ -15,7 +15,7 @@ The repository currently contains a Zig bootstrap compiler, an experimental Kyn 
 | --- | --- |
 | Compiler implementation | Zig 0.17.0 bootstrap |
 | Frontend | Lexer, parser, AST and semantic analysis |
-| Backends | Textual LLVM IR and Linux x86-64 System V assembly |
+| Backends | Textual LLVM IR and Linux x86-64 assembly (Kyn-internal register ABI) |
 | Language features | Fixed-width integers, booleans, strings, structs, enums, methods, pointers, imports and control flow |
 | Standard library | Experimental; APIs and contracts are incomplete |
 | Self-hosting | Not implemented; Kyn compiler files are prototypes/placeholders |
@@ -57,7 +57,9 @@ The compiler is produced at `zig-out/bin/kync`.
 ## Validate
 
 ```sh
-zig fmt --check build.zig src std
+# Check changed backend/CLI files; see .github/workflows/ci.yml for the
+# complete CI formatting source set (some legacy files still have drift).
+zig fmt --check build.zig src/main.zig src/codegen/llvm.zig src/codegen/x86_64.zig
 zig build test
 zig build e2e
 zig build validate-ir
@@ -65,13 +67,14 @@ zig build validate-ir
 
 Use `zig build validate-ir-strict` to require an LLVM verifier. CI runs the strict validation step so a missing verifier cannot silently pass.
 
-Locally with Zig 0.17.0: **265 compiler unit tests + 7 standard-library
-tests**, **151 native end-to-end cases** and **106 LLVM 20-verified IR
-modules** (`llvmlite`; 13 selected programs also ran under MCJIT). These
-local checks are distinct from the required CI: PR #38 and the resulting
-`main` commit `ac49f66` also passed the strict `llvm-as`, E2E and extension
-jobs. See [Implementation status](docs/status.md) for remaining release
-blockers.
+On the current integer-width branch with Zig 0.17.0: **276 compiler unit
+tests + 7 standard-library tests**, **157 native end-to-end cases** and
+**110 LLVM 20-verified IR modules** (`llvmlite`; four new cases also ran under
+MCJIT). PR #40 passed both required CI jobs, including strict `llvm-as`;
+post-merge `main` validation must be checked separately. PRs #38/#39 and
+their `main` merge commits previously passed strict `llvm-as`, E2E and
+extension jobs. See [Implementation status](docs/status.md) for remaining
+release blockers.
 
 ## Quick start
 

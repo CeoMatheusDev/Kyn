@@ -1,0 +1,5 @@
+// Only integers admit unary minus; bool is not an integer.
+fn main() -> i32 {
+    let invalid = -true;
+    return 0;
+}

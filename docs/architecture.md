@@ -32,7 +32,7 @@ Having both sets does not mean a self-hosted pipeline exists.
       v
   Backend (single interface)
       |-- Textual LLVM IR   -> src/codegen/llvm.zig
-      +-- x86-64 System V   -> src/codegen/x86_64.zig  (as + ld -> executable)
+      +-- Linux x86-64/Kyn ABI -> src/codegen/x86_64.zig (as + ld -> executable)
 ```
 
 The driver (`src/driver.zig`) runs the pipeline and centralizes memory
@@ -93,12 +93,13 @@ declaration order.
 
 - `Symbol.typ == .aggregate` reserves `1 + n` slots: the first is the base
   (reserved) and each field uses `slot + 1 + index`, in declaration order.
-- x86-64: every slot has 8 bytes; field read/write is `movl` at the slot offset,
-  and struct copy walks the fields. Parameters arrive in one register per field
-  (`%rdi`, `%rsi`, …), calls push one word per field and pop in reverse order,
-  and the **return** uses `%eax`, `%edx`, `%ecx`, `%r8d`, `%r9d`, `%r10d`
-  (limit of 6 fields). Literal fields are evaluated on the stack before moving
-  to the return registers, so one field cannot clobber another's result.
+- x86-64: every slot has 8 bytes; field access/copy uses `movq` for 64-bit
+  integers and pointers, `movl` for smaller scalars. Parameters arrive in one
+  register per field (`%rdi`, `%rsi`, …), calls push one word per field and pop
+  in reverse order; the **return** uses `%rax`, `%rdx`, `%rcx`, `%r8`, `%r9`,
+  `%r10` (or their 32-bit names for narrow fields; limit of 6 fields). Literal
+  fields are evaluated on the stack before moving to the return registers, so
+  one field cannot clobber another's result.
 - LLVM IR: one `[n+1 x i64]` stack object per struct; the base address points
   at the reserved last word and field `i` is at `-8*(i+1)` (inbounds GEP). This
   keeps `&struct_var` and `(*ptr).field` stable and matches the native frame;
@@ -107,11 +108,28 @@ declaration order.
   i32 %arg1)` for `fn f(p: P)`); the return remains an aggregate (`{ i32, i1, … }`
   built with `insertvalue` and read with `extractvalue`). LLVM may scalarize
   non-escaping stack objects during optimization. This is NOT a C ABI layout.
-- `sema.registerWordsOf` is the single source for the **6-register** limit: it
-  counts 1 per struct field, 2 per `str`, 2 per enum and 1 per scalar; it applies
-  to declaration, call, struct return and enum return.
+- `sema.registerWordsOf` is the single source for the **6-register** parameter
+  limit in declarations and calls: 1 per struct field or pointer, 2 per `str`
+  or enum, and 2 per `i64`/`u64`/`usize`. Struct returns separately limit fields
+  to six; enum returns use the tag/payload pair.
 - Literals require every field exactly once, which guarantees structs are
   always initialized (no partially built state).
+
+### Integer widths and Kyn's internal calling convention
+
+- Each scalar occupies one eight-byte local slot. The native emitter keeps
+  values up to 32 bits in `%eax`, normalizing 8-/16-bit results to their signed
+  or unsigned range after operations/casts. `i64`, `u64` and `usize` use 64-bit
+  loads, stores and ALU operations in `%rax`. Their return value is in `%rax`.
+- Each wide **scalar parameter** occupies two consecutive argument registers:
+  low 32 bits then high 32 bits (e.g. `%edi`, `%esi` for argument 1). The
+  callee joins the halves before storing the value. A pointer or a wide struct
+  **field** instead occupies one full 64-bit register. These are Kyn-internal
+  rules using System V register names, **not** a C ABI or a promise of FFI.
+- LLVM IR has typed scalar `i64` parameters/results, rather than the native
+  pair-of-register representation. The semantic six-word budget is enforced
+  for both emitters, but their machine-level ABIs are not interchangeable.
+  `str` remains a pair of full 64-bit pointer/length values in native calls.
 
 ### Strings and text output (`str`) — `print` + backends
 
@@ -235,10 +253,11 @@ index in declaration order) plus one **payload** word.
   unknown-to-known assignment is rejected. The native backend transports
   pointer arguments and struct fields in full 64-bit registers/slots. No
   bounds, lifetime or C-layout guarantee is provided.
-- `x86_64.zig`: System V assembly without libc. `_start` calls `kyn_main` and
-  exits through the `exit` syscall. Variables in 8-byte frame slots, expressions
-  in `%eax` with a temporary stack, calls with arguments in
-  `%edi/%esi/%edx/%ecx/%r8d/%r9d`. This is the path validated by execution.
+- `x86_64.zig`: Linux assembly without libc. `_start` calls `kyn_main` and
+  exits through the `exit` syscall. Variables use 8-byte frame slots;
+  expressions use `%eax` or `%rax`, saving intermediates on the stack. Calls
+  use Kyn's layout in `%rdi/%rsi/%rdx/%rcx/%r8/%r9` (with 32-bit halves for
+  wide scalar parameters). This is the path validated by execution.
 
 ### Standard library — `std/`
 
