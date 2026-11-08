@@ -3,7 +3,10 @@ const vscode = require("vscode");
 const cp = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
-const { validateSnapshot, filePathOf, targetAt, findSymbol, referencesFor, remapSnapshotOffsets } = require("./index");
+const {
+  validateSnapshot, filePathOf, targetAt, findSymbol, referencesFor,
+  remapSnapshotOffsets, renameEntries
+} = require("./index");
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const SELECTOR = { language: "kyn", scheme: "file" };
 
@@ -375,6 +378,54 @@ class WorkspaceSymbolIndex {
     }
     return locations;
   }
+  async prepareRename(document, position) {
+    const snapshot = await this.get(document);
+    if (!snapshot) return null;
+    const offset = document.offsetAt(position);
+    const id = this.symbolAt(snapshot, document, offset);
+    if (!id) return null;
+    const symbol = findSymbol(snapshot, id);
+    if (!symbol) return null;
+    const entry = [symbol, ...snapshot.references].find(item => {
+      if (item.target && item.target !== id) return false;
+      const file = this.filePath(snapshot, item.file);
+      return file && canonical(file) === canonical(document.uri.fsPath) &&
+        item.start <= offset && offset < item.end;
+    });
+    if (!entry) return null;
+    return {
+      range: new vscode.Range(document.positionAt(entry.start), document.positionAt(entry.end)),
+      placeholder: symbol.name
+    };
+  }
+  async rename(document, position, newName) {
+    const snapshot = await this.get(document);
+    if (!snapshot) return null;
+    const id = this.symbolAt(snapshot, document, document.offsetAt(position));
+    if (!id) return null;
+    const symbol = findSymbol(snapshot, id);
+    const entries = renameEntries(snapshot, id, newName);
+    if (!symbol || !entries) return null;
+
+    const edit = new vscode.WorkspaceEdit();
+    for (const entry of entries) {
+      const file = this.filePath(snapshot, entry.file);
+      if (!file) return null;
+      const uri = vscode.Uri.file(file);
+      const targetDocument = canonical(file) === canonical(document.uri.fsPath)
+        ? document
+        : await vscode.workspace.openTextDocument(uri);
+      // The snapshot only overlays the root document. Refuse stale imported
+      // buffers rather than applying edits against offsets from disk.
+      if (targetDocument.isDirty && targetDocument !== document) return null;
+      const range = new vscode.Range(
+        targetDocument.positionAt(entry.start), targetDocument.positionAt(entry.end)
+      );
+      if (targetDocument.getText(range) !== symbol.name) return null;
+      edit.replace(uri, range, newName);
+    }
+    return edit;
+  }
   async workspaceSymbols(query) {
     const needle = query.toLowerCase(), result = [], seen = new Set();
     const documents = vscode.workspace.textDocuments.filter(doc =>
@@ -413,6 +464,10 @@ function activate(context) {
     vscode.languages.registerDocumentSymbolProvider(SELECTOR, { provideDocumentSymbols: symbols }),
     vscode.languages.registerDefinitionProvider(SELECTOR, { provideDefinition: (doc, pos) => symbolIndex.definition(doc, pos) }),
     vscode.languages.registerReferenceProvider(SELECTOR, { provideReferences: (doc, pos, ctx) => symbolIndex.references(doc, pos, ctx.includeDeclaration) }),
+    vscode.languages.registerRenameProvider(SELECTOR, {
+      prepareRename: (doc, pos) => symbolIndex.prepareRename(doc, pos),
+      provideRenameEdits: (doc, pos, name) => symbolIndex.rename(doc, pos, name)
+    }),
     vscode.languages.registerWorkspaceSymbolProvider({ provideWorkspaceSymbols: query => symbolIndex.workspaceSymbols(query) }),
     vscode.workspace.onDidOpenTextDocument(doc => { symbolIndex.invalidate(); client.schedule(doc, true); }),
     vscode.workspace.onDidChangeTextDocument(event => {
