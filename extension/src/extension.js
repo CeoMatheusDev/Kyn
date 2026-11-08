@@ -319,11 +319,11 @@ class WorkspaceSymbolIndex {
     const cached = this.cache.get(key);
     if (cached && cached.version === document.version) return cached.snapshot;
     if (this.pending.has(key)) return this.pending.get(key);
-    const revision = this.revision;
+    const revision = this.revision, version = document.version;
     const pending = this.client.semanticIndex(document).then(snapshot => {
-      if (snapshot && revision === this.revision && !document.isClosed) {
-        this.cache.set(key, { version: document.version, snapshot });
-      }
+      if (document.isClosed) return null;
+      if (revision !== this.revision || version !== document.version) return this.get(document);
+      if (snapshot) this.cache.set(key, { version, snapshot });
       return snapshot;
     }).finally(() => {
       if (this.pending.get(key) === pending) this.pending.delete(key);
