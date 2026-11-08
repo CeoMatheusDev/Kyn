@@ -3,6 +3,7 @@ const vscode = require("vscode");
 const cp = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
+const { validateSnapshot, filePathOf, targetAt, findSymbol, referencesFor } = require("./index");
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const SELECTOR = { language: "kyn", scheme: "file" };
 
@@ -187,8 +188,7 @@ class KynClient {
         this.output.appendLine("[symbols] kync returned invalid semantic JSON.");
         return null;
       }
-      if (snapshot.schema !== 1 || !Array.isArray(snapshot.files) ||
-          !Array.isArray(snapshot.symbols) || !Array.isArray(snapshot.references)) {
+      if (!validateSnapshot(snapshot)) {
         this.output.appendLine("[symbols] unsupported semantic index schema.");
         return null;
       }
@@ -332,19 +332,10 @@ class WorkspaceSymbolIndex {
     return pending;
   }
   filePath(snapshot, fileId) {
-    const file = snapshot.files.find(entry => entry.id === fileId);
-    return file ? file.path : null;
+    return filePathOf(snapshot, fileId);
   }
   symbolAt(snapshot, document, offset) {
-    const file = canonical(document.uri.fsPath);
-    const declaration = snapshot.symbols.find(symbol =>
-      canonical(this.filePath(snapshot, symbol.file) || "") === file &&
-      symbol.start <= offset && offset < symbol.end);
-    if (declaration) return declaration.id;
-    const reference = snapshot.references.find(item =>
-      canonical(this.filePath(snapshot, item.file) || "") === file &&
-      item.start <= offset && offset < item.end);
-    return reference ? reference.target : null;
+    return targetAt(snapshot, document.uri.fsPath, offset, canonical);
   }
   async location(snapshot, entry) {
     const file = this.filePath(snapshot, entry.file);
@@ -360,7 +351,7 @@ class WorkspaceSymbolIndex {
     if (!snapshot) return null;
     const id = this.symbolAt(snapshot, document, document.offsetAt(position));
     if (!id) return null;
-    const symbol = snapshot.symbols.find(entry => entry.id === id);
+    const symbol = findSymbol(snapshot, id);
     return symbol ? this.location(snapshot, symbol) : null;
   }
   async references(document, position, includeDeclaration) {
@@ -369,16 +360,8 @@ class WorkspaceSymbolIndex {
     const id = this.symbolAt(snapshot, document, document.offsetAt(position));
     if (!id) return [];
     const locations = [];
-    if (includeDeclaration) {
-      const declaration = snapshot.symbols.find(entry => entry.id === id);
-      if (declaration) {
-        const location = await this.location(snapshot, declaration);
-        if (location) locations.push(location);
-      }
-    }
-    for (const reference of snapshot.references) {
-      if (reference.target !== id) continue;
-      const location = await this.location(snapshot, reference);
+    for (const entry of referencesFor(snapshot, id, includeDeclaration)) {
+      const location = await this.location(snapshot, entry);
       if (location) locations.push(location);
     }
     return locations;
