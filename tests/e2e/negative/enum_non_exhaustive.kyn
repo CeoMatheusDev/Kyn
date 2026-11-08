@@ -1,0 +1,19 @@
+// A `switch` without every case and without `else` is rejected.
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
+fn main() -> i32 {
+    let c = Color.Red;
+    switch c {
+        Red => {
+            return 1;
+        }
+        Green => {
+            return 2;
+        }
+    }
+    return 0;
+}

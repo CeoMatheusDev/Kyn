@@ -2690,3 +2690,322 @@ test "sema: 'print_i32' produces no value for variable initialization" {
     defer f.deinit();
     try expectOnly(&f, .type_mismatch);
 }
+
+test "sema: enum case without payload and exhaustive switch are accepted" {
+    var f = try Fixture.check(
+        \\enum Color { Red, Green, Blue }
+        \\fn main() -> i32 {
+        \\    let c = Color.Green;
+        \\    var total: i32 = 0;
+        \\    switch c {
+        \\        Red => { total = 1; }
+        \\        Green => { total = 2; }
+        \\        Blue => { total = 3; }
+        \\    }
+        \\    return total;
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 0), f.diags.count());
+
+    const checked = f.checked.?;
+    try testing.expectEqual(@as(usize, 1), checked.enums.len);
+    try testing.expectEqualStrings("Color", checked.enums[0].decl.name);
+    try testing.expectEqual(@as(usize, 3), checked.enums[0].cases.len);
+    try testing.expectEqual(@as(i32, 0), checked.enums[0].cases[0].tag);
+    try testing.expectEqual(@as(i32, 2), checked.enums[0].cases[2].tag);
+    try testing.expectEqual(Type.enumeration, checked.symbols[0].typ);
+    // Tag slot + payload slot for the enum, one slot for the counter.
+    try testing.expectEqual(@as(u32, 3), checked.functions[0].slot_count);
+}
+
+test "sema: payload binding declares an i32 symbol for the arm" {
+    var f = try Fixture.check(
+        \\enum Shape { Circle(i32), Empty }
+        \\fn main() -> i32 {
+        \\    let s = Shape.Empty;
+        \\    switch s {
+        \\        Circle(r) => { return r; }
+        \\        Empty => { return 0; }
+        \\    }
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 0), f.diags.count());
+
+    const sw = f.checked.?.functions[0].decl.body[1].kind.switch_stmt;
+    try testing.expectEqual(@as(usize, 2), sw.arms.len);
+    try testing.expectEqual(@as(u32, 0), sw.arms[0].resolved_case.?);
+    try testing.expectEqual(Type.i32, f.checked.?.symbols[sw.arms[0].binding_symbol.?].typ);
+    // `r` lives in its own scope: it is not visible after the switch.
+    try testing.expectEqual(@as(usize, 2), f.checked.?.functions[0].symbol_count);
+}
+
+test "sema: non-exhaustive switch lists the missing cases" {
+    var f = try Fixture.check(
+        \\enum Color { Red, Green, Blue }
+        \\fn main() -> i32 {
+        \\    let c = Color.Red;
+        \\    switch c {
+        \\        Red => { return 1; }
+        \\    }
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .non_exhaustive_switch);
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "missing 'Green', 'Blue'") != null,
+    );
+}
+
+test "sema: 'else' arm in an exhaustive switch is unreachable" {
+    var f = try Fixture.check(
+        \\enum Color { Red, Green }
+        \\fn main() -> i32 {
+        \\    let c = Color.Red;
+        \\    switch c {
+        \\        Red => { return 1; }
+        \\        Green => { return 2; }
+        \\        else => { return 3; }
+        \\    }
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .unreachable_arm);
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "already covers every case") != null,
+    );
+}
+
+test "sema: unknown and duplicated cases are diagnosed" {
+    var f = try Fixture.check(
+        \\enum Color { Red, Green }
+        \\fn main() -> i32 {
+        \\    let c = Color.Red;
+        \\    switch c {
+        \\        Purple => { return 1; }
+        \\        Red => { return 2; }
+        \\        Red => { return 3; }
+        \\        Green => { return 4; }
+        \\    }
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 2), f.diags.count());
+    try testing.expectEqual(diagnostics.Kind.unknown_case, f.diags.items.items[0].kind);
+    try testing.expectEqual(diagnostics.Kind.invalid_switch_arm, f.diags.items.items[1].kind);
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[1].message, "already handled") != null,
+    );
+}
+
+test "sema: payload binding rules" {
+    var f = try Fixture.check(
+        \\enum Shape { Circle(i32), Empty }
+        \\fn main() -> i32 {
+        \\    let s = Shape.Empty;
+        \\    switch s {
+        \\        Circle => { return 1; }
+        \\        Empty(x) => { return 2; }
+        \\    }
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 2), f.diags.count());
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "carries a payload; bind it with 'Circle(name)'") != null,
+    );
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[1].message, "has no payload; 'x' cannot be bound") != null,
+    );
+}
+
+test "sema: constructor payload is checked" {
+    var f = try Fixture.check(
+        \\enum Shape { Circle(i32), Empty }
+        \\fn main() -> i32 {
+        \\    let a = Shape.Circle(true);
+        \\    let b = Shape.Circle(1, 2);
+        \\    let c = Shape.Empty(1);
+        \\    let d = Shape.Circle;
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 4), f.diags.count());
+    try testing.expectEqual(diagnostics.Kind.type_mismatch, f.diags.items.items[0].kind);
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "payload of 'Shape.Circle' has type 'i32', found 'bool'") != null,
+    );
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[1].message, "expects 1 payload argument, received 2") != null,
+    );
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[2].message, "has no payload; use 'Shape.Empty'") != null,
+    );
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[3].message, "needs a payload: use 'Shape.Circle(value)'") != null,
+    );
+}
+
+test "sema: enums are nominal in annotations and assignments" {
+    var f = try Fixture.check(
+        \\enum A { One, Two }
+        \\enum B { One, Two }
+        \\fn main() -> i32 {
+        \\    let a: A = B.One;
+        \\    var b: A = A.Two;
+        \\    b = B.One;
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 2), f.diags.count());
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "is enum 'B', but the annotation is 'A'") != null,
+    );
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[1].message, "is enum 'A', but the assigned value is enum 'B'") != null,
+    );
+}
+
+test "sema: enum in parameters, returns and struct fields is unsupported" {
+    var f = try Fixture.check(
+        \\enum Color { Red }
+        \\struct Holder { c: Color }
+        \\fn takes(c: Color) -> i32 { return 0; }
+        \\fn gives() -> Color { return Color.Red; }
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 3), f.diags.count());
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "of enum type is not supported yet") != null,
+    );
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[1].message, "in parameters is not supported yet") != null,
+    );
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[2].message, "in returns is not supported yet") != null,
+    );
+}
+
+test "sema: switch requires an enum value" {
+    var f = try Fixture.check(
+        \\fn main() -> i32 {
+        \\    let x = 1;
+        \\    switch x {
+        \\        Red => { return 1; }
+        \\    }
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .type_mismatch);
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "'switch' requires an enum value, found 'i32'") != null,
+    );
+}
+
+test "sema: switch over a constructed value is unsupported" {
+    var f = try Fixture.check(
+        \\enum Color { Red }
+        \\fn main() -> i32 {
+        \\    switch Color.Red {
+        \\        Red => { return 1; }
+        \\    }
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .unsupported);
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "store it in a variable first") != null,
+    );
+}
+
+test "sema: duplicated case inside an enum is diagnosed" {
+    var f = try Fixture.check(
+        \\enum Color { Red, Red }
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .duplicate_declaration);
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "case 'Red' already declared in enum 'Color'") != null,
+    );
+}
+
+test "sema: a struct and an enum cannot share a name" {
+    var f = try Fixture.check(
+        \\struct Color { x: i32 }
+        \\enum Color { Red }
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .duplicate_declaration);
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "enum 'Color' already declared as a struct or enum") != null,
+    );
+}
+
+test "sema: non-i32 payload and empty enum are unsupported" {
+    var f = try Fixture.check(
+        \\enum Weird { Box(bool) }
+        \\enum Nothing { }
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 2), f.diags.count());
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "payload type 'bool' is not supported yet") != null,
+    );
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[1].message, "with no cases is not supported") != null,
+    );
+}
+
+test "sema: operators on enum values are unsupported" {
+    var f = try Fixture.check(
+        \\enum Color { Red, Green }
+        \\fn main() -> i32 {
+        \\    let a = Color.Red;
+        \\    let b = Color.Green;
+        \\    if a == b { return 1; }
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .unsupported);
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "'==' is not supported on an enum value") != null,
+    );
+}
+
+test "sema: an enum value cannot be used as a statement" {
+    var f = try Fixture.check(
+        \\enum Color { Red }
+        \\fn main() -> i32 {
+        \\    Color.Red;
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .unsupported);
+}
+
+test "sema: alwaysReturns understands a switch with every arm returning" {
+    var f = try Fixture.check(
+        \\enum Color { Red, Green }
+        \\fn pick(c: i32) -> i32 {
+        \\    let color = Color.Red;
+        \\    switch color {
+        \\        Red => { return 1; }
+        \\        Green => { return 2; }
+        \\    }
+        \\}
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 0), f.diags.count());
+}

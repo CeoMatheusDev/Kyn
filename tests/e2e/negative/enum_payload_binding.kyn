@@ -1,0 +1,17 @@
+// A case without payload cannot bind a name.
+enum Shape {
+    Circle(i32),
+    Empty,
+}
+
+fn main() -> i32 {
+    let s = Shape.Empty;
+    switch s {
+        Circle(r) => {
+            return r;
+        }
+        Empty(value) => {
+            return value;
+        }
+    }
+}

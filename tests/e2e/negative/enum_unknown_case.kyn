@@ -1,0 +1,20 @@
+// A case that the enum does not declare is rejected.
+enum Color {
+    Red,
+    Green,
+}
+
+fn main() -> i32 {
+    let c = Color.Red;
+    switch c {
+        Red => {
+            return 1;
+        }
+        Green => {
+            return 2;
+        }
+        Purple => {
+            return 3;
+        }
+    }
+}

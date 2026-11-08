@@ -1,0 +1,66 @@
+// Enum with and without payload consumed by an exhaustive `switch`:
+// the tag drives the arm and the payload is bound to a new variable.
+// expect-stdout: 2
+// expect-stdout: 5
+// expect-stdout: 100
+// expect-exit: 0
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
+enum Shape {
+    Circle(i32),
+    Square(i32),
+    Empty,
+}
+
+fn describe(color: i32) -> i32 {
+    return color;
+}
+
+fn main() -> i32 {
+    let green = Color.Green;
+    var tag: i32 = 0;
+    switch green {
+        Red => {
+            tag = 1;
+        }
+        Green => {
+            tag = 2;
+        }
+        Blue => {
+            tag = 3;
+        }
+    }
+    print_i32(tag);
+
+    let circle = Shape.Circle(5);
+    switch circle {
+        Circle(radius) => {
+            print_i32(radius);
+        }
+        Square(side) => {
+            print_i32(side + 1000);
+        }
+        Empty => {
+            print_i32(0);
+        }
+    }
+
+    let empty = Shape.Empty;
+    switch empty {
+        Circle(radius) => {
+            print_i32(radius);
+        }
+        Square(side) => {
+            print_i32(side);
+        }
+        Empty => {
+            print_i32(100);
+        }
+    }
+
+    return describe(tag) - 2;
+}

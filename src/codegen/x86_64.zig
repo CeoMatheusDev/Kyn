@@ -1280,3 +1280,44 @@ test "x86_64: program without print_i32 does not emit the decimal routine" {
     const asm_text = try emitFixture(&f);
     try testing.expect(std.mem.indexOf(u8, asm_text, "kyn_print_i32") == null);
 }
+
+test "x86_64: enum stores the tag in the first slot and the payload in the second" {
+    var f = try support.Fixture.build(
+        \\enum Shape { Circle(i32), Empty }
+        \\fn main() -> i32 {
+        \\    let plain = Shape.Empty;
+        \\    let with_payload = Shape.Circle(7);
+        \\    return 0;
+        \\}
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+    // `Empty` is case 1: tag only.
+    try support.expectContains(asm_text, "movl $1, -8(%rbp)");
+    // `Circle` is case 0: payload in the payload slot, then the tag.
+    try support.expectContains(asm_text, "movl $7, %eax");
+    try support.expectContains(asm_text, "movl %eax, -32(%rbp)");
+    try support.expectContains(asm_text, "movl $0, -24(%rbp)");
+}
+
+test "x86_64: switch compares the tag and copies the payload into the binding" {
+    var f = try support.Fixture.build(
+        \\enum Shape { Circle(i32), Empty }
+        \\fn main() -> i32 {
+        \\    let s = Shape.Circle(3);
+        \\    var total: i32 = 0;
+        \\    switch s {
+        \\        Circle(r) => { total = r; }
+        \\        Empty => { total = 1; }
+        \\    }
+        \\    return total;
+        \\}
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+    try support.expectContains(asm_text, "cmpl $0, %eax");
+    try support.expectContains(asm_text, "cmpl $1, %eax");
+    try support.expectContains(asm_text, "je .Lmain_switch_case");
+    try support.expectContains(asm_text, "jmp .Lmain_switch_end");
+    try support.expectContains(asm_text, ".Lmain_switch_end");
+}

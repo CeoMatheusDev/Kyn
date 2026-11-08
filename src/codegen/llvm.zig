@@ -1374,3 +1374,60 @@ test "llvm: program without print_i32 does not emit the decimal routine" {
     const ir = try emitFixture(&f);
     try testing.expect(std.mem.indexOf(u8, ir, "kyn_print_i32") == null);
 }
+
+test "llvm: enum allocates tag and payload slots and stores the case tag" {
+    var f = try support.Fixture.build(
+        \\enum Shape { Circle(i32), Empty }
+        \\fn main() -> i32 {
+        \\    let plain = Shape.Empty;
+        \\    let with_payload = Shape.Circle(7);
+        \\    return 0;
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+    try support.expectContains(ir, "alloca i32, align 4");
+    try support.expectContains(ir, "store i32 1, ptr %v0, align 4");
+    try support.expectContains(ir, "store i32 7, ptr %");
+}
+
+test "llvm: switch lowers to a switch on the tag with one block per arm" {
+    var f = try support.Fixture.build(
+        \\enum Color { Red, Green, Blue }
+        \\fn main() -> i32 {
+        \\    let c = Color.Green;
+        \\    var total: i32 = 0;
+        \\    switch c {
+        \\        Red => { total = 1; }
+        \\        Green => { total = 2; }
+        \\        Blue => { total = 3; }
+        \\    }
+        \\    return total;
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+    try support.expectContains(ir, "switch i32 %t0, label %switch_end");
+    try support.expectContains(ir, "i32 0, label %switch_case");
+    try support.expectContains(ir, "i32 1, label %switch_case");
+    try support.expectContains(ir, "i32 2, label %switch_case");
+    try support.expectContains(ir, "switch_case");
+}
+
+test "llvm: switch with else uses the else block as the default label" {
+    var f = try support.Fixture.build(
+        \\enum Shape { Circle(i32), Empty }
+        \\fn main() -> i32 {
+        \\    let s = Shape.Empty;
+        \\    var total: i32 = 0;
+        \\    switch s {
+        \\        Circle(r) => { total = r; }
+        \\        else => { total = 9; }
+        \\    }
+        \\    return total;
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+    try support.expectContains(ir, "label %switch_else");
+}
