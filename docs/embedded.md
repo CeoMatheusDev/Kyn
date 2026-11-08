@@ -19,12 +19,12 @@ Verified facts, with the validation that backs each one (see
 
 | Capability | State | Evidence |
 | --- | --- | --- |
-| Lexer → parser → AST → semantics → backend pipeline | Implemented | 244 compiler tests |
+| Lexer → parser → AST → semantics → backend pipeline | Implemented | 246 compiler unit tests + 7 std tests |
 | Native backend without libc (`_start`, `write`/`exit` syscalls, System V) | Implemented, executed | `as` + `ld` + exit code and stdout checked by 31 e2e fixtures |
 | Textual LLVM IR backend (official target, configurable in principle) | Implemented for the current subset | 90/90 modules accepted by the LLVM verifier (`llvm-as` in CI) |
 | Multi-file programs (`import "path.kyn";`) | Implemented | 9 executed module fixtures, 3 negative ones |
 | Nominal `struct`/`enum` with documented layout and call ABI | Implemented (tag/payload pair, one register per field) | Structural tests in both backends + executed fixtures |
-| `impl`/methods, by value, no hidden parameter | Implemented | 121 e2e cases, mangled `Type_method` symbols |
+| `impl`/methods, by value, no hidden parameter | Implemented | 130 e2e cases, mangled `Type_method` symbols |
 | Explicit register limit (6 words) instead of a silent ABI | Enforced with diagnostics | Declaration and call-site tests |
 | Arena allocation for compiler-owned data, no global state | Implemented | Architecture notes in `docs/architecture.md` |
 
@@ -37,16 +37,20 @@ down and tested. That is the part worth keeping.
 1. **One target.** The native backend is Linux x86-64 with hard-coded
    registers, a hard-coded `target triple` in the IR and a Linux `exit`
    syscall. There is no target abstraction to plug Cortex-M or RISC-V into.
-2. **No pointers, arrays or slices.** There is no way to express an address,
-   dereference it, index memory or describe a buffer. MMIO is impossible
-   without this.
+2. **Pointers are still deliberately limited.** Typed pointers, address-of,
+   dereference, struct-field access through a pointer, pointer arithmetic and
+   pointer equality/inequality exist for the current target. Arrays, slices,
+   indexing, nullability rules, ownership/borrowing and a formal aliasing model
+   are not implemented.
 3. **No `unsafe`/`volatile`.** `src/sema/unsafe.zig` holds the policy, but the
    AST has no `unsafe` block, no `volatile` qualifier and no attributes, so a
    register read could be reordered or dropped with no diagnostic.
-4. **One integer width.** `i32` only (plus `bool`/`str`): no `u8`/`i8`,
-   `u16`/`i16`, `u32`, `u64`, `usize`, no explicit conversions, no bitwise
-   operators, no shifts. Register access needs exact widths and defined
-   overflow semantics.
+4. **Integer widths exist, but target layout is not configurable.** The
+   compiler supports `i8`/`i16`/`i32`/`i64`, `u8`/`u16`/`u32`/`u64` and
+   `usize`, with explicit integer casts and bitwise/shift operators. The current
+   target remains fixed to Linux x86-64; portable data layouts, overflow
+   contracts across targets and target-specific integer semantics still need
+   formalization.
 5. **No layout control.** No `#[repr(C)]`, no explicit alignment, no
    compile-time offset assertions. A hardware register block must have a
    guaranteed layout.
