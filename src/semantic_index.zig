@@ -125,10 +125,10 @@ const Builder = struct {
         for (self.checked.functions, 0..) |function, function_index| {
             const decl = function.decl;
             const end = @min(
-                @as(usize, function.symbol_start) + function.symbol_count,
+                @as(usize, function.symbol_start) + @as(usize, function.symbol_count),
                 self.checked.symbols.len,
             );
-            const start: usize = @min(function.symbol_start, end);
+            const start: usize = @min(@as(usize, function.symbol_start), end);
             for (self.checked.symbols[start..end], start..) |symbol, symbol_index| {
                 const kind: []const u8 = if (symbol.kind == .param) "parameter" else "variable";
                 try self.addSymbol(
