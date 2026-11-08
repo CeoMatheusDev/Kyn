@@ -86,9 +86,9 @@ const Builder = struct {
 
     fn addTypeReference(self: *Builder, file: u32, type_name: ast.TypeName) !void {
         if (self.checked.findStruct(type_name.name)) |id| {
-            try self.addReference(try self.symbolId("struct", id), file, type_name.span, "type");
+            try self.addReference(try self.symbolId("struct", @as(usize, id)), file, type_name.span, "type");
         } else if (self.checked.findEnum(type_name.name)) |id| {
-            try self.addReference(try self.symbolId("enum", id), file, type_name.span, "type");
+            try self.addReference(try self.symbolId("enum", @as(usize, id)), file, type_name.span, "type");
         }
     }
 
@@ -97,7 +97,7 @@ const Builder = struct {
             const decl = function.decl;
             const kind: []const u8 = if (function.is_method) "method" else "function";
             const container = if (decl.owner_type) |owner| owner.name else null;
-            try self.addSymbol(try self.symbolId("function", i), decl.name, kind, decl.file_id, decl.name_span, container);
+            try self.addSymbol(try self.symbolId("function", @as(usize, i)), decl.name, kind, decl.file_id, decl.name_span, container);
             if (decl.owner_type) |owner| try self.addTypeReference(decl.file_id, owner);
             for (decl.params) |param| try self.addTypeReference(decl.file_id, param.type_name);
             if (decl.return_type) |return_type| try self.addTypeReference(decl.file_id, return_type);
@@ -151,7 +151,7 @@ const Builder = struct {
 
     fn variableId(self: *Builder, index: ?u32) !?[]const u8 {
         if (index) |i| {
-            if (@as(usize, i) < self.checked.symbols.len) return try self.symbolId("variable", i);
+            if (@as(usize, i) < self.checked.symbols.len) return try self.symbolId("variable", @as(usize, i));
         }
         return null;
     }
@@ -160,7 +160,7 @@ const Builder = struct {
         if (enum_index) |ei| {
             if (case_index) |ci| {
                 if (@as(usize, ei) < self.checked.enums.len and @as(usize, ci) < self.checked.enums[ei].cases.len) {
-                    return try self.pairId("case", ei, ci);
+                    return try self.pairId("case", @as(usize, ei), @as(usize, ci));
                 }
             }
         }
@@ -186,7 +186,7 @@ const Builder = struct {
         }
         if (owner) |struct_index| {
             if (@as(usize, struct_index) < self.checked.structs.len and @as(usize, index) < self.checked.structs[struct_index].fields.len) {
-                return try self.pairId("field", struct_index, index);
+                return try self.pairId("field", @as(usize, struct_index), @as(usize, index));
             }
         }
         return null;
@@ -226,7 +226,7 @@ const Builder = struct {
                         for (literal.fields) |init| {
                             for (fields, 0..) |field, field_index| {
                                 if (std.mem.eql(u8, field.name, init.name)) {
-                                    try self.addReference(try self.pairId("field", id, field_index), file, init.name_span, "field_init");
+                                    try self.addReference(try self.pairId("field", @as(usize, id), field_index), file, init.name_span, "field_init");
                                     break;
                                 }
                             }
