@@ -65,10 +65,10 @@ implementation and reproducible tests.
 - [ ] Extend semantic analysis with floating-point types, richer flow
       analysis, ownership/lifetime checking and a complete error model.
 - [ ] Define and validate the official backend. The x86-64 backend is validated
-      by execution; LLVM IR passed strict `llvm-as` on the integrated PR #40
-      and `main`. This shift-count cycle still needs its own strict CI. The
-      choice of the official backend and a configurable `target triple` remain
-      pending.
+      by execution; LLVM IR passed strict `llvm-as` on PR #40 and its `main`
+      merge commit, and on the shift-count PR #41. Post-merge `main` CI is a
+      separate gate. The choice of the official backend and a configurable
+      `target triple` remain pending.
 
 ## Phase 2 — Freestanding and embedded targets
 

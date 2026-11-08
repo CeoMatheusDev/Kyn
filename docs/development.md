@@ -140,11 +140,12 @@ requests and manual dispatch. On `ubuntu-24.04` the workflow:
 
 On the current shift-count branch, local results are 278 compiler + 7 std
 tests (285/285), 158/158 E2E cases and 111/111 LLVM 20-verified modules
-via `llvmlite`; its strict `llvm-as` PR check is still required. Earlier
-[PR #40](https://github.com/CeoMatheusDev/Kyn/pull/40) passed both jobs on
-its final head (run 42531600138); `main` also passed both jobs on the merge
-commit `33a61cd` (run 42531803954), including strict LLVM validation. PRs
-#36/#37 remain separate and have a failing compiler check.
+via `llvmlite`. [PR #41](https://github.com/CeoMatheusDev/Kyn/pull/41)
+passed both required CI jobs, including strict `llvm-as` (run 42532559205);
+post-merge `main` CI is a separate gate. Earlier
+[PR #40](https://github.com/CeoMatheusDev/Kyn/pull/40) and its `main` merge
+commit `33a61cd` also passed both jobs (runs 42531600138/42531803954).
+PRs #36/#37 remain separate and have a failing compiler check.
 
 A missing LLVM in CI **fails** the build, so IR validation cannot be skipped
 silently.

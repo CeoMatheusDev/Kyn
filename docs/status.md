@@ -3,9 +3,9 @@
 This document separates integrated work (PRs #38–#40, including the
 post-merge `main` CI on `33a61cd`) from the current shift-count contract on
 `arena/e4fd71ba-kyn` (November 8, 2026). Local validation uses Zig 0.17.0,
-Linux x86-64, GNU `as`/`ld` and LLVM 20 (`llvmlite`); strict `llvm-as` CI for
-this new branch has not run yet. Earlier validation remains historical evidence,
-not a claim about outstanding feature branches.
+Linux x86-64, GNU `as`/`ld` and LLVM 20 (`llvmlite`). PR #41 passed strict
+`llvm-as` CI; post-merge `main` CI remains a separate gate. Earlier validation
+remains historical evidence, not a claim about outstanding feature branches.
 
 ## Summary
 
@@ -151,8 +151,9 @@ mask instruction for 8-/16-bit values. Valid in-range shifts are unchanged.
   `shift_count_modulo.kyn` (8-/16-/32-/64-bit, signed/unsigned and mixed count
   types). No existing fixtures were removed.
 - LLVM 20 `llvmlite.parse_assembly` + `.verify`: **111/111** modules. The new
-  fixture also returned 0 under MCJIT. This is not the strict `llvm-as` CI
-  result; CI must validate the final PR head and the post-merge `main` commit.
+  fixture also returned 0 under MCJIT. These local checks are independent of
+  the passing strict `llvm-as` CI on PR #41; the final PR head and post-merge
+  `main` commit must each be validated separately.
 - Extension check/tests/manifests: 4/4 tests passed locally.
 
 **Not solved:** division by zero and signed division overflow have different
@@ -190,6 +191,10 @@ compiler checks and must not be merged red.
   [run 42531600138](https://github.com/CeoMatheusDev/Kyn/actions/runs/42531600138));
   post-merge `main` [run 42531803954](https://github.com/CeoMatheusDev/Kyn/actions/runs/42531803954)
   passed both jobs on that exact merge commit. The source branch was preserved.
+- [PR #41](https://github.com/CeoMatheusDev/Kyn/pull/41) passed both CI jobs,
+  including strict `llvm-as` and 158 executable E2E cases
+  ([run 42532559205](https://github.com/CeoMatheusDev/Kyn/actions/runs/42532559205)).
+  A green PR does not replace the final head check or post-merge `main` CI.
 - PR #37 (target foundations, 10 exclusive commits) and PR #36 (editor rename,
   4 exclusive commits) remain open with failing compiler checks. Neither was
   merged or discarded; evaluate them independently after their required checks
