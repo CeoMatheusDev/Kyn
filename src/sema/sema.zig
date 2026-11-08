@@ -189,18 +189,25 @@ pub const Type = union(enum) {
 };
 
 test "sema type metadata: usize is a 64-bit unsigned integer" {
-    try std.testing.expectEqual(@as(u32, 64), Type.usize.bitWidth());
-    try std.testing.expect(!Type.usize.isSigned());
-    try std.testing.expectEqual(@as(usize, 2), Type.usize.registerWords());
+    const usize_type: Type = .usize;
+    try std.testing.expectEqual(@as(u32, 64), usize_type.bitWidth());
+    try std.testing.expect(!usize_type.isSigned());
+    try std.testing.expectEqual(@as(usize, 2), usize_type.registerWords());
 }
 
 test "sema type metadata: signedness and widths match integer names" {
-    try std.testing.expectEqual(@as(u32, 8), Type.i8.bitWidth());
-    try std.testing.expectEqual(@as(u32, 16), Type.u16.bitWidth());
-    try std.testing.expectEqual(@as(u32, 32), Type.i32.bitWidth());
-    try std.testing.expectEqual(@as(u32, 64), Type.u64.bitWidth());
-    try std.testing.expect(Type.i64.isSigned());
-    try std.testing.expect(!Type.u64.isSigned());
+    const i8_type: Type = .i8;
+    const u16_type: Type = .u16;
+    const i32_type: Type = .i32;
+    const i64_type: Type = .i64;
+    const u64_type: Type = .u64;
+
+    try std.testing.expectEqual(@as(u32, 8), i8_type.bitWidth());
+    try std.testing.expectEqual(@as(u32, 16), u16_type.bitWidth());
+    try std.testing.expectEqual(@as(u32, 32), i32_type.bitWidth());
+    try std.testing.expectEqual(@as(u32, 64), u64_type.bitWidth());
+    try std.testing.expect(i64_type.isSigned());
+    try std.testing.expect(!u64_type.isSigned());
 }
 
 /// A pointer type whose pointee is `.unknown`. Used when the exact pointee
