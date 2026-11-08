@@ -1,0 +1,59 @@
+{
+  "Function": {
+    "prefix": "fn",
+    "body": [
+      "fn ${1:name}(${2})${3: -> i32} {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "Declare a Kyn function"
+  },
+  "Main function": {
+    "prefix": "main",
+    "body": [
+      "fn main() -> i32 {",
+      "    ${0:return 0;}",
+      "}"
+    ],
+    "description": "Kyn program entry point"
+  },
+  "Struct": {
+    "prefix": "struct",
+    "body": [
+      "struct ${1:Name} {",
+      "    ${2:field}: ${3:i32},",
+      "}"
+    ],
+    "description": "Declare a Kyn struct"
+  },
+  "Enum": {
+    "prefix": "enum",
+    "body": [
+      "enum ${1:Name} {",
+      "    ${2:First},",
+      "    ${3:Second},",
+      "}"
+    ],
+    "description": "Declare a Kyn enum"
+  },
+  "If / else": {
+    "prefix": "if",
+    "body": [
+      "if ${1:condition} {",
+      "    ${2}",
+      "} else {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "Conditional branch"
+  },
+  "While loop": {
+    "prefix": "while",
+    "body": [
+      "while ${1:condition} {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "While loop"
+  }
+}
