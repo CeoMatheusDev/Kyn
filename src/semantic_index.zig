@@ -144,7 +144,7 @@ const Builder = struct {
 
     fn functionId(self: *Builder, index: ?u32) !?[]const u8 {
         if (index) |i| {
-            if (@as(usize, i) < self.checked.functions.len) return try self.symbolId("function", i);
+            if (@as(usize, i) < self.checked.functions.len) return try self.symbolId("function", @as(usize, i));
         }
         return null;
     }
@@ -221,7 +221,7 @@ const Builder = struct {
             .struct_literal => |literal| {
                 if (literal.resolved_struct) |id| {
                     if (@as(usize, id) < self.checked.structs.len) {
-                        try self.addReference(try self.symbolId("struct", id), file, literal.type_name.span, "construct");
+                        try self.addReference(try self.symbolId("struct", @as(usize, id)), file, literal.type_name.span, "construct");
                         const fields = self.checked.structs[id].fields;
                         for (literal.fields) |init| {
                             for (fields, 0..) |field, field_index| {
