@@ -166,6 +166,16 @@ const FnEmitter = struct {
     label_count: u32 = 0,
     /// Has the current block already ended (return)? Avoids unreachable code.
     terminated: bool = false,
+    /// Type of the value left by the last `emitExpr` call. Used to know whether
+    /// the result is in `%eax` (32-bit scalar) or was spilled to memory (e.g.
+    /// a 64-bit pointer). `null` means no expression has been emitted yet.
+    last_expr_type: ?sema.Type = null,
+    /// Slot where the last expression was spilled, if `last_expr_type` is a
+    /// pointer (stored as a 64-bit value in memory rather than in `%eax`).
+    last_expr_slot: u32 = 0,
+    /// Number of extra stack slots reserved for pointer temporaries (beyond
+    /// the slots already counted by `info.slot_count`).
+    ptr_slots: u32 = 0,
 
     fn init(
         arena: std.mem.Allocator,
@@ -174,7 +184,7 @@ const FnEmitter = struct {
         info: sema.FunctionInfo,
         state: *codegen.ProgramState,
     ) FnEmitter {
-        return .{ .arena = arena, .func = func, .checked = checked, .info = info, .state = state };
+        return .{ .arena = arena, .func = func, .checked = checked, .info = info, .state = state, .last_expr_type = null, .last_expr_slot = 0, .ptr_slots = 0 };
     }
 
     fn print(self: *FnEmitter, comptime fmt: []const u8, args: anytype) !void {
@@ -195,6 +205,21 @@ const FnEmitter = struct {
 
     fn symbolAt(self: *FnEmitter, index: u32) *const sema.Symbol {
         return &self.checked.symbols[index];
+    }
+
+    /// Allocates an extra stack slot for a pointer temporary and returns its
+    /// slot index (counting from 0, after the regular `info.slot_count` slots).
+    fn allocPtrSlot(self: *FnEmitter) u32 {
+        const slot = self.info.slot_count + self.ptr_slots;
+        self.ptr_slots += 1;
+        return slot;
+    }
+
+    /// Offset of a stack slot (regular slots use `slot` directly; pointer
+    /// temporaries use `allocPtrSlot` which returns indices starting after
+    /// `info.slot_count`).
+    fn ptrSlotOffset(slot: u32) u32 {
+        return 8 * (slot + 1);
     }
 
     /// Register words the type consumes (struct: one per field).
@@ -219,7 +244,16 @@ const FnEmitter = struct {
         }
         if (register_words > arg_registers.len) return error.UnsupportedNode;
 
-        const frame_bytes: u32 = std.mem.alignForward(u32, self.info.slot_count * 8, 16);
+        // Reserve extra slots for pointer temporaries (address-of results).
+        // Count pointer-typed locals/params: each may need an extra stack slot
+        // for an address-of temporary. This keeps the frame size unchanged for
+        // functions that don't use pointers.
+        var ptr_var_count: u32 = 0;
+        for (self.info.symbol_start .. self.info.symbol_start + self.info.symbol_count) |i| {
+            if (self.checked.symbols[i].typ == .ptr) ptr_var_count += 1;
+        }
+        const total_slots: u32 = self.info.slot_count + ptr_var_count;
+        const frame_bytes: u32 = std.mem.alignForward(u32, total_slots * 8, 16);
 
         try self.print(".type kyn_{s}, @function\n", .{self.info.symbol_name});
         try self.print("kyn_{s}:\n", .{self.info.symbol_name});
@@ -294,7 +328,15 @@ const FnEmitter = struct {
                     try self.emitEnumStore(symbol, decl.init);
                 } else {
                     try self.emitExpr(decl.init);
-                    try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
+                    if (self.last_expr_type == .ptr) {
+                        // Pointer value was spilled to memory by emitExpr;
+                        // store it into the variable's slot.
+                        try self.print("    mov %rax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
+                        self.last_expr_type = null;
+                        self.last_expr_slot = 0;
+                    } else {
+                        try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
+                    }
                 }
             },
 
@@ -308,7 +350,15 @@ const FnEmitter = struct {
                     try self.emitEnumStore(symbol, assign.value);
                 } else {
                     try self.emitExpr(assign.value);
-                    try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
+                    if (self.last_expr_type == .ptr) {
+                        // Pointer value was spilled to memory by emitExpr;
+                        // store it into the variable's slot.
+                        try self.print("    mov %rax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
+                        self.last_expr_type = null;
+                        self.last_expr_slot = 0;
+                    } else {
+                        try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
+                    }
                 }
             },
 
@@ -518,20 +568,74 @@ const FnEmitter = struct {
                 // `str` does not fit in `%eax`: it is only copied/printed by dedicated
                 // routines, and semantics refuses to use it as a scalar.
                 if (symbol.typ == .str) return error.MiscompiledAst;
-                try self.print("    movl -{d}(%rbp), %eax\n", .{slotOffset(symbol.slot)});
+                if (symbol.typ == .ptr) {
+                    // Pointer values are 64-bit: load into %rax.
+                    try self.print("    movq -{d}(%rbp), %rax\n", .{slotOffset(symbol.slot)});
+                    self.last_expr_type = .ptr;
+                    self.last_expr_slot = 0; // in %rax, not memory
+                } else {
+                    try self.print("    movl -{d}(%rbp), %eax\n", .{slotOffset(symbol.slot)});
+                }
             },
 
             .unary => |unary| {
-                try self.emitExpr(unary.operand);
                 switch (unary.op) {
-                    .neg => try self.print("    negl %eax\n", .{}),
+                    .address_of => {
+                        // `&var`: emit the address of a local variable.
+                        // The operand must be an identifier resolving to a
+                        // symbol with a stack slot.
+                        const operand_expr = unary.operand;
+                        if (operand_expr.kind != .identifier) {
+                            return error.UnsupportedNode;
+                        }
+                        const symbol = self.symbolAt(operand_expr.resolved orelse return error.MiscompiledAst);
+                        if (symbol.typ == .str) return error.MiscompiledAst;
+                        // Allocate a stack slot to hold the 64-bit pointer.
+                        const ptr_slot = self.allocPtrSlot();
+                        // lea -offset(%rbp), %rax
+                        try self.print("    lea -{d}(%rbp), %rax\n", .{slotOffset(symbol.slot)});
+                        // mov %rax, -ptr_slot(%rbp)
+                        try self.print("    mov %rax, -{d}(%rbp)\n", .{ptrSlotOffset(ptr_slot)});
+                        self.last_expr_type = .ptr;
+                        self.last_expr_slot = ptr_slot;
+                    },
+                    .dereference => {
+                        // `*ptr`: load the value pointed to by the pointer.
+                        // The pointer operand should have been emitted already,
+                        // leaving either a 64-bit pointer in memory (last_expr_slot > 0)
+                        // or already in %rax (last_expr_slot == 0).
+                        try self.emitExpr(unary.operand);
+                        if (self.last_expr_type == .ptr and self.last_expr_slot != 0) {
+                            // Pointer was spilled to memory: load it into %rax.
+                            try self.print("    mov -{d}(%rbp), %rax\n", .{ptrSlotOffset(self.last_expr_slot)});
+                        }
+                        // If last_expr_slot == 0, the pointer is already in %rax
+                        // (loaded by the .identifier case). Just dereference.
+                        // mov (%rax), %eax  -- load the i32 value pointed to.
+                        try self.print("    mov (%rax), %eax\n", .{});
+                        self.last_expr_type = .i32;
+                        self.last_expr_slot = 0;
+                    },
+                    .neg => {
+                        try self.emitExpr(unary.operand);
+                        try self.print("    negl %eax\n", .{});
+                    },
                     .not => {
+                        try self.emitExpr(unary.operand);
                         try self.print("    cmpl $0, %eax\n", .{});
                         try self.print("    sete %al\n", .{});
                         try self.print("    movzbl %al, %eax\n", .{});
                     },
-                    .bitnot => try self.print("    notl %eax\n", .{}),
+                    .bitnot => {
+                        try self.emitExpr(unary.operand);
+                        try self.print("    notl %eax\n", .{});
+                    },
                 }
+                self.last_expr_type = switch (unary.op) {
+                    .address_of => .ptr,
+                    .dereference => .i32,
+                    else => self.last_expr_type,
+                };
             },
 
             .binary => |binary| {

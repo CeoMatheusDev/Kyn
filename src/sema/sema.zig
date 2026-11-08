@@ -40,6 +40,10 @@ pub const Type = enum {
     enumeration,
     /// Unknown type: avoids a cascade of diagnostics after an error.
     unknown,
+    /// Pointer value (address-sized). The pointee type is not tracked in the
+    /// type system yet; dereference yields `.unknown` until pointee tracking
+    /// is added. Pointers take one register.
+    ptr,
 
     pub fn name(self: Type) []const u8 {
         return switch (self) {
@@ -58,6 +62,7 @@ pub const Type = enum {
             .str => "str",
             .enumeration => "enum",
             .unknown => "unknown",
+            .ptr => "ptr",
         };
     }
 
@@ -74,6 +79,7 @@ pub const Type = enum {
         if (std.mem.eql(u8, text, "bool")) return .bool;
         if (std.mem.eql(u8, text, "void")) return .void;
         if (std.mem.eql(u8, text, "str")) return .str;
+        if (std.mem.eql(u8, text, "ptr")) return .ptr;
         return null;
     }
 
@@ -87,18 +93,20 @@ pub const Type = enum {
 
     /// Types that can exist as an expression/variable value. `str` is a
     /// slice (two slots), not a scalar, but it has a value: it can initialize,
-    /// be copied, returned and passed as an argument.
+    /// be copied, returned and passed as an argument. Pointers are values.
     pub fn isValue(self: Type) bool {
-        return self.isInteger() or self == .bool or self == .str;
+        return self.isInteger() or self == .bool or self == .str or self == .ptr;
     }
 
-    /// Bit width of an integer type in bits; 0 for non-integers.
+    /// Bit width of an integer type in bits; 0 for non-integers. Pointers
+    /// are address-sized (64 bits on the current target).
     pub fn bitWidth(self: Type) u32 {
         return switch (self) {
             .i8, .u8 => 8,
             .i16, .u16 => 16,
             .i32, .u32, .usize => 32,
             .i64, .u64 => 64,
+            .ptr => 64,
             else => 0,
         };
     }
@@ -114,6 +122,7 @@ pub const Type = enum {
 
     /// Register words consumed by the calling convention: `str` takes two
     /// consecutive registers (pointer and length). 64-bit integers take two.
+    /// Pointers take one register (address).
     pub fn registerWords(self: Type) usize {
         if (self == .str) return 2;
         if (self == .u64 or self == .i64 or self == .usize) return 2;
@@ -1695,6 +1704,37 @@ pub const Checker = struct {
                             return .unknown;
                         }
                         return operand;
+                    },
+                    .address_of => {
+                        // `&expr` requires the operand to be an lvalue: a
+                        // variable or a field access. The result is a pointer.
+                        if (operand == .unknown) return .unknown;
+                        if (!operand.isValue() and operand != .ptr) {
+                            try self.diags.add(
+                                .type_mismatch,
+                                expr.span,
+                                "operator '&' expects a variable or field, found '{s}'",
+                                .{operand.name()},
+                            );
+                            return .unknown;
+                        }
+                        return .ptr;
+                    },
+                    .dereference => {
+                        // `*ptr` requires the operand to be a pointer. The
+                        // pointee type is not tracked yet, so the result is
+                        // `.unknown` until pointer pointee tracking is added.
+                        if (operand == .unknown) return .unknown;
+                        if (operand != .ptr) {
+                            try self.diags.add(
+                                .type_mismatch,
+                                expr.span,
+                                "operator '*' expects a pointer, found '{s}'",
+                                .{operand.name()},
+                            );
+                            return .unknown;
+                        }
+                        return .unknown;
                     },
                 }
             },

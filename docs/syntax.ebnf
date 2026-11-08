@@ -37,9 +37,10 @@ parameters       = parameter, { ",", parameter } ;
 parameter        = identifier, ":", type_expr ;
 
 (* Accepted by semantics: i8/i16/i32/i64, u8/u16/u32/u64, usize, bool, str,
-   void, names of declared structs and names of declared enums. An enum crosses
-   calls by value (tag + payload, two registers); a struct field of enum type is
-   diagnosed as unsupported. *)
+   void, ptr, names of declared structs and names of declared enums. An enum
+   crosses calls by value (tag + payload, two registers); a struct field of enum
+   type is diagnosed as unsupported. `ptr` is a pointer value; its pointee type
+   is not tracked by the type system yet. *)
 type_expr        = identifier ;
 
 block            = "{", { statement }, "}" ;
@@ -104,7 +105,7 @@ bitand           = shift, { "&", shift } ;
 shift            = additive, { ( "<<" | ">>" ), additive } ;
 additive         = multiplicative, { ( "+" | "-" ), multiplicative } ;
 multiplicative   = unary, { ( "*" | "/" | "%" ), unary } ;
-unary            = ( "-" | "!" | "~" ), unary | postfix ;
+unary            = ( "-" | "!" | "~" | "&" | "*" ), unary | postfix ;
 
 (* Dotted postfix. `Name.Case(...)` is an enum constructor; `value.method(...)`
    is a method call whose receiver (the base) is passed as argument 1; a dotted

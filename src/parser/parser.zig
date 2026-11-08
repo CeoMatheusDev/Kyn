@@ -720,6 +720,24 @@ pub const Parser = struct {
                     .unary = .{ .op = .bitnot, .operand = operand },
                 });
             },
+            // Address-of (`&var`): unary only in operand position. The binary
+            // `&` (bitwise AND) is handled in `parseBinary`.
+            .bitand => {
+                self.advance();
+                const operand = try self.parseUnary();
+                return ast.Expr.create(self.arena, tok.span.merge(operand.span), .{
+                    .unary = .{ .op = .address_of, .operand = operand },
+                });
+            },
+            // Dereference (`*ptr`): unary only in operand position. The binary
+            // `*` (multiplication) is handled in `parseBinary`.
+            .star => {
+                self.advance();
+                const operand = try self.parseUnary();
+                return ast.Expr.create(self.arena, tok.span.merge(operand.span), .{
+                    .unary = .{ .op = .dereference, .operand = operand },
+                });
+            },
             else => return self.parsePrimary(),
         }
     }

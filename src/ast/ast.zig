@@ -292,12 +292,18 @@ pub const Expr = struct {
         not,
         /// Bitwise complement (`~`).
         bitnot,
+        /// Address-of (`&`): yields a pointer to the operand.
+        address_of,
+        /// Dereference (`*`): yields the value pointed to by the operand.
+        dereference,
 
         pub fn spelling(self: UnaryOp) []const u8 {
             return switch (self) {
                 .neg => "-",
                 .not => "!",
                 .bitnot => "~",
+                .address_of => "&",
+                .dereference => "*",
             };
         }
     };

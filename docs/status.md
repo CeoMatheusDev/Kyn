@@ -100,16 +100,18 @@ string literals and `str` variables (inferred or annotated) with copy and
 assignment, builtin `print(s: str)` and `print_i32(n: i32)` (text and decimals
 with a line break), `fn`, `let`/`var` with a mandatory initializer, type
 annotation or inference (`i8`/`i16`/`i32`/`i64`/`u8`/`u16`/`u32`/`u64`/
-`usize`, `bool`, `str`, `void`), assignment (only on
+`usize`, `bool`, `str`, `void`, `ptr`), assignment (only on
 `var`), `return`, `if`/`else`/`else if`, `while`, blocks, arithmetic
 expressions, comparisons, `&&`/`||` with short-circuit, bitwise `&` `|` `^` `~`
-`<<` `>>` (same-type integers), unary `-`/`!`/`~`, integer and boolean literals,
-direct calls to functions of the program itself (up to 6 argument registers,
-counting `str` as two and each struct field as one), `str`
+`<<` `>>` (same-type integers), unary `-`/`!`/`~`/`&`/`*`, integer and boolean
+literals, direct calls to functions of the program itself (up to 6 argument
+registers, counting `str` as two and each struct field as one), `str`
 by value in parameters/returns and struct by value in parameters, arguments and
 returns (up to 6 fields), explicit conversion `expr as T` (int↔int only;
 `bool`/`str`/`void` rejected; same-width is a no-op; narrowing truncates,
-widening zero/sign-extends).
+widening zero/sign-extends), address-of `&var` (yields `ptr`) and dereference
+`*ptr` (yields `.unknown` until pointee tracking is added). Pointers count as
+one register in the six-register limit.
 
 Outside the subset (diagnosed or rejected): enum **struct fields**, enum payload
 types other than `i32`, operators on enum values (`==`, arithmetic), `switch`
@@ -117,8 +119,9 @@ over a constructed value, associated functions without a receiver, receiver
 literal or field read on a call result, references (`&self`), `unsafe`,
 `#[...]` attributes, struct with a struct field, empty struct, struct field of
 type `str`, `str` comparison (`==`/`!=`), concatenation and formatting of `str`,
-`f32`/`f64` and other types, `[]T` slices, pointers, generics, `Result<T, E>`/`?`,
-closures, `for`, visibility (`pub`), qualified/selective imports and packages.
+`f32`/`f64` and other types, `[]T` slices, pointer pointee-type tracking,
+generics, `Result<T, E>`/`?`, closures, `for`, visibility (`pub`),
+qualified/selective imports and packages.
 
 ## Validation executed in this cycle
 
@@ -130,15 +133,16 @@ closures, `for`, visibility (`pub`), qualified/selective imports and packages.
   exhaustive `switch`, string pool and rejection of `void` variables) plus 7
   from the experimental `std` (253 in total). One existing sema test was
   retargeted from `u8` (now accepted) to `i128` (still unknown).
-- `zig build e2e` — 124/124 cases: 31 behavioral fixtures plus 2 new ones
-  (`bitwise` and `cast`), 9 executed multi-file programs, 50
-  `case_N.kyn` fixtures with exit code `N`, 28 negative fixtures (8 enum,
+- `zig build e2e` — 126/126 cases: 31 behavioral fixtures plus 3 new ones
+  (`bitwise`, `cast` and `pointer`), 9 executed multi-file programs, 50
+  `case_N.kyn` fixtures with exit code `N`, 29 negative fixtures (8 enum,
   4 struct, 3 methods, 4 `str`/`print`, 2 `print_i32`, 1 `str` field,
-  1 `main` returning `str`, 1 implicit narrowing `implicit_narrowing`), 2
-  modules with enums (`import_enum`, plus the method example `import_method`)
-  and 3 negative modules (cycle, missing file, duplicated symbol) with the
-  expected message. The enum negatives include nominal identity (`enum_nominal`)
-  and the two-register limit (`enum_registers`).
+  1 `main` returning `str`, 1 implicit narrowing `implicit_narrowing`,
+  1 pointer type mismatch `ptr_type_mismatch`), 2 modules with enums
+  (`import_enum`, plus the method example `import_method`) and 3 negative
+  modules (cycle, missing file, duplicated symbol) with the expected message.
+  The enum negatives include nominal identity (`enum_nominal`) and the
+  two-register limit (`enum_registers`).
 - `zig fmt --check build.zig src std` — no differences.
 - `zig build validate-ir` (local, no LLVM) — warns and skips, as documented for
   the development environment; the same script covers 90 modules when

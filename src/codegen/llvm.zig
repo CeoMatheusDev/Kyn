@@ -89,6 +89,8 @@ fn llvmType(typ: sema.Type) codegen.Error![]const u8 {
         .enumeration => error.UnsupportedType,
         // `str` is pointer + length: represented by two slots.
         .str => error.UnsupportedType,
+        // A pointer is a 64-bit address.
+        .ptr => "i64",
         .unknown => error.UnsupportedType,
     };
 }
@@ -112,6 +114,8 @@ fn typeAlign(typ: sema.Type) codegen.Error!u32 {
         .bool => 1,
         .void => error.UnsupportedType,
         .aggregate => error.UnsupportedType,
+        // A pointer is 8-byte aligned.
+        .ptr => 8,
         .enumeration => error.UnsupportedType,
         .str => error.UnsupportedType,
         .unknown => error.UnsupportedType,
@@ -945,6 +949,7 @@ const FnEmitter = struct {
             .neg => try self.emit("  {s} = sub {s} 0, {s}\n", .{ result, ty, operand.text }),
             .not => try self.emit("  {s} = xor i1 {s}, true\n", .{ result, operand.text }),
             .bitnot => try self.emit("  {s} = xor {s} {s}, -1\n", .{ result, ty, operand.text }),
+            .address_of, .dereference => return error.UnsupportedNode,
         }
         _ = expr;
         return .{

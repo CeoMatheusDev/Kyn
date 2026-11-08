@@ -1,0 +1,7 @@
+// expect-exit: 42
+// Ponteiros: address-of (&) e dereference (*)
+fn main() -> i32 {
+    var x: i32 = 42;
+    let p: ptr = &x;
+    return *p;
+}

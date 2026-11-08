@@ -167,6 +167,27 @@ Bitwise operators bind tighter than comparison but looser than additive
 operators. Use parentheses to disambiguate when mixing them with `+`/`-` or
 `==`/`!=`.
 
+### Pointers (`ptr`, `&`, `*`)
+
+**Implemented:** pointer values (`ptr`), address-of (`&var`) and dereference
+(`*ptr`). A pointer is address-sized (one 64-bit register). The pointee type is
+not tracked by the type system yet: `&` applied to any value-typed expression
+yields `.ptr`, and `*` applied to a `.ptr` value yields `.unknown` until pointee
+tracking is added. Pointers can be stored in variables, passed as arguments and
+returned from functions. They count as one register in the six-register limit.
+
+```kyn
+fn main() -> i32 {
+    var x: i32 = 42;
+    let p: ptr = &x;      // address of x
+    return *p;            // 42
+}
+```
+
+Current limits, all diagnosed: `&` applied to a non-lvalue (literal, call
+result), `*` applied to a non-pointer type, `ptr` used in arithmetic or
+comparison.
+
 At this stage `str` is a **static slice**: pointer to constant bytes + length,
 kept in two slots. It exists to give the program text output:
 
