@@ -69,11 +69,11 @@ jobs:
           zig-out/bin/kync symbols --json --lib tests/e2e/positive/fib.kyn > "$RUNNER_TEMP/kyn-semantic-index.json"
           python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["schema"] == 1; assert d["symbols"]; assert d["references"]' "$RUNNER_TEMP/kyn-semantic-index.json"
 
-      - name: End to end (assembly -> as/ld -> execution)
-        run: zig build e2e
-
       - name: Validate LLVM IR with llvm-as (strict)
         run: zig build validate-ir-strict
+
+      - name: End to end (assembly -> as/ld -> execution)
+        run: zig build e2e
 
   extension-check:
     name: VS Code extension validation
