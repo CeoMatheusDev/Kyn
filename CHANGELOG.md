@@ -1,4 +1,10 @@
-# Changelog — Kyn
+# Changelog
+
+## Unreleased
+
+- Replace the repository-wide MIT licensing with Apache License 2.0, including the VS Code extension metadata and project documentation.
+
+— Kyn
 
 Rules: Semantic Versioning 2.0.0. Pre-1.0.0 = pre-release.
 
