@@ -120,7 +120,7 @@ const Builder = struct {
             }
         }
 
-        for (self.checked.functions, 0..) |function, function_index| {
+        for (self.checked.functions) |function| {
             const decl = function.decl;
             const end = @min(
                 @as(usize, function.symbol_start) + @as(usize, function.symbol_count),
@@ -138,7 +138,6 @@ const Builder = struct {
                     decl.name,
                 );
             }
-            _ = function_index;
         }
     }
 
@@ -173,7 +172,7 @@ const Builder = struct {
         switch (base.kind) {
             .identifier => {
                 if (base.resolved) |symbol_index| {
-                    if (symbol_index < self.checked.symbols.len) {
+                    if (@as(usize, symbol_index) < self.checked.symbols.len) {
                         const symbol = self.checked.symbols[symbol_index];
                         if (symbol.has_struct_id) owner = symbol.struct_id;
                     }
