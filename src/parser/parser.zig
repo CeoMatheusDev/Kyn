@@ -96,12 +96,13 @@ pub const Parser = struct {
         return self.take();
     }
 
-    /// programa = { import }, { struct_decl | enum_decl | function_decl }, EOF
+    /// programa = { import }, { struct_decl | enum_decl | impl_decl | function_decl }, EOF
     pub fn parseProgram(self: *Parser) Error!*ast.Program {
         const start_span = self.current().span;
         var imports: std.ArrayList(ast.Import) = .empty;
         var structs: std.ArrayList(*ast.StructDecl) = .empty;
         var enums: std.ArrayList(*ast.EnumDecl) = .empty;
+        var impls: std.ArrayList(*ast.ImplBlock) = .empty;
         var functions: std.ArrayList(*ast.Function) = .empty;
         var seen_decl = false;
 
@@ -113,7 +114,7 @@ pub const Parser = struct {
                         return self.fail(
                             .syntax,
                             tok.span,
-                            "'import' must come before 'struct', 'enum' and 'fn' declarations",
+                            "'import' must come before 'struct', 'enum', 'impl' and 'fn' declarations",
                             .{},
                         );
                     }
@@ -127,6 +128,14 @@ pub const Parser = struct {
                     seen_decl = true;
                     try enums.append(self.arena, try self.parseEnum());
                 },
+                .kw_impl => {
+                    seen_decl = true;
+                    const block = try self.parseImpl();
+                    // Methods enter the single function list in source order;
+                    // the block keeps the target span for diagnostics.
+                    for (block.methods) |method| try functions.append(self.arena, method);
+                    try impls.append(self.arena, block);
+                },
                 .kw_fn => {
                     seen_decl = true;
                     try functions.append(self.arena, try self.parseFunction());
@@ -136,7 +145,7 @@ pub const Parser = struct {
                     return self.fail(
                         .syntax,
                         tok.span,
-                        "expected 'import', 'struct', 'enum' or 'fn' at top level, found {s}",
+                        "expected 'import', 'struct', 'enum', 'impl' or 'fn' at top level, found {s}",
                         .{tok.describe()},
                     );
                 },
@@ -148,6 +157,7 @@ pub const Parser = struct {
             .imports = try imports.toOwnedSlice(self.arena),
             .structs = try structs.toOwnedSlice(self.arena),
             .enums = try enums.toOwnedSlice(self.arena),
+            .impls = try impls.toOwnedSlice(self.arena),
             .functions = try functions.toOwnedSlice(self.arena),
             .span = start_span.merge(self.current().span),
         };
@@ -269,6 +279,47 @@ pub const Parser = struct {
             .span = kw_tok.span.merge(close.span),
         };
         return decl;
+    }
+
+    /// impl_decl = "impl", identifier, "{", { function_decl }, "}" ;
+    /// The target type is resolved by semantics; the parser only records it.
+    fn parseImpl(self: *Parser) Error!*ast.ImplBlock {
+        const kw_tok = try self.expect(.kw_impl, "'impl'");
+        const type_name = try self.parseTypeName("type name after 'impl'");
+        _ = try self.expect(.lbrace, "'{' to start the methods of 'impl'");
+
+        var methods: std.ArrayList(*ast.Function) = .empty;
+        while (!self.at(.rbrace)) {
+            if (self.at(.eof)) {
+                return self.fail(
+                    .syntax,
+                    self.current().span,
+                    "impl '{s}' is not closed: missing '}}' before end of file",
+                    .{type_name.name},
+                );
+            }
+            if (!self.at(.kw_fn)) {
+                const tok = self.current();
+                return self.fail(
+                    .syntax,
+                    tok.span,
+                    "expected 'fn' inside 'impl' or '}}' to close, found {s}",
+                    .{tok.describe()},
+                );
+            }
+            const method = try self.parseFunction();
+            method.owner_type = type_name;
+            try methods.append(self.arena, method);
+        }
+        const close = try self.expect(.rbrace, "'}' to close the impl");
+
+        const block = try self.arena.create(ast.ImplBlock);
+        block.* = .{
+            .type_name = type_name,
+            .methods = try methods.toOwnedSlice(self.arena),
+            .span = kw_tok.span.merge(close.span),
+        };
+        return block;
     }
 
     /// import = "import", string, ";" ;
@@ -1402,5 +1453,65 @@ test "parser: duplicate 'else' arm is diagnosed" {
     try testing.expectEqual(@as(usize, 1), parsed.diags.count());
     try testing.expect(
         std.mem.indexOf(u8, parsed.diags.items.items[0].message, "duplicate 'else' arm") != null,
+    );
+}
+
+test "parser: impl block keeps its target and hands the methods to program.functions" {
+    var parsed = try Parsed.parse(
+        \\struct Point { x: i32, y: i32 }
+        \\impl Point {
+        \\    fn sum(self: Point) -> i32 { return self.x + self.y; }
+        \\    fn scaled(self: Point, factor: i32) -> i32 { return self.sum() * factor; }
+        \\}
+        \\fn main() -> i32 { return 0; }
+    );
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 0), parsed.diags.count());
+
+    const program = parsed.program.?;
+    try testing.expectEqual(@as(usize, 1), program.impls.len);
+    try testing.expectEqualStrings("Point", program.impls[0].type_name.name);
+    try testing.expectEqual(@as(usize, 2), program.impls[0].methods.len);
+
+    // Methods travel in the single function list, in source order.
+    try testing.expectEqual(@as(usize, 3), program.functions.len);
+    try testing.expectEqualStrings("sum", program.functions[0].name);
+    try testing.expectEqualStrings("scaled", program.functions[1].name);
+    try testing.expectEqualStrings("main", program.functions[2].name);
+    try testing.expectEqualStrings("Point", program.functions[0].owner_type.?.name);
+    try testing.expect(program.functions[2].owner_type == null);
+
+    // `self.sum()` parses as a method call on the receiver.
+    const body = program.functions[1].body;
+    const call = body[0].kind.return_stmt.?.kind.binary.lhs.kind.method_call;
+    try testing.expectEqualStrings("sum", call.name);
+    try testing.expectEqualStrings("self", call.base.kind.identifier);
+}
+
+test "parser: only 'fn' is accepted inside 'impl'" {
+    var parsed = try Parsed.parse(
+        \\struct Point { x: i32 }
+        \\impl Point {
+        \\    let x = 1;
+        \\}
+        \\fn main() -> i32 { return 0; }
+    );
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 1), parsed.diags.count());
+    try testing.expect(
+        std.mem.indexOf(u8, parsed.diags.items.items[0].message, "expected 'fn' inside 'impl' or '}' to close") != null,
+    );
+}
+
+test "parser: an unclosed impl reports the missing '}'" {
+    var parsed = try Parsed.parse(
+        \\struct Point { x: i32 }
+        \\impl Point {
+        \\    fn sum(self: Point) -> i32 { return self.x; }
+    );
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 1), parsed.diags.count());
+    try testing.expect(
+        std.mem.indexOf(u8, parsed.diags.items.items[0].message, "impl 'Point' is not closed: missing '}' before end of file") != null,
     );
 }

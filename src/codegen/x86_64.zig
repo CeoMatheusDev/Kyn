@@ -57,7 +57,7 @@ pub fn emit(
     try out.print(arena, ".text\n", .{});
     try out.print(arena, ".globl _start\n", .{});
     try out.print(arena, "_start:\n", .{});
-    try out.print(arena, "    call kyn_{s}\n", .{main_info.decl.name});
+    try out.print(arena, "    call kyn_{s}\n", .{main_info.symbol_name});
     if (main_info.return_type == .void) {
         try out.print(arena, "    xorl %edi, %edi\n", .{});
     } else {
@@ -221,8 +221,8 @@ const FnEmitter = struct {
 
         const frame_bytes: u32 = std.mem.alignForward(u32, self.info.slot_count * 8, 16);
 
-        try self.print(".type kyn_{s}, @function\n", .{self.func.name});
-        try self.print("kyn_{s}:\n", .{self.func.name});
+        try self.print(".type kyn_{s}, @function\n", .{self.info.symbol_name});
+        try self.print("kyn_{s}:\n", .{self.info.symbol_name});
         try self.print("    pushq %rbp\n", .{});
         try self.print("    movq %rsp, %rbp\n", .{});
         if (frame_bytes > 0) {
@@ -272,7 +272,7 @@ const FnEmitter = struct {
             self.terminated = true;
         }
 
-        try self.print(".size kyn_{s}, .-kyn_{s}\n", .{ self.func.name, self.func.name });
+        try self.print(".size kyn_{s}, .-kyn_{s}\n", .{ self.info.symbol_name, self.info.symbol_name });
     }
 
     fn emitStatements(self: *FnEmitter, stmts: []*ast.Stmt) Error!void {
@@ -418,6 +418,13 @@ const FnEmitter = struct {
                 try self.print("    movl $0, %edx\n", .{});
             },
             .method_call => |call| {
+                // A method returning an enum leaves the pair in `%eax`/`%edx`,
+                // the same place a constructor writes it.
+                if (call.resolved_fn) |index| {
+                    if (self.checked.functions[index].return_type != .enumeration) return error.MiscompiledAst;
+                    try self.emitCallWith(index, .{ .receiver = call.base, .list = call.args });
+                    return;
+                }
                 const tag = try self.caseTag(
                     call.resolved_enum orelse return error.MiscompiledAst,
                     call.resolved_case orelse return error.MiscompiledAst,
@@ -435,10 +442,10 @@ const FnEmitter = struct {
                 try self.print("    movl -{d}(%rbp), %eax\n", .{slotOffset(src.slot)});
                 try self.print("    movl -{d}(%rbp), %edx\n", .{slotOffset(src.slot + 1)});
             },
-            .call => |call| {
-                const index = call.callee_fn orelse return error.MiscompiledAst;
-                if (self.checked.functions[index].return_type != .enumeration) return error.MiscompiledAst;
-                try self.emitCall(call);
+            .call => {
+                const ref = (try callRefOf(value)) orelse return error.MiscompiledAst;
+                if (self.checked.functions[ref.index].return_type != .enumeration) return error.MiscompiledAst;
+                try self.emitCallWith(ref.index, ref.site);
             },
             else => return error.MiscompiledAst,
         }
@@ -545,6 +552,18 @@ const FnEmitter = struct {
                 try self.emitCall(call);
             },
 
+            // `value.method(args)`: the receiver is argument 1. Only scalars fit
+            // in `%eax`; the other value types go through their own helpers.
+            .method_call => {
+                const ref = (try callRefOf(expr)) orelse return error.UnsupportedNode;
+                if (!self.checked.functions[ref.index].return_type.isValue() and
+                    self.checked.functions[ref.index].return_type != .void)
+                {
+                    return error.UnsupportedNode;
+                }
+                try self.emitCallWith(ref.index, ref.site);
+            },
+
             .field_access => |access| {
                 // An enum case (`Color.Red`) is tag + payload slots, not an operand.
                 if (access.resolved_enum != null) return error.UnsupportedNode;
@@ -559,9 +578,6 @@ const FnEmitter = struct {
             // A struct value does not fit in `%eax`: `let`/assignment handle the
             // literal field by field in `emitStructStore`.
             .struct_literal => return error.UnsupportedNode,
-            // An enum value is tag + payload slots: `emitEnumStore` and
-            // `emitSwitch` consume it.
-            .method_call => return error.UnsupportedNode,
             // `str` is two slots (pointer + length), handled by
             // `emitStrStore` and `emitPrint`.
             .str_literal => return error.UnsupportedNode,
@@ -598,9 +614,10 @@ const FnEmitter = struct {
                     });
                 }
             },
-            .call => |call| {
+            .call, .method_call => {
+                const ref = (try callRefOf(value)) orelse return error.MiscompiledAst;
                 if (info.fields.len > struct_return_registers.len) return error.UnsupportedNode;
-                try self.emitCall(call);
+                try self.emitCallWith(ref.index, ref.site);
                 for (info.fields, 0..) |_, i| {
                     const index: u32 = @intCast(i);
                     try self.print("    movl {s}, -{d}(%rbp)\n", .{
@@ -632,7 +649,10 @@ const FnEmitter = struct {
                     });
                 }
             },
-            .call => |call| try self.emitCall(call),
+            .call, .method_call => {
+                const ref = (try callRefOf(value)) orelse return error.MiscompiledAst;
+                try self.emitCallWith(ref.index, ref.site);
+            },
             .struct_literal => |lit| {
                 for (fields, 0..) |field, i| {
                     const init_value = findFieldInit(lit.fields, field.name) orelse return error.MiscompiledAst;
@@ -649,6 +669,25 @@ const FnEmitter = struct {
             },
             else => return error.MiscompiledAst,
         }
+    }
+
+    /// Call site of an expression: a free call (`list` = written arguments) or a
+    /// method call (`receiver` = `base`). `null` for anything else — including an
+    /// enum constructor, which is not a call.
+    const CallRef = struct { index: u32, site: codegen.Arguments };
+
+    fn callRefOf(expr: *ast.Expr) Error!?CallRef {
+        return switch (expr.kind) {
+            .call => |call| .{
+                .index = call.callee_fn orelse return error.MiscompiledAst,
+                .site = .{ .list = call.args },
+            },
+            .method_call => |call| if (call.resolved_fn) |index| .{
+                .index = index,
+                .site = .{ .receiver = call.base, .list = call.args },
+            } else null,
+            else => null,
+        };
     }
 
     /// Pushes a struct field by field (for by-value argument passing in calls).
@@ -674,9 +713,10 @@ const FnEmitter = struct {
                     try self.print("    pushq %rax\n", .{});
                 }
             },
-            .call => |call| {
+            .call, .method_call => {
+                const ref = (try callRefOf(value)) orelse return error.MiscompiledAst;
                 if (fields.len > struct_return_registers.len) return error.UnsupportedNode;
-                try self.emitCall(call);
+                try self.emitCallWith(ref.index, ref.site);
                 for (fields, 0..) |_, i| {
                     try self.print("    pushq {s}\n", .{struct_return_registers_64[i]});
                 }
@@ -702,10 +742,10 @@ const FnEmitter = struct {
                 try self.print("    movq -{d}(%rbp), %rax\n", .{slotOffset(src.slot)});
                 try self.print("    movq -{d}(%rbp), %rdx\n", .{slotOffset(src.slot + 1)});
             },
-            .call => |call| {
-                const index = call.callee_fn orelse return error.MiscompiledAst;
-                if (self.checked.functions[index].return_type != .str) return error.MiscompiledAst;
-                try self.emitCall(call);
+            .call, .method_call => {
+                const ref = (try callRefOf(value)) orelse return error.MiscompiledAst;
+                if (self.checked.functions[ref.index].return_type != .str) return error.MiscompiledAst;
+                try self.emitCallWith(ref.index, ref.site);
             },
             else => return error.MiscompiledAst,
         }
@@ -817,15 +857,19 @@ const FnEmitter = struct {
         try self.print("{s}:\n", .{end_label});
     }
 
+    /// Call expression: builtin or free function.
     fn emitCall(self: *FnEmitter, call: ast.Expr.Call) Error!void {
         if (call.builtin) |builtin| switch (builtin) {
             .print => return self.emitPrint(call),
             .print_i32 => return self.emitPrintI32(call),
         };
+        try self.emitCallWith(call.callee_fn orelse return error.MiscompiledAst, .{ .list = call.args });
+    }
 
-        const callee_index = call.callee_fn orelse return error.MiscompiledAst;
+    /// Call by resolved index: `site` carries the receiver of a method first.
+    fn emitCallWith(self: *FnEmitter, callee_index: u32, site: codegen.Arguments) Error!void {
         const callee = self.checked.functions[callee_index];
-        if (call.args.len != callee.params.len) return error.MiscompiledAst;
+        if (site.count() != callee.params.len) return error.MiscompiledAst;
 
         // Each argument takes 1 register, 2 when it is `str` (pointer and
         // length, in that order) and one per field when it is a struct. Semantics
@@ -839,24 +883,26 @@ const FnEmitter = struct {
 
         // Fast path: with a single argument nothing can clobber the target
         // registers, so we move directly without going through the stack.
-        if (call.args.len == 1 and callee.params[0] != .aggregate) {
+        if (site.count() == 1 and callee.params[0] != .aggregate) {
             if (callee.params[0] == .str) {
-                try self.emitStrValue(call.args[0]);
+                try self.emitStrValue(site.at(0));
                 try self.print("    movq %rax, {s}\n", .{arg_registers_64[0]});
                 try self.print("    movq %rdx, {s}\n", .{arg_registers_64[1]});
             } else if (callee.params[0] == .enumeration) {
-                try self.emitEnumValue(call.args[0]);
+                try self.emitEnumValue(site.at(0));
                 try self.print("    movl %eax, {s}\n", .{arg_registers[0]});
                 try self.print("    movl %edx, {s}\n", .{arg_registers[1]});
             } else {
-                try self.emitExpr(call.args[0]);
+                try self.emitExpr(site.at(0));
                 try self.print("    movl %eax, {s}\n", .{arg_registers[0]});
             }
-            try self.print("    call kyn_{s}\n", .{call.callee});
+            try self.print("    call kyn_{s}\n", .{callee.symbol_name});
             return;
         }
 
-        for (call.args, callee.params, 0..) |arg, ptype, arg_index| {
+        for (0..site.count()) |arg_index| {
+            const arg = site.at(arg_index);
+            const ptype = callee.params[arg_index];
             if (ptype == .aggregate) {
                 const struct_id = if (arg_index < callee.param_struct_ids.len)
                     callee.param_struct_ids[arg_index]
@@ -890,7 +936,7 @@ const FnEmitter = struct {
 
         // The stack is back to 16-byte alignment before the call,
         // since every argument was pushed and popped.
-        try self.print("    call kyn_{s}\n", .{call.callee});
+        try self.print("    call kyn_{s}\n", .{callee.symbol_name});
     }
 };
 
@@ -1400,4 +1446,45 @@ test "x86_64: an enum parameter arrives in two registers and returns in %eax/%ed
     try support.expectContains(asm_text, "pushq %rax");
     try support.expectContains(asm_text, "pushq %rdx");
     try support.expectContains(asm_text, "call kyn_mix");
+}
+
+test "x86_64: a method mangles the symbol and receives its receiver as argument 1" {
+    var f = try support.Fixture.build(
+        \\struct Point { x: i32, y: i32 }
+        \\impl Point {
+        \\    fn sum(self: Point) -> i32 { return self.x + self.y; }
+        \\    fn moved(self: Point, dx: i32) -> Point {
+        \\        return Point { x: self.x + dx, y: self.y };
+        \\    }
+        \\}
+        \\fn main() -> i32 {
+        \\    let p = Point { x: 1, y: 2 };
+        \\    let q = p.moved(1);
+        \\    return p.sum() + q.sum();
+        \\}
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+
+    // `Type_method`, deterministic and distinct from a free function.
+    try support.expectContains(asm_text, ".type kyn_Point_sum, @function");
+    try support.expectContains(asm_text, "kyn_Point_moved:");
+    try support.expectContains(asm_text, ".size kyn_Point_moved, .-kyn_Point_moved");
+
+    // The method calling another method of the receiver uses the mangled name.
+    try support.expectContains(asm_text, "call kyn_Point_sum");
+    try support.expectContains(asm_text, "call kyn_Point_moved");
+
+    // Receiver fields are pushed first, then `dx`; the reverse pop puts the
+    // receiver in `%rdi`/`%rsi` and `dx` in `%rdx`.
+    const moved_at = std.mem.indexOf(u8, asm_text, "call kyn_Point_moved").?;
+    const before = asm_text[0..moved_at];
+    const last = before[before.len - 120 ..];
+    try support.expectContains(last, "pushq %rax");
+    try support.expectContains(last, "movq %rax, %rdx");
+    try support.expectContains(last, "movq %rax, %rsi");
+    try support.expectContains(last, "movq %rax, %rdi");
+
+    // A struct returned by a method lands in the struct return registers.
+    try support.expectContains(asm_text, "movl %edx, -48(%rbp)");
 }

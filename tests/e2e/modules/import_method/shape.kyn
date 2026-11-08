@@ -1,0 +1,16 @@
+// Struct and methods declared in the imported module: the `impl` block travels
+// with the flattened program and the caller only sees the type name.
+struct Shape {
+    width: i32,
+    height: i32,
+}
+
+impl Shape {
+    fn area(self: Shape) -> i32 {
+        return self.width * self.height;
+    }
+
+    fn doubled(self: Shape) -> Shape {
+        return Shape { width: self.width * 2, height: self.height * 2 };
+    }
+}

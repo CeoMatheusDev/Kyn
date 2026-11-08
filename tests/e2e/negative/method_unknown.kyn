@@ -1,0 +1,15 @@
+// A method that the receiver type does not declare.
+struct Point {
+    x: i32,
+}
+
+impl Point {
+    fn sum(self: Point) -> i32 {
+        return self.x;
+    }
+}
+
+fn main() -> i32 {
+    let p = Point { x: 1 };
+    return p.product();
+}

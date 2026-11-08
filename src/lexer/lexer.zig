@@ -34,6 +34,7 @@ pub const Tag = enum {
     kw_while,
     kw_enum,
     kw_switch,
+    kw_impl,
     kw_true,
     kw_false,
 
@@ -49,7 +50,7 @@ pub const Tag = enum {
     arrow, // ->
     fat_arrow, // =>
 
-    // operadores
+    // operators
     assign, // =
     eq, // ==
     ne, // !=
@@ -88,7 +89,7 @@ pub const Token = struct {
         return switch (self.tag) {
             .identifier => "identifier",
             .integer => "integer",
-            .string => "literal de string",
+            .string => "string literal",
             .kw_fn => "'fn'",
             .kw_import => "'import'",
             .kw_struct => "'struct'",
@@ -100,6 +101,7 @@ pub const Token = struct {
             .kw_while => "'while'",
             .kw_enum => "'enum'",
             .kw_switch => "'switch'",
+            .kw_impl => "'impl'",
             .kw_true => "'true'",
             .kw_false => "'false'",
             .lparen => "'('",
@@ -135,7 +137,7 @@ pub const Token = struct {
 
     pub fn isKeyword(self: Token) bool {
         return switch (self.tag) {
-            .kw_fn, .kw_struct, .kw_let, .kw_var, .kw_return, .kw_if, .kw_else, .kw_while, .kw_enum, .kw_switch, .kw_true, .kw_false => true,
+            .kw_fn, .kw_struct, .kw_let, .kw_var, .kw_return, .kw_if, .kw_else, .kw_while, .kw_enum, .kw_switch, .kw_impl, .kw_true, .kw_false => true,
             else => false,
         };
     }
@@ -154,6 +156,7 @@ fn keywordTag(text: []const u8) ?Tag {
         .{ "while", .kw_while },
         .{ "enum", .kw_enum },
         .{ "switch", .kw_switch },
+        .{ "impl", .kw_impl },
         .{ "true", .kw_true },
         .{ "false", .kw_false },
     });
@@ -372,7 +375,7 @@ test "lexer: keywords keep the original text" {
     try std.testing.expectEqualStrings("let", tok.text);
 }
 
-test "lexer: operadores de dois caracteres" {
+test "lexer: two-character operators" {
     try expectTags("-> == != <= >= && || < > = ! + - * / %", &.{
         .arrow, .eq, .ne, .le, .ge, .amp_amp, .pipe_pipe, .lt, .gt, .assign, .bang, .plus, .minus, .star, .slash, .percent, .eof,
     });

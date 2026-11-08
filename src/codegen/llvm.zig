@@ -117,6 +117,25 @@ const Operand = struct {
     typ: sema.Type,
 };
 
+/// Call site of an expression: a free call (`list` = written arguments) or a
+/// method call (`receiver` = `base`). `null` for anything else — including an
+/// enum constructor, which is not a call.
+const CallRef = struct { index: u32, site: codegen.Arguments };
+
+fn callRefOf(expr: *ast.Expr) codegen.Error!?CallRef {
+    return switch (expr.kind) {
+        .call => |call| .{
+            .index = call.callee_fn orelse return error.MiscompiledAst,
+            .site = .{ .list = call.args },
+        },
+        .method_call => |call| if (call.resolved_fn) |index| .{
+            .index = index,
+            .site = .{ .receiver = call.base, .list = call.args },
+        } else null,
+        else => null,
+    };
+}
+
 const Block = struct {
     label: []const u8,
     body: std.ArrayList(u8) = .empty,
@@ -252,8 +271,9 @@ const FnEmitter = struct {
                     values[i] = tmp;
                 }
             },
-            .call => |call| {
-                const aggregate = try self.emitStructCall(call);
+            .call, .method_call => {
+                const ref = (try callRefOf(expr)) orelse return error.MiscompiledAst;
+                const aggregate = try self.emitStructCall(ref.index, ref.site);
                 const aggregate_type = try self.structType(struct_id);
                 for (fields, 0..) |_, i| {
                     const tmp = try self.newTemp();
@@ -268,14 +288,13 @@ const FnEmitter = struct {
     }
 
     /// Call whose return is a struct: returns the temporary holding the aggregate.
-    fn emitStructCall(self: *FnEmitter, call: ast.Expr.Call) Error![]const u8 {
-        const fn_index = call.callee_fn orelse return error.MiscompiledAst;
+    fn emitStructCall(self: *FnEmitter, fn_index: u32, site: codegen.Arguments) Error![]const u8 {
         const callee = self.checked.functions[fn_index];
         if (callee.return_type != .aggregate) return error.MiscompiledAst;
-        const args = try self.emitArgs(call, callee.params, callee.param_struct_ids);
+        const args = try self.emitArgs(site, callee.params, callee.param_struct_ids);
         const aggregate_type = try self.structType(callee.return_struct_id);
         const result = try self.newTemp();
-        try self.emit("  {s} = call {s} @{s}({s})\n", .{ result, aggregate_type, call.callee, args });
+        try self.emit("  {s} = call {s} @{s}({s})\n", .{ result, aggregate_type, callee.symbol_name, args });
         return result;
     }
 
@@ -402,7 +421,7 @@ const FnEmitter = struct {
         }
 
         const ret_type = try self.returnType(self.info.return_type, self.info.return_struct_id);
-        try out.print(self.arena, "define {s} @{s}({s}) {{\n", .{ ret_type, self.func.name, signature.items });
+        try out.print(self.arena, "define {s} @{s}({s}) {{\n", .{ ret_type, self.info.symbol_name, signature.items });
 
         for (self.blocks.items) |*b| {
             try out.print(self.arena, "{s}:\n", .{b.label});
@@ -494,8 +513,9 @@ const FnEmitter = struct {
                 } else if (self.info.return_type == .enumeration) {
                     const expr = maybe_expr orelse return error.MiscompiledAst;
                     // A call returning an enum already is the aggregate.
-                    if (expr.kind == .call) {
-                        const direct = try self.emitEnumCall(expr.kind.call);
+                    if (expr.kind == .call or expr.kind == .method_call) {
+                        const ref = (try callRefOf(expr)) orelse return error.MiscompiledAst;
+                        const direct = try self.emitEnumCall(ref.index, ref.site);
                         try self.emit("  ret {{ i32, i32 }} {s}\n", .{direct});
                         self.block().terminated = true;
                         return;
@@ -511,8 +531,9 @@ const FnEmitter = struct {
                     const expr = maybe_expr orelse return error.MiscompiledAst;
                     const aggregate_type = try self.structType(self.info.return_struct_id);
                     // A call returning a struct already is the aggregate: return it directly.
-                    if (expr.kind == .call) {
-                        const direct = try self.emitStructCall(expr.kind.call);
+                    if (expr.kind == .call or expr.kind == .method_call) {
+                        const ref = (try callRefOf(expr)) orelse return error.MiscompiledAst;
+                        const direct = try self.emitStructCall(ref.index, ref.site);
                         try self.emit("  ret {s} {s}\n", .{ aggregate_type, direct });
                         self.block().terminated = true;
                         return;
@@ -617,6 +638,15 @@ const FnEmitter = struct {
                 };
             },
             .method_call => |call| {
+                // A method returning an enum already yields the aggregate.
+                if (call.resolved_fn) |index| {
+                    const aggregate = try self.emitEnumCall(index, .{ .receiver = call.base, .list = call.args });
+                    const tag = try self.newTemp();
+                    try self.emit("  {s} = extractvalue {{ i32, i32 }} {s}, 0\n", .{ tag, aggregate });
+                    const payload = try self.newTemp();
+                    try self.emit("  {s} = extractvalue {{ i32, i32 }} {s}, 1\n", .{ payload, aggregate });
+                    return .{ .tag = tag, .payload = payload };
+                }
                 const tag = try self.caseTag(
                     call.resolved_enum orelse return error.MiscompiledAst,
                     call.resolved_case orelse return error.MiscompiledAst,
@@ -635,10 +665,9 @@ const FnEmitter = struct {
                 try self.emit("  {s} = load i32, ptr {s}, align 4\n", .{ payload, try self.varName(src.slot + 1) });
                 return .{ .tag = tag, .payload = payload };
             },
-            .call => |call| {
-                const index = call.callee_fn orelse return error.MiscompiledAst;
-                if (self.checked.functions[index].return_type != .enumeration) return error.MiscompiledAst;
-                const aggregate = try self.emitEnumCall(call);
+            .call => {
+                const ref = (try callRefOf(expr)) orelse return error.MiscompiledAst;
+                const aggregate = try self.emitEnumCall(ref.index, ref.site);
                 const tag = try self.newTemp();
                 try self.emit("  {s} = extractvalue {{ i32, i32 }} {s}, 0\n", .{ tag, aggregate });
                 const payload = try self.newTemp();
@@ -752,9 +781,13 @@ const FnEmitter = struct {
             // A whole struct is not an operand: `let`/assignment handle it
             // field by field in `emitStructStore`.
             .struct_literal => return error.UnsupportedNode,
-            // An enum value is tag + payload slots: `emitEnumStore` and
-            // `emitSwitch` consume it.
-            .method_call => return error.UnsupportedNode,
+            // `value.method(args)`: the receiver is argument 1. Values that do
+            // not fit in an operand (struct, `str`, enum) go through
+            // `enumOperand`/`strOperand`/`structFieldValues`.
+            .method_call => {
+                const ref = (try callRefOf(expr)) orelse return error.UnsupportedNode;
+                return self.emitCallWith(ref.index, ref.site);
+            },
             // `str` is two slots (pointer + length), handled by
             // `emitStrStore` and `emitPrint`.
             .str_literal => return error.UnsupportedNode,
@@ -785,10 +818,9 @@ const FnEmitter = struct {
                 try self.emit("  {s} = load i64, ptr {s}, align 8\n", .{ len_temp, try self.varName(src.slot + 1) });
                 return .{ .ptr = ptr_temp, .len = len_temp };
             },
-            .call => |call| {
-                const index = call.callee_fn orelse return error.MiscompiledAst;
-                if (self.checked.functions[index].return_type != .str) return error.MiscompiledAst;
-                const pair = try self.emitStrCall(call);
+            .call, .method_call => {
+                const ref = (try callRefOf(expr)) orelse return error.MiscompiledAst;
+                const pair = try self.emitStrCall(ref.index, ref.site);
                 const ptr_temp = try self.newTemp();
                 try self.emit("  {s} = extractvalue {{ ptr, i64 }} {s}, 0\n", .{ ptr_temp, pair });
                 const len_temp = try self.newTemp();
@@ -920,14 +952,17 @@ const FnEmitter = struct {
 
     /// Argument list in IR form. `str` contributes two
     /// (`ptr` + `i64`), in the order the signature declares them.
+    /// Arguments in callee order: the method receiver first, then the written
+    /// arguments.
     fn emitArgs(
         self: *FnEmitter,
-        call: ast.Expr.Call,
+        site: codegen.Arguments,
         params: []const sema.Type,
         param_struct_ids: []const u32,
     ) Error![]const u8 {
         var args: std.ArrayList(u8) = .empty;
-        for (call.args, 0..) |arg, i| {
+        for (0..site.count()) |i| {
+            const arg = site.at(i);
             const ptype = if (i < params.len) params[i] else return error.MiscompiledAst;
             const struct_id = if (i < param_struct_ids.len) param_struct_ids[i] else 0;
             if (ptype == .aggregate) {
@@ -957,33 +992,37 @@ const FnEmitter = struct {
     }
 
     /// Call whose return is `str`: returns the temporary holding the `{ptr, i64}` pair.
-    fn emitStrCall(self: *FnEmitter, call: ast.Expr.Call) Error![]const u8 {
-        const fn_index = call.callee_fn orelse return error.MiscompiledAst;
+    fn emitStrCall(self: *FnEmitter, fn_index: u32, site: codegen.Arguments) Error![]const u8 {
         const callee = self.checked.functions[fn_index];
-        const args = try self.emitArgs(call, callee.params, callee.param_struct_ids);
+        if (callee.return_type != .str) return error.MiscompiledAst;
+        const args = try self.emitArgs(site, callee.params, callee.param_struct_ids);
         const result = try self.newTemp();
-        try self.emit("  {s} = call {{ ptr, i64 }} @{s}({s})\n", .{ result, call.callee, args });
+        try self.emit("  {s} = call {{ ptr, i64 }} @{s}({s})\n", .{ result, callee.symbol_name, args });
         return result;
     }
 
     /// Call whose return is an enum: returns the temporary holding
     /// `{ i32, i32 }`.
-    fn emitEnumCall(self: *FnEmitter, call: ast.Expr.Call) Error![]const u8 {
-        const fn_index = call.callee_fn orelse return error.MiscompiledAst;
+    fn emitEnumCall(self: *FnEmitter, fn_index: u32, site: codegen.Arguments) Error![]const u8 {
         const callee = self.checked.functions[fn_index];
-        const args = try self.emitArgs(call, callee.params, callee.param_struct_ids);
+        if (callee.return_type != .enumeration) return error.MiscompiledAst;
+        const args = try self.emitArgs(site, callee.params, callee.param_struct_ids);
         const result = try self.newTemp();
-        try self.emit("  {s} = call {{ i32, i32 }} @{s}({s})\n", .{ result, call.callee, args });
+        try self.emit("  {s} = call {{ i32, i32 }} @{s}({s})\n", .{ result, callee.symbol_name, args });
         return result;
     }
 
+    /// Call expression: builtin or free function.
     fn emitCall(self: *FnEmitter, call: ast.Expr.Call) Error!Operand {
         if (call.builtin) |builtin| switch (builtin) {
             .print => return self.emitPrint(call),
             .print_i32 => return self.emitPrintI32(call),
         };
+        return self.emitCallWith(call.callee_fn orelse return error.MiscompiledAst, .{ .list = call.args });
+    }
 
-        const fn_index = call.callee_fn orelse return error.MiscompiledAst;
+    /// Call by resolved index: `site` carries the receiver of a method first.
+    fn emitCallWith(self: *FnEmitter, fn_index: u32, site: codegen.Arguments) Error!Operand {
         const callee = self.checked.functions[fn_index];
         // `str`, struct and enum do not fit in an `Operand`: consumers use
         // `strOperand`, `enumOperand`, `emitEnumCall` and `emitStructCall`.
@@ -991,16 +1030,16 @@ const FnEmitter = struct {
         if (callee.return_type == .aggregate) return error.UnsupportedNode;
         if (callee.return_type == .enumeration) return error.UnsupportedNode;
 
-        const args = try self.emitArgs(call, callee.params, callee.param_struct_ids);
+        const args = try self.emitArgs(site, callee.params, callee.param_struct_ids);
 
         const ret_type = try llvmType(callee.return_type);
         if (callee.return_type == .void) {
-            try self.emit("  call void @{s}({s})\n", .{ call.callee, args });
+            try self.emit("  call void @{s}({s})\n", .{ callee.symbol_name, args });
             return .{ .text = "", .typ = .void };
         }
 
         const result = try self.newTemp();
-        try self.emit("  {s} = call {s} @{s}({s})\n", .{ result, ret_type, call.callee, args });
+        try self.emit("  {s} = call {s} @{s}({s})\n", .{ result, ret_type, callee.symbol_name, args });
         return .{ .text = result, .typ = callee.return_type };
     }
 };
@@ -1533,4 +1572,39 @@ test "llvm: enums cross calls as two i32 arguments and a { i32, i32 } return" {
     try support.expectContains(ir, "call { i32, i32 } @pick(i32 1)");
     try support.expectContains(ir, "extractvalue { i32, i32 }");
     try support.expectContains(ir, "call i32 @label(i32 ");
+}
+
+test "llvm: methods are mangled Type_method and the receiver is argument 0" {
+    var f = try support.Fixture.build(
+        \\struct Point { x: i32, y: i32 }
+        \\impl Point {
+        \\    fn sum(self: Point) -> i32 { return self.x + self.y; }
+        \\    fn moved(self: Point, dx: i32) -> Point {
+        \\        return Point { x: self.x + dx, y: self.y };
+        \\    }
+        \\}
+        \\fn main() -> i32 {
+        \\    let p = Point { x: 1, y: 2 };
+        \\    let q = p.moved(1);
+        \\    return p.sum() + q.sum();
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+    try support.expectAllBlocksTerminated(ir);
+
+    // Struct (pointer-free) receivers arrive flattened, one argument per field,
+    // before the written arguments.
+    try support.expectContains(ir, "define i32 @Point_sum(i32 %arg0, i32 %arg1) {");
+    try support.expectContains(ir, "define { i32, i32 } @Point_moved(i32 %arg0, i32 %arg1, i32 %arg2) {");
+
+    // Calls use the mangled name and pass the receiver first; the aggregate
+    // comes back through `extractvalue`.
+    try support.expectContains(ir, "call i32 @Point_sum(i32");
+    try support.expectContains(ir, "call { i32, i32 } @Point_moved(i32");
+    try support.expectContains(ir, "extractvalue { i32, i32 }");
+
+    // No symbol leaks the unmangled name.
+    try testing.expect(std.mem.indexOf(u8, ir, "@sum(") == null);
+    try testing.expect(std.mem.indexOf(u8, ir, "@moved(") == null);
 }
