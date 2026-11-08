@@ -27,7 +27,7 @@ Having both sets does not mean a self-hosted pipeline exists.
    AST    (structs, functions, statements, expressions; slices into the input)
       |
       v
- Semantics (scopes, i32/bool/str/void/struct types, mutability, stack slots)
+ Semantics (scopes, fixed-width integers, bool/str/void, structs/enums/pointers, mutability, stack slots)
       |
       v
   Backend (single interface)
