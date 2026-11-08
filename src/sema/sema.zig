@@ -49,7 +49,9 @@ pub const Type = union(enum) {
 
     /// Pointer type with optional struct identity for field access.
     pub const PtrType = struct {
-        pointee: *Type,
+        // Pointee identity is immutable after checking; sharing a read-only
+        // unknown sentinel is safe across independent compilations.
+        pointee: *const Type,
         /// Struct id when pointee is `.aggregate`, 0 otherwise.
         struct_id: u32 = 0,
         /// True when `struct_id` is a valid index into `Checked.structs`.
@@ -194,6 +196,13 @@ pub const Type = union(enum) {
     }
 };
 
+test "sema type metadata: generic pointer needs no checker initialization" {
+    const generic = Type.fromName("ptr").?;
+    try std.testing.expect(generic.isPtr());
+    try std.testing.expectEqual(Type.unknown, generic.ptr.pointee.*);
+    try std.testing.expectEqualStrings("ptr", generic.name());
+}
+
 test "sema type metadata: usize is a 64-bit unsigned integer" {
     const usize_type: Type = .usize;
     try std.testing.expectEqual(@as(u32, 64), usize_type.bitWidth());
@@ -216,17 +225,13 @@ test "sema type metadata: signedness and widths match integer names" {
     try std.testing.expect(!u64_type.isSigned());
 }
 
-/// A pointer type whose pointee is `.unknown`. Used when the exact pointee
-/// type is not tracked (e.g. the result of `&x`).
-var unknown_type: Type = .unknown;
-var ptr_to_unknown_type: Type = undefined;
-
-fn initPtrToUnknown() void {
-    ptr_to_unknown_type = Type{ .ptr = .{ .pointee = &unknown_type } };
-}
+/// Generic `ptr` annotations have no known pointee. The sentinel is constant:
+/// callers can resolve a pointer even before a Checker exists, and parallel
+/// compilations never race while initializing pointer metadata.
+const unknown_type: Type = .unknown;
 
 fn ptrToUnknown() Type {
-    return ptr_to_unknown_type;
+    return .{ .ptr = .{ .pointee = &unknown_type } };
 }
 
 /// A known pointer can be erased to `ptr<unknown>` at a generic boundary,
@@ -447,7 +452,6 @@ pub const Checker = struct {
     }
 
     pub fn checkProgram(self: *Checker, program: *const ast.Program) std.mem.Allocator.Error!Checked {
-        initPtrToUnknown();
         // Step 0: struct names before any type is resolved.
         for (program.structs) |decl| {
             self.diags.current_file = decl.file_id;
