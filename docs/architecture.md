@@ -205,8 +205,9 @@ index in declaration order) plus one **payload** word.
   declaration), then bodies;
 - nested scopes with shadowing allowed and duplicates diagnosed in the same
   scope;
-- types `i32`, `bool`, `str`, `void` and nominal structs; operators checked by
-  category;
+- fixed-width signed/unsigned integers, `usize`, `bool`, `str`, `void`, nominal
+  structs/enums and inferred pointer types; operators and casts are checked by
+  type category and integer width;
 - assignment requires `var`;
 - structural return check (`alwaysReturns`) for non-void functions;
 - `fn main()` validation (no parameters, `i32` or `void` return);
@@ -214,7 +215,10 @@ index in declaration order) plus one **payload** word.
 
 ### Backends — `src/codegen/`
 
-- `llvm.zig`: textual IR with simple SSA, basic blocks, `phi` for `&&`/`||`,
+- `llvm.zig`: textual IR for integer operations/casts, enums, scalar-replaced
+  structs, strings, calls and control flow; address-of/dereference expressions
+  are currently unsupported by this backend. It uses simple SSA, basic blocks,
+  `phi` for `&&`/`||`,
   `alloca` for variables. Without an LLVM tool in the local environment
   validation is structural (every block ends with `ret`/`br`/`unreachable`) and
   CI runs `llvm-as` over every fixture (`tools/validate-ir.sh`).
