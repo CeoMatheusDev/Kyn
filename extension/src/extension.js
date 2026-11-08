@@ -322,7 +322,7 @@ class WorkspaceSymbolIndex {
     const revision = this.revision, version = document.version;
     const pending = this.client.semanticIndex(document).then(snapshot => {
       if (document.isClosed) return null;
-      if (revision !== this.revision || version !== document.version) return this.get(document);
+      if (revision !== this.revision || version !== document.version) return null;
       if (snapshot) this.cache.set(key, { version, snapshot });
       return snapshot;
     }).finally(() => {
