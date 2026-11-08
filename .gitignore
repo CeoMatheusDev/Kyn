@@ -1,8 +1,31 @@
-# Zig build artifacts (build.zig / build.zig.zon)
+# Zig build outputs
 .zig-cache/
 zig-cache/
 zig-out/
 
-# Binary installed by the CLI
+# Native compiler artifacts
 kync
 *.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.ll
+*.s
+
+# VS Code extension packaging
+*.vsix
+
+# Editor and operating-system files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.swp
+*~

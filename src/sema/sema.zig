@@ -1,15 +1,17 @@
-//! Bootstrap semantic analysis.
+//! Semantic analysis for the Zig bootstrap compiler.
 //!
 //! Responsibilities:
-//! - resolve names (variables, parameters and functions) and annotates the AST
-//!   with symbol indices (`Expr.resolved`, `Stmt.decl_symbol`, `Call.callee_fn`);
-//! - check types (`i32`, `bool`, `void`), mutability and conditions;
-//! - assign one stack slot per variable of each function, consumed by the
-//!   backends;
-//! - validate the `main` entry point.
+//! - register nominal struct, enum and function declarations before checking
+//!   bodies, allowing recursion and calls before declarations;
+//! - resolve variables, parameters, functions, methods, enum cases and fields,
+//!   annotating AST nodes with stable indices rather than rewriting the tree;
+//! - validate fixed-width integer types, bool, str, void, aggregates, enums and
+//!   pointer types, including casts, mutability, operators and control flow;
+//! - compute symbol slots and argument-register usage consumed by the backends;
+//! - validate the entry-point contract and produce structured diagnostics.
 //!
-//! The AST is not modified structurally: it only receives resolved indices.
-//! Every symbol and signature is allocated in the received arena.
+//! The AST is not modified structurally. Symbols, signatures and semantic
+//! metadata are allocated from the compilation arena supplied to Checker.
 
 const std = @import("std");
 const ast = @import("../ast/ast.zig");
@@ -133,8 +135,8 @@ pub const Type = union(enum) {
         return switch (self) {
             .i8, .u8 => 8,
             .i16, .u16 => 16,
-            .i32, .u32, .usize => 32,
-            .i64, .u64 => 64,
+            .i32, .u32 => 32,
+            .i64, .u64, .usize => 64,
             .ptr => 64,
             else => 0,
         };
@@ -143,7 +145,7 @@ pub const Type = union(enum) {
     /// True when the type is signed.
     pub fn isSigned(self: Type) bool {
         return switch (self) {
-            .i8, .i16, .i32, .i64, .usize => true, // usize treated as signed for shift amount
+            .i8, .i16, .i32, .i64 => true,
             .u8, .u16, .u32, .u64 => false,
             else => false,
         };
@@ -185,6 +187,28 @@ pub const Type = union(enum) {
         };
     }
 };
+
+test "sema type metadata: usize is a 64-bit unsigned integer" {
+    const usize_type: Type = .usize;
+    try std.testing.expectEqual(@as(u32, 64), usize_type.bitWidth());
+    try std.testing.expect(!usize_type.isSigned());
+    try std.testing.expectEqual(@as(usize, 2), usize_type.registerWords());
+}
+
+test "sema type metadata: signedness and widths match integer names" {
+    const i8_type: Type = .i8;
+    const u16_type: Type = .u16;
+    const i32_type: Type = .i32;
+    const i64_type: Type = .i64;
+    const u64_type: Type = .u64;
+
+    try std.testing.expectEqual(@as(u32, 8), i8_type.bitWidth());
+    try std.testing.expectEqual(@as(u32, 16), u16_type.bitWidth());
+    try std.testing.expectEqual(@as(u32, 32), i32_type.bitWidth());
+    try std.testing.expectEqual(@as(u32, 64), u64_type.bitWidth());
+    try std.testing.expect(i64_type.isSigned());
+    try std.testing.expect(!u64_type.isSigned());
+}
 
 /// A pointer type whose pointee is `.unknown`. Used when the exact pointee
 /// type is not tracked (e.g. the result of `&x`).

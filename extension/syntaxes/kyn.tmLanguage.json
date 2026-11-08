@@ -103,7 +103,7 @@
       "patterns": [
         {
           "name": "punctuation.separator.kyn",
-          "match": "[,:;. ]"
+          "match": "[,:;.]"
         },
         {
           "name": "punctuation.section.kyn",

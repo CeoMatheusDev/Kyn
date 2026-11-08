@@ -27,7 +27,7 @@ Having both sets does not mean a self-hosted pipeline exists.
    AST    (structs, functions, statements, expressions; slices into the input)
       |
       v
- Semantics (scopes, i32/bool/str/void/struct types, mutability, stack slots)
+ Semantics (scopes, fixed-width integers, bool/str/void, structs/enums/pointers, mutability, stack slots)
       |
       v
   Backend (single interface)
@@ -205,8 +205,9 @@ index in declaration order) plus one **payload** word.
   declaration), then bodies;
 - nested scopes with shadowing allowed and duplicates diagnosed in the same
   scope;
-- types `i32`, `bool`, `str`, `void` and nominal structs; operators checked by
-  category;
+- fixed-width signed/unsigned integers, 64-bit unsigned `usize`, `bool`, `str`, `void`, nominal
+  structs/enums and inferred pointer types; operators and casts are checked by
+  type category and integer width;
 - assignment requires `var`;
 - structural return check (`alwaysReturns`) for non-void functions;
 - `fn main()` validation (no parameters, `i32` or `void` return);
@@ -214,8 +215,12 @@ index in declaration order) plus one **payload** word.
 
 ### Backends — `src/codegen/`
 
-- `llvm.zig`: textual IR with simple SSA, basic blocks, `phi` for `&&`/`||`,
-  `alloca` for variables. Without an LLVM tool in the local environment
+- `llvm.zig`: textual IR for integer operations/casts, enums, scalar-replaced
+  structs, strings, calls and control flow; address-of/dereference expressions
+  are currently unsupported by this backend. It uses simple SSA, basic blocks,
+  `phi` for `&&`/`||`, and `alloca` for variables. The native backend also
+  lowers pointer operations; `usize` is 64-bit and unsigned in semantic type
+  metadata. Without an LLVM tool in the local environment
   validation is structural (every block ends with `ret`/`br`/`unreachable`) and
   CI runs `llvm-as` over every fixture (`tools/validate-ir.sh`).
 - `x86_64.zig`: System V assembly without libc. `_start` calls `kyn_main` and
@@ -247,8 +252,8 @@ They compile and have tests, but most APIs do no real I/O.
 3. Define the struct-by-value convention for **aggregates larger** than the
    register table (today limited to 6 fields, receiver included) — stack passing
    or `sret` — which also lifts the "large `self`" limitation of methods.
-4. Add the still-missing AST nodes (`unsafe`, attributes, pointers) and wire
-   `src/sema/unsafe.zig`; extract the data layout and calling convention into an
+4. Add the still-missing AST nodes for `unsafe` and attributes, and wire
+   `src/sema/unsafe.zig`; extract data layout and calling convention into an
    explicit target description (see `docs/embedded.md` §3).
 5. Define the executable memory model (ownership, lifetimes, slices) before
    expanding the std.

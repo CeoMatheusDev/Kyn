@@ -36,3 +36,8 @@ The generated `kync` executable is placed at `zig-out/bin/kync`.
 
 Keep the grammar aligned with the syntax actually accepted by the compiler.
 Do not add editor features that imply unsupported language constructs.
+
+## License
+
+This extension is part of the Kyn project and is licensed under Apache-2.0.
+See [the repository license](../LICENSE) for the full terms.

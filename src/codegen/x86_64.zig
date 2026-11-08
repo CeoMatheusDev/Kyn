@@ -1,25 +1,24 @@
-//! Native x86-64 backend (Linux, System V AMD64), no libc dependency.
+//! Native x86-64 backend for Linux, using the System V AMD64 ABI.
 //!
 //! Strategy:
-//! - every variable (parameter or local) gets an 8-byte slot in the frame;
-//!   `i32`/`bool` use 4 bytes of the slot and are loaded as 32 bits;
-//! - a struct variable takes one base slot (reserved) followed by one slot
-//!   per field, in declaration order (`slot + 1 + index`); structs never
-//!   escape the function (no by-value parameters/returns), so it fits in
-//!   local variables;
-//! - expressions are evaluated in `%eax` with a temporary stack;
-//! - `str` is a slice (pointer + length) kept in two slots; in
-//!   calls it occupies **two consecutive registers** (`%rdi/%rsi`,
-//!   `%rdx/%rcx`, `%r8/%r9` — at most three `str` per call) and the return
-//!   comes back in `%rax` (pointer) and `%rdx` (length);
-//! - `_start` calls `kyn_main` and exits through the `exit` syscall (60) with
-//!   the value returned by `main` (`0` when `main` is `void`).
+//! - reserve eight-byte frame slots for local values and parameters;
+//! - use width-specific integer registers and operations for 8/16/32/64-bit
+//!   integer types; bool values are materialized as 32-bit values;
+//! - lower structs into a reserved base slot plus one slot per field, and
+//!   flatten struct arguments/returns according to the current Kyn ABI;
+//! - represent strings as pointer + length pairs in storage and calls;
+//! - represent pointer values as 64-bit addresses and reserve temporary frame
+//!   slots for address-of results;
+//! - generate `_start`, call the Kyn entry point and exit through Linux syscall
+//!   60, without a libc dependency.
 //!
-//! This backend is the validatable path: `as` + `ld` produce a binary that can
-//! be run and checked through its exit code (see `tools/e2e.sh`).
+//! The native backend is the executable validation path: `as` and `ld`
+//! assemble and link emitted programs, which are then checked by exit status
+//! and stdout in `tools/e2e.sh`.
 //!
-//! Known limits: up to 6 parameters (SysV registers), no external
-//! calls, `bool` is materialized as 32 bits, no optimization.
+//! Known limits include the current six-register argument budget, no external
+//! calls and no optimization. This is a project-specific ABI, not yet a stable
+//! cross-target calling-convention specification.
 
 const std = @import("std");
 const ast = @import("../ast/ast.zig");

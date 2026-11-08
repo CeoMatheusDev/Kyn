@@ -1,22 +1,20 @@
-//! LLVM IR backend (text).
+//! Textual LLVM IR backend for the current Kyn subset.
 //!
-//! Emits textual IR for the current subset: `i32`/`void` functions, `i32`/`bool`
-//! variables, arithmetic, comparisons, `&&`/`||` with short-circuit,
-//! `if`/`else`, `while` and direct function calls.
+//! The emitter lowers fixed-width integer operations and casts, boolean
+//! control flow, direct calls, switch statements, enums, scalar-replaced
+//! structs and static strings. String values are represented as pointer +
+//! length pairs in storage and calls, with aggregate returns where required.
 //!
-//! Structs: struct values only exist in local variables (no parameters,
-//! returns, pointers or struct fields), so each field gets its own
-//! `alloca` — scalar replacement of a struct that never escapes. That
-//! removes aggregate types and `getelementptr` without changing observable
+//! This backend is not feature-identical to the native x86-64 backend:
+//! address-of and dereference expressions currently return
+//! `error.UnsupportedNode`. Pointer semantics can therefore pass semantic
+//! analysis while LLVM emission remains unavailable for programs that use
+//! those expressions.
 //!
-//! `str` is a slice (pointer + length): in variables it takes two `alloca`s
-//! (`ptr` and `i64`); in calls it becomes two parameters (`ptr` + `i64`) and
-//! the return uses the aggregate `{ ptr, i64 }` with `insertvalue`/`extractvalue`.
-//!
-//! This emitter is not validated by an LLVM assembler in the development
-//! environment (no `llc`/`clang` available); the tests check the structure of
-//! the emitted text. For end-to-end executable validation see the
-//! `x86_64_asm` backend, which is assembled and linked with `as`/`ld`.
+//! LLVM output is textual and must be checked with an LLVM verifier. Structural
+//! unit tests alone do not establish that emitted IR is accepted by LLVM.
+//! Native executable validation is performed through the x86-64 backend and
+//! the `as` + `ld` end-to-end test path.
 
 const std = @import("std");
 const ast = @import("../ast/ast.zig");

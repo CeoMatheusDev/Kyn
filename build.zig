@@ -32,7 +32,7 @@ pub fn build(b: *std.Build) void {
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     run_cmd.addPassthruArgs();
-    b.step("run", "Executa o kync").dependOn(&run_cmd.step);
+    b.step("run", "Run the kync compiler").dependOn(&run_cmd.step);
 
     // Compiler unit tests.
     const unit_tests = b.addTest(.{

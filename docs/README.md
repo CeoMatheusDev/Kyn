@@ -15,6 +15,13 @@ This folder holds the project's technical documentation. The documents explicitl
 | [Lexical grammar](grammar.ebnf) | Tokens, keywords and operators implemented in the lexer |
 | [Syntactic grammar](syntax.ebnf) | Exact grammar of the subset accepted by the current parser |
 | [Memory model](memory_model.md) | Proposed guidelines for memory, ownership and FFI |
+| [Maintainer guide](maintainer-guide.md) | Sources of truth, change protocol and engineering conventions |
+
+## Directory guides
+
+- [Compiler source](../src/README.md) — active Zig pipeline and experimental prototypes.
+- [Standard library](../std/README.md) — intended core/OS boundary and current limitations.
+- [Tests](../tests/README.md) — fixture taxonomy and validation commands.
 
 ## Conventions
 

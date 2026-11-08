@@ -124,14 +124,15 @@ from the local tests.
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs on `push` (main and `arena/**`),
-`pull_request` and manually. On `ubuntu-24.04` the workflow:
+`.github/workflows/ci.yml` runs on pushes to the maintained branch, pull
+requests and manual dispatch. On `ubuntu-24.04` the workflow:
 
 1. installs `python3-venv` and `llvm`;
 2. installs Zig 0.17.0 from the official PyPI wheel (the same path described
    above) and exposes it on `PATH`;
 3. runs `zig fmt --check build.zig src std`;
-4. runs `zig build test` (244 + 7 tests) and `zig build e2e` (121 cases);
+4. runs `zig build test` (the current status snapshot records 246 compiler + 7 std
+tests) and `zig build e2e` (the current status snapshot records 130 cases);
 5. runs `zig build validate-ir-strict` (IR of 90 modules accepted by
    `llvm-as`).
 
@@ -186,7 +187,7 @@ tools/e2e.sh           # end-to-end validation
 3. Add or update tests covering the behavior.
 4. Run `zig build test` and, if you touched backend/semantics, `zig build e2e`.
 5. Update the affected documentation (`docs/status.md`, `docs/syntax.ebnf`,
-   `CHANGELOG.md`, `DEVELOPMENT_STATE.md`).
+   `CHANGELOG.md`, `docs/maintainer-guide.md`).
 6. In the pull request, state what was executed and what was not validated.
 
 ## Implementation conventions

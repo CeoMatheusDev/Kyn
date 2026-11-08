@@ -44,16 +44,16 @@ implementation and reproducible tests.
       enums, receiver passed by value as argument 1, `Type_method` mangling,
       per-type name spaces, nominal receiver rules and a shared argument checker
       for free and method calls.
-- [ ] Complete parser and AST for the target language. Current subset: `fn`,
-      `let`/`var`, assignment, `return`, `if`/`else`, `while`, `switch` over
-      enums, blocks, expressions with precedence, `import`, `struct`, `enum`,
-      `impl` and `str`, structs, enums and `str` by value across functions.
-      Missing: `unsafe`, attributes, enum struct fields, payload types other
-      than `i32`, `str` comparison and concatenation, slices, pointers and
-      generics.
-- [ ] Complete semantic analysis and the type system beyond
-      `i32`/`bool`/`void`/`str` (other integer widths, `f32`/`f64`, `str` with
-      ownership/lifetimes, flow checking).
+- [x] Add fixed-width signed/unsigned integers, `usize`, explicit integer
+      casts, bitwise operators and shifts; validate width-aware semantics in
+      both backends.
+- [x] Add typed pointers, address-of, dereference, pointer field access,
+      pointer arithmetic and pointer equality/inequality for the current target.
+- [ ] Complete the language beyond the implemented subset: slices, arrays,
+      nested aggregates, enum struct fields, richer payloads, `unsafe`,
+      attributes, generics and a formal ownership/lifetime model.
+- [ ] Extend semantic analysis with floating-point types, richer flow
+      analysis, ownership/lifetime checking and a complete error model.
 - [ ] Define and validate the official backend. The x86-64 backend is validated
       by execution; the LLVM backend IR is accepted by `llvm-as` in CI, but the
       choice of the official backend (and a configurable `target triple`)
@@ -61,14 +61,13 @@ implementation and reproducible tests.
 
 ## Phase 2 — Freestanding and embedded targets
 
-Dependency order and rationale in `docs/embedded.md`; nothing here is started
-before the numeric-width cycles.
+Dependency order and rationale in `docs/embedded.md`. Fixed-width integers,
+bitwise operations and basic typed pointers are already implemented; this phase
+covers the additional target and memory contracts required for firmware.
 
-- [ ] Fixed-width integers (`u8`/`i8`, `u16`/`i16`, `u32`, `u64`, `usize`) with
-      explicit conversions, bitwise operators, shifts and defined wrap
-      semantics.
-- [ ] Pointers (`*T`, `*const T`), address-of, dereference and the first real
-      `unsafe` blocks (wire `src/sema/unsafe.zig` to AST nodes).
+- [ ] Define pointer safety, nullability, aliasing and lifetime rules; add
+      const-qualified pointers and real `unsafe` blocks only after the rules
+      are specified and tested.
 - [ ] `volatile` loads/stores preserved by both backends, plus MMIO/register
       abstractions in a future `kyn:embedded` package.
 - [ ] Layout control: `#[repr(C)]`, explicit alignment and compile-time

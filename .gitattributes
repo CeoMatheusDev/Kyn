@@ -1,4 +1,20 @@
-# Linguagem Kyn / Zig
-*.zig text diff=zig
+# Source files
+*.zig text diff=zig eol=lf
 *.kyn text eol=lf
+*.sh text eol=lf
+
+# Documentation and metadata
 *.md text eol=lf
+*.txt text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.zon text eol=lf
+*.ebnf text eol=lf
+
+# Preserve binary assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
