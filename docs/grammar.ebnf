@@ -22,10 +22,12 @@ integer    = digit, { digit } ;   (* value converted to i64 by the parser *)
 string_literal = '"', { any_char - ( '"' | "\n" | "\r" ) }, '"' ;
 
 keyword    = "fn" | "let" | "var" | "return"
-           | "if" | "else" | "while"
-           | "import" | "struct" | "true" | "false" ;
+           | "if" | "else" | "while" | "switch"
+           | "import" | "struct" | "enum" | "true" | "false" ;
 
-operator   = "->"
+(* "=>" (fat arrow) separates a switch case from its body; "->" is only the
+   return arrow of a function signature. *)
+operator   = "->" | "=>"
            | "==" | "!=" | "<" | "<=" | ">" | ">="
            | "=" | "+" | "-" | "*" | "/" | "%" | "!"
            | "&&" | "||" ;

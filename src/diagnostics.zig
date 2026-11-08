@@ -26,6 +26,15 @@ pub const Kind = enum {
     undefined_field,
     /// Incomplete struct literal or repeated field.
     invalid_struct_literal,
+    /// `switch` arm whose case exists but whose payload binding is wrong
+    /// (missing payload, payload on a payload-less case, wrong arity).
+    invalid_switch_arm,
+    /// Case name that the enum does not declare.
+    unknown_case,
+    /// `switch` without an `else` and without covering every case.
+    non_exhaustive_switch,
+    /// `else` arm that can never run because every case is covered.
+    unreachable_arm,
     missing_main,
     invalid_main,
     // modules

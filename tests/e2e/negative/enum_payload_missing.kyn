@@ -1,0 +1,17 @@
+// A case with a payload must bind it; a bare `Circle` is rejected.
+enum Shape {
+    Circle(i32),
+    Empty,
+}
+
+fn main() -> i32 {
+    let s = Shape.Empty;
+    switch s {
+        Circle => {
+            return 1;
+        }
+        Empty => {
+            return 0;
+        }
+    }
+}

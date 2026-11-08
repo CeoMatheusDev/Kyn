@@ -1,0 +1,12 @@
+// Struct fields of enum type are not supported yet.
+enum Color {
+    Red,
+}
+
+struct Holder {
+    c: Color,
+}
+
+fn main() -> i32 {
+    return 0;
+}

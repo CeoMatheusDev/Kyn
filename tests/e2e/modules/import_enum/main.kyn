@@ -1,0 +1,21 @@
+// expect-stdout: 12
+// expect-exit: 48
+import "color.kyn";
+
+fn main() -> i32 {
+    let c = Color.Blue;
+    var total: i32 = green_tag();
+    switch c {
+        Red => {
+            total = total + 1;
+        }
+        Green => {
+            total = total + 2;
+        }
+        Blue => {
+            total = total + 5;
+        }
+    }
+    print_i32(total);
+    return total * 4;
+}

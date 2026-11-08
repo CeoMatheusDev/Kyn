@@ -96,11 +96,12 @@ pub const Parser = struct {
         return self.take();
     }
 
-    /// programa = { import }, { struct_decl | function_decl }, EOF
+    /// programa = { import }, { struct_decl | enum_decl | function_decl }, EOF
     pub fn parseProgram(self: *Parser) Error!*ast.Program {
         const start_span = self.current().span;
         var imports: std.ArrayList(ast.Import) = .empty;
         var structs: std.ArrayList(*ast.StructDecl) = .empty;
+        var enums: std.ArrayList(*ast.EnumDecl) = .empty;
         var functions: std.ArrayList(*ast.Function) = .empty;
         var seen_decl = false;
 
@@ -112,7 +113,7 @@ pub const Parser = struct {
                         return self.fail(
                             .syntax,
                             tok.span,
-                            "'import' must come before 'struct' and 'fn' declarations",
+                            "'import' must come before 'struct', 'enum' and 'fn' declarations",
                             .{},
                         );
                     }
@@ -121,6 +122,10 @@ pub const Parser = struct {
                 .kw_struct => {
                     seen_decl = true;
                     try structs.append(self.arena, try self.parseStruct());
+                },
+                .kw_enum => {
+                    seen_decl = true;
+                    try enums.append(self.arena, try self.parseEnum());
                 },
                 .kw_fn => {
                     seen_decl = true;
@@ -131,7 +136,7 @@ pub const Parser = struct {
                     return self.fail(
                         .syntax,
                         tok.span,
-                        "expected 'import', 'struct' declaration or 'fn' at top level, found {s}",
+                        "expected 'import', 'struct', 'enum' or 'fn' at top level, found {s}",
                         .{tok.describe()},
                     );
                 },
@@ -142,6 +147,7 @@ pub const Parser = struct {
         program.* = .{
             .imports = try imports.toOwnedSlice(self.arena),
             .structs = try structs.toOwnedSlice(self.arena),
+            .enums = try enums.toOwnedSlice(self.arena),
             .functions = try functions.toOwnedSlice(self.arena),
             .span = start_span.merge(self.current().span),
         };
@@ -165,7 +171,7 @@ pub const Parser = struct {
                     .{name_tok.text},
                 );
             }
-            const field_name = try self.expectIdentifier("nome do campo");
+            const field_name = try self.expectIdentifier("field name");
             _ = try self.expect(.colon, "':' and the field type");
             const type_name = try self.parseTypeName("field type");
             try fields.append(self.arena, .{
@@ -195,6 +201,71 @@ pub const Parser = struct {
             .name = name_tok.text,
             .name_span = name_tok.span,
             .fields = try fields.toOwnedSlice(self.arena),
+            .span = kw_tok.span.merge(close.span),
+        };
+        return decl;
+    }
+
+    /// enum_decl = "enum", identifier, "{", { case, [","] }, "}" ;
+    /// case = identifier, ["(", type_name, ")"] ;
+    fn parseEnum(self: *Parser) Error!*ast.EnumDecl {
+        const kw_tok = try self.expect(.kw_enum, "'enum'");
+        const name_tok = try self.expectIdentifier("enum name after 'enum'");
+        _ = try self.expect(.lbrace, "'{' to start the enum cases");
+
+        var cases: std.ArrayList(ast.EnumCase) = .empty;
+        while (!self.at(.rbrace)) {
+            if (self.at(.eof)) {
+                return self.fail(
+                    .syntax,
+                    self.current().span,
+                    "enum '{s}' is not closed: missing '}}' before end of file",
+                    .{name_tok.text},
+                );
+            }
+            // A stray separator between cases is accepted and ignored.
+            if (self.at(.comma) or self.at(.semicolon)) {
+                self.advance();
+                continue;
+            }
+
+            const case_tok = try self.expectIdentifier("case name");
+            var payload: ?ast.TypeName = null;
+            var case_span = case_tok.span;
+            if (self.at(.lparen)) {
+                self.advance();
+                payload = try self.parseTypeName("payload type of the case");
+                const close = try self.expect(.rparen, "')' to close the payload type");
+                case_span = case_span.merge(close.span);
+            }
+            try cases.append(self.arena, .{
+                .name = case_tok.text,
+                .name_span = case_tok.span,
+                .payload = payload,
+                .span = case_span,
+            });
+
+            if (self.at(.comma) or self.at(.semicolon)) {
+                self.advance();
+                continue;
+            }
+            if (!self.at(.rbrace)) {
+                const tok = self.current();
+                return self.fail(
+                    .syntax,
+                    tok.span,
+                    "expected ',' between enum cases or '}}' to close, found {s}",
+                    .{tok.describe()},
+                );
+            }
+        }
+        const close = try self.expect(.rbrace, "'}' to close the enum");
+
+        const decl = try self.arena.create(ast.EnumDecl);
+        decl.* = .{
+            .name = name_tok.text,
+            .name_span = name_tok.span,
+            .cases = try cases.toOwnedSlice(self.arena),
             .span = kw_tok.span.merge(close.span),
         };
         return decl;
@@ -309,6 +380,7 @@ pub const Parser = struct {
             .kw_return => self.parseReturn(),
             .kw_if => self.parseIf(),
             .kw_while => self.parseWhile(),
+            .kw_switch => self.parseSwitch(),
             .lbrace => blk: {
                 const block = try self.parseBlock("'{' to start the block");
                 const stmt = try ast.Stmt.create(self.arena, block.span, .{ .block = block.stmts });
@@ -419,6 +491,86 @@ pub const Parser = struct {
         const block = try self.parseBlock("'{' to start the 'while' block");
         return ast.Stmt.create(self.arena, kw_tok.span.merge(block.span), .{
             .while_stmt = .{ .cond = cond, .body = block.stmts },
+        });
+    }
+
+    /// switch_stmt = "switch", expr, "{", { arm }, "}" ;
+    /// arm = (case_name, ["(", identifier, ")"]) | "else", "=>", block ;
+    fn parseSwitch(self: *Parser) Error!*ast.Stmt {
+        const kw_tok = try self.expect(.kw_switch, "'switch'");
+        const scrutinee = try self.parseCondition();
+        _ = try self.expect(.lbrace, "'{' to start the switch arms");
+
+        var arms: std.ArrayList(ast.Stmt.SwitchArm) = .empty;
+        var else_body: ?[]*ast.Stmt = null;
+        var else_span: ?Span = null;
+        var else_seen = false;
+
+        while (!self.at(.rbrace)) {
+            if (self.at(.eof)) {
+                return self.fail(
+                    .syntax,
+                    self.current().span,
+                    "switch is not closed: missing '}}' before end of file",
+                    .{},
+                );
+            }
+            // Tolerates stray separators between arms.
+            if (self.at(.comma) or self.at(.semicolon)) {
+                self.advance();
+                continue;
+            }
+
+            const arm_tok = self.current();
+            if (arm_tok.tag == .kw_else) {
+                self.advance();
+                _ = try self.expect(.fat_arrow, "'=>' after 'else'");
+                const body = try self.parseBlock("'{' to start the 'else' arm");
+                if (else_seen) {
+                    return self.fail(
+                        .syntax,
+                        arm_tok.span,
+                        "duplicate 'else' arm in the switch",
+                        .{},
+                    );
+                }
+                else_seen = true;
+                else_body = body.stmts;
+                else_span = arm_tok.span;
+                continue;
+            }
+
+            const case_tok = try self.expectIdentifier("case name or 'else'");
+            var binding: ?[]const u8 = null;
+            var binding_span: ?Span = null;
+            if (self.at(.lparen)) {
+                self.advance();
+                const name_tok = try self.expectIdentifier("name to bind the payload");
+                binding = name_tok.text;
+                binding_span = name_tok.span;
+                _ = try self.expect(.rparen, "')' to close the payload binding");
+            }
+            _ = try self.expect(.fat_arrow, "'=>' after the case");
+            const body = try self.parseBlock("'{' to start the arm body");
+
+            try arms.append(self.arena, .{
+                .case_name = case_tok.text,
+                .case_span = case_tok.span,
+                .binding = binding,
+                .binding_span = binding_span,
+                .body = body.stmts,
+                .span = case_tok.span.merge(body.span),
+            });
+        }
+        const close = try self.expect(.rbrace, "'}' to close the switch");
+
+        return ast.Stmt.create(self.arena, kw_tok.span.merge(close.span), .{
+            .switch_stmt = .{
+                .scrutinee = scrutinee,
+                .arms = try arms.toOwnedSlice(self.arena),
+                .else_body = else_body,
+                .else_span = else_span,
+            },
         });
     }
 
@@ -586,12 +738,40 @@ pub const Parser = struct {
         });
     }
 
-    /// Consumes chained `.field` accesses over `base` and returns the outermost node.
+    /// Consumes chained `.field` accesses over `base` and returns the outermost
+    /// node. `Name.Case(...)` becomes a `method_call`, which semantics resolves
+    /// as an enum constructor (other method calls are rejected there).
     fn parseFieldChain(self: *Parser, base: *ast.Expr) Error!*ast.Expr {
         var expr = base;
         while (self.at(.dot)) {
             self.advance();
             const field_tok = try self.expectIdentifier("field name after '.'");
+
+            if (self.at(.lparen)) {
+                self.advance();
+                var args: std.ArrayList(*ast.Expr) = .empty;
+                if (!self.at(.rparen)) {
+                    while (true) {
+                        try args.append(self.arena, try self.parseExpression());
+                        if (self.at(.comma)) {
+                            self.advance();
+                            continue;
+                        }
+                        break;
+                    }
+                }
+                const close = try self.expect(.rparen, "')' to close the arguments");
+                expr = try ast.Expr.create(self.arena, expr.span.merge(close.span), .{
+                    .method_call = .{
+                        .base = expr,
+                        .name = field_tok.text,
+                        .name_span = field_tok.span,
+                        .args = try args.toOwnedSlice(self.arena),
+                    },
+                });
+                continue;
+            }
+
             const node = try ast.Expr.create(self.arena, expr.span.merge(field_tok.span), .{
                 .field_access = .{
                     .base = expr,
@@ -617,7 +797,7 @@ pub const Parser = struct {
                     .{},
                 );
             }
-            const field_name = try self.expectIdentifier("nome do campo no literal");
+            const field_name = try self.expectIdentifier("field name in the literal");
             _ = try self.expect(.colon, "':' e o valor do campo");
             const value = try self.parseExpression();
             try fields.append(self.arena, .{
@@ -665,6 +845,9 @@ pub const Parser = struct {
             .field_access => |access| access,
             else => return self.fail(.syntax, target.span, "invalid assignment", .{}),
         };
+        if (access.resolved_enum != null) {
+            return self.fail(.syntax, target.span, "invalid assignment", .{});
+        }
         self.advance(); // =
         const value = try self.parseExpression();
         const semi = try self.expect(.semicolon, "';' after the assignment");
@@ -1106,4 +1289,118 @@ test "parser: print_i32 call with an arithmetic expression" {
     const call = parsed.program.?.functions[0].body[0].kind.expr_stmt.kind.call;
     try testing.expectEqualStrings("print_i32", call.callee);
     try testing.expectEqual(ast.Expr.BinaryOp.mul, call.args[0].kind.binary.op);
+}
+
+test "parser: enum declaration with and without payload" {
+    var parsed = try Parsed.parse(
+        \\enum Color { Red, Green, Blue }
+        \\enum Shape { Circle(i32), Empty, }
+        \\fn main() -> i32 { return 0; }
+    );
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 0), parsed.diags.count());
+
+    const program = parsed.program.?;
+    try testing.expectEqual(@as(usize, 2), program.enums.len);
+    try testing.expectEqualStrings("Color", program.enums[0].name);
+    try testing.expectEqual(@as(usize, 3), program.enums[0].cases.len);
+    try testing.expect(program.enums[0].cases[0].payload == null);
+    try testing.expectEqualStrings("Green", program.enums[0].cases[1].name);
+    try testing.expectEqualStrings("Circle", program.enums[1].cases[0].name);
+    try testing.expectEqualStrings("i32", program.enums[1].cases[0].payload.?.name);
+    try testing.expect(program.enums[1].cases[1].payload == null);
+}
+
+test "parser: unclosed enum is diagnosed" {
+    var parsed = try Parsed.parse(
+        \\enum Color { Red
+    );
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 1), parsed.diags.count());
+    try testing.expectEqual(diagnostics.Kind.syntax, parsed.diags.items.items[0].kind);
+}
+
+test "parser: switch with payload binding, plain case and else" {
+    var parsed = try Parsed.parse(
+        \\enum Shape { Circle(i32), Empty }
+        \\fn main() -> i32 {
+        \\    var s = Shape.Empty;
+        \\    switch s {
+        \\        Circle(r) => { return r; }
+        \\        Empty => { return 0; }
+        \\        else => { return 1; }
+        \\    }
+        \\}
+    );
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 0), parsed.diags.count());
+
+    const body = parsed.program.?.functions[0].body;
+    try testing.expectEqual(@as(usize, 2), body.len);
+    const sw = body[1].kind.switch_stmt;
+    try testing.expectEqual(@as(usize, 2), sw.arms.len);
+    try testing.expectEqualStrings("Circle", sw.arms[0].case_name);
+    try testing.expectEqualStrings("r", sw.arms[0].binding.?);
+    try testing.expectEqual(@as(usize, 1), sw.arms[0].body.len);
+    try testing.expectEqualStrings("Empty", sw.arms[1].case_name);
+    try testing.expect(sw.arms[1].binding == null);
+    try testing.expect(sw.else_body != null);
+}
+
+test "parser: enum case and enum constructor in expressions" {
+    var parsed = try Parsed.parse(
+        \\enum Shape { Circle(i32), Empty }
+        \\fn main() -> i32 {
+        \\    let a = Shape.Empty;
+        \\    let b = Shape.Circle(5);
+        \\    return 0;
+        \\}
+    );
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 0), parsed.diags.count());
+
+    const body = parsed.program.?.functions[0].body;
+    const plain = body[0].kind.let_decl.init.kind.field_access;
+    try testing.expectEqualStrings("Shape", plain.base.kind.identifier);
+    try testing.expectEqualStrings("Empty", plain.name);
+
+    const with_payload = body[1].kind.let_decl.init.kind.method_call;
+    try testing.expectEqualStrings("Shape", with_payload.base.kind.identifier);
+    try testing.expectEqualStrings("Circle", with_payload.name);
+    try testing.expectEqual(@as(usize, 1), with_payload.args.len);
+}
+
+test "parser: switch arm requires '=>'" {
+    var parsed = try Parsed.parse(
+        \\enum Color { Red }
+        \\fn main() -> i32 {
+        \\    let c = Color.Red;
+        \\    switch c {
+        \\        Red { return 1; }
+        \\    }
+        \\}
+    );
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 1), parsed.diags.count());
+    try testing.expect(
+        std.mem.indexOf(u8, parsed.diags.items.items[0].message, "'=>' after the case") != null,
+    );
+}
+
+test "parser: duplicate 'else' arm is diagnosed" {
+    var parsed = try Parsed.parse(
+        \\enum Color { Red }
+        \\fn main() -> i32 {
+        \\    let c = Color.Red;
+        \\    switch c {
+        \\        else => { return 1; }
+        \\        else => { return 2; }
+        \\    }
+        \\}
+    );
+    defer parsed.deinit();
+    try testing.expectEqual(@as(usize, 1), parsed.diags.count());
+    try testing.expect(
+        std.mem.indexOf(u8, parsed.diags.items.items[0].message, "duplicate 'else' arm") != null,
+    );
 }

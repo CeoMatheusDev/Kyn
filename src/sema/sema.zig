@@ -26,6 +26,10 @@ pub const Type = enum {
     /// Static string slice (pointer + length), represented in two
     /// slots. Not a scalar: it only initializes, is copied and is a `print`
     str,
+    /// Enum value: a tag (`i32`, the declaration order of the case) plus a
+    /// payload slot (used only by cases that carry a value). Not a scalar: it
+    /// takes part in no operator; the only consumer is `switch`.
+    enumeration,
     /// Unknown type: avoids a cascade of diagnostics after an error.
     unknown,
 
@@ -36,6 +40,7 @@ pub const Type = enum {
             .void => "void",
             .aggregate => "struct",
             .str => "str",
+            .enumeration => "enum",
             .unknown => "unknown",
         };
     }
@@ -75,6 +80,8 @@ pub const Symbol = struct {
     decl_span: Span,
     /// Index into `Checked.structs` when `typ == .aggregate`.
     struct_id: u32 = 0,
+    /// Index into `Checked.enums` when `typ == .enumeration`.
+    enum_id: u32 = 0,
 };
 
 /// Field of an already validated struct: scalar type and declaration index.
@@ -87,6 +94,22 @@ pub const FieldInfo = struct {
 pub const StructInfo = struct {
     decl: *const ast.StructDecl,
     fields: []FieldInfo,
+};
+
+/// Case of an already validated enum: `payload` is `null` for a case without
+/// a value and the payload type otherwise (only `i32` today).
+pub const CaseInfo = struct {
+    name: []const u8,
+    name_span: Span,
+    payload: ?Type,
+    /// Value stored in the tag slot: the index in `EnumDecl.cases`, so the
+    /// declaration order is part of the representation.
+    tag: i32,
+};
+
+pub const EnumInfo = struct {
+    decl: *const ast.EnumDecl,
+    cases: []CaseInfo,
 };
 
 pub const FunctionInfo = struct {
@@ -111,9 +134,18 @@ pub const Checked = struct {
     symbols: []Symbol,
     /// Declared structs, in source order (flattened across modules).
     structs: []StructInfo,
+    /// Declared enums, in source order (flattened across modules).
+    enums: []EnumInfo = &.{},
 
     pub fn findStruct(self: *const Checked, name: []const u8) ?u32 {
         for (self.structs, 0..) |info, i| {
+            if (std.mem.eql(u8, info.decl.name, name)) return @intCast(i);
+        }
+        return null;
+    }
+
+    pub fn findEnum(self: *const Checked, name: []const u8) ?u32 {
+        for (self.enums, 0..) |info, i| {
             if (std.mem.eql(u8, info.decl.name, name)) return @intCast(i);
         }
         return null;
@@ -133,6 +165,8 @@ pub const Checked = struct {
 /// backends — so declaration, call and code emission never diverge.
 pub fn registerWordsOf(structs: []const StructInfo, typ: Type, struct_id: u32) usize {
     if (typ == .aggregate and struct_id < structs.len) return structs[struct_id].fields.len;
+    // An enum is a tag plus a payload slot, never a single register.
+    if (typ == .enumeration) return 2;
     return typ.registerWords();
 }
 
@@ -157,6 +191,7 @@ pub const Checker = struct {
     symbols: std.ArrayList(Symbol) = .empty,
     functions: std.ArrayList(FunctionInfo) = .empty,
     structs: std.ArrayList(StructInfo) = .empty,
+    enums: std.ArrayList(EnumInfo) = .empty,
     /// Start (index into `symbols`) of the current scope.
     scopes: std.ArrayList(usize) = .empty,
 
@@ -175,6 +210,13 @@ pub const Checker = struct {
             self.diags.current_file = decl.file_id;
             try self.registerStructName(decl);
         }
+        // Step 0b: enum names and cases, so that `resolveTypeName` can point
+        // at them and `switch` can be checked.
+        for (program.enums) |decl| {
+            self.diags.current_file = decl.file_id;
+            try self.registerEnum(decl);
+        }
+
         for (program.structs) |decl| {
             self.diags.current_file = decl.file_id;
             try self.registerStructFields(decl);
@@ -202,6 +244,7 @@ pub const Checker = struct {
             .functions = try self.functions.toOwnedSlice(self.arena),
             .symbols = try self.symbols.toOwnedSlice(self.arena),
             .structs = try self.structs.toOwnedSlice(self.arena),
+            .enums = try self.enums.toOwnedSlice(self.arena),
         };
     }
 
@@ -212,9 +255,95 @@ pub const Checker = struct {
         return null;
     }
 
+    fn findEnumIndex(self: *const Checker, name: []const u8) ?u32 {
+        for (self.enums.items, 0..) |info, i| {
+            if (std.mem.eql(u8, info.decl.name, name)) return @intCast(i);
+        }
+        return null;
+    }
+
+    /// Enum pass: unique name (against structs and enums), unique cases and a
+    /// supported payload type. Tags follow the declaration order.
+    fn registerEnum(self: *Checker, decl: *const ast.EnumDecl) std.mem.Allocator.Error!void {
+        if (self.findEnumIndex(decl.name) != null or self.findStructIndex(decl.name) != null) {
+            try self.diags.add(
+                .duplicate_declaration,
+                decl.name_span,
+                "enum '{s}' already declared as a struct or enum",
+                .{decl.name},
+            );
+            return;
+        }
+
+        if (decl.cases.len == 0) {
+            try self.diags.add(
+                .unsupported,
+                decl.name_span,
+                "enum '{s}' with no cases is not supported at this stage",
+                .{decl.name},
+            );
+        }
+
+        const cases = try self.arena.alloc(CaseInfo, decl.cases.len);
+        for (decl.cases, 0..) |case, i| {
+            for (decl.cases[0..i]) |previous| {
+                if (std.mem.eql(u8, previous.name, case.name)) {
+                    try self.diags.add(
+                        .duplicate_declaration,
+                        case.name_span,
+                        "case '{s}' already declared in enum '{s}' (line {d})",
+                        .{ case.name, decl.name, previous.name_span.line },
+                    );
+                    break;
+                }
+            }
+
+            var payload: ?Type = null;
+            if (case.payload) |tn| {
+                const typ = try self.resolveTypeName(tn);
+                if (typ == .i32) {
+                    payload = .i32;
+                } else if (typ != .unknown) {
+                    try self.diags.add(
+                        .unsupported,
+                        tn.span,
+                        "case '{s}' of '{s}': payload type '{s}' is not supported yet (only 'i32')",
+                        .{ case.name, decl.name, tn.name },
+                    );
+                }
+            }
+
+            cases[i] = .{
+                .name = case.name,
+                .name_span = case.name_span,
+                .payload = payload,
+                .tag = @intCast(i),
+            };
+        }
+
+        try self.enums.append(self.arena, .{ .decl = decl, .cases = cases });
+    }
+
+    /// Index of the case inside the enum, by name.
+    fn findCaseIndex(info: *const EnumInfo, name: []const u8) ?u32 {
+        for (info.cases, 0..) |case, i| {
+            if (std.mem.eql(u8, case.name, name)) return @intCast(i);
+        }
+        return null;
+    }
+
     /// First struct pass: guarantees unique names so that any
     /// declaration can be referenced by types resolved later.
     fn registerStructName(self: *Checker, decl: *const ast.StructDecl) std.mem.Allocator.Error!void {
+        if (self.findEnumIndex(decl.name) != null) {
+            try self.diags.add(
+                .duplicate_declaration,
+                decl.name_span,
+                "struct '{s}' already declared as an enum",
+                .{decl.name},
+            );
+            return;
+        }
         for (self.structs.items) |existing| {
             if (std.mem.eql(u8, existing.decl.name, decl.name)) {
                 if (self.fileName(existing.decl.file_id)) |path| {
@@ -285,6 +414,13 @@ pub const Checker = struct {
                     "field '{s}' of '{s}' of type 'str' is not supported yet",
                     .{ field.name, decl.name },
                 );
+            } else if (typ == .enumeration) {
+                try self.diags.add(
+                    .unsupported,
+                    field.type_name.span,
+                    "field '{s}' of '{s}' of enum type is not supported yet",
+                    .{ field.name, decl.name },
+                );
             } else if (typ == .void) {
                 try self.diags.add(
                     .type_mismatch,
@@ -348,6 +484,14 @@ pub const Checker = struct {
         for (func.params, 0..) |param, i| {
             params[i] = try self.resolveTypeName(param.type_name);
             param_struct_ids[i] = self.structIdOfTypeName(param.type_name) orelse 0;
+            if (params[i] == .enumeration) {
+                try self.diags.add(
+                    .unsupported,
+                    param.type_name.span,
+                    "enum '{s}' in parameters is not supported yet; declare the enum variable inside the function and use 'switch'",
+                    .{param.type_name.name},
+                );
+            }
             register_words += self.wordsOf(params[i], param_struct_ids[i]);
         }
 
@@ -370,6 +514,15 @@ pub const Checker = struct {
             self.structIdOfTypeName(tn) orelse 0
         else
             0;
+
+        if (return_type == .enumeration) {
+            try self.diags.add(
+                .unsupported,
+                func.return_type.?.span,
+                "enum '{s}' in returns is not supported yet",
+                .{func.return_type.?.name},
+            );
+        }
 
         // A struct returns in one register per field, in declaration order.
         if (return_type == .aggregate and return_struct_id < self.structs.items.len) {
@@ -437,10 +590,11 @@ pub const Checker = struct {
     fn resolveTypeName(self: *Checker, tn: ast.TypeName) std.mem.Allocator.Error!Type {
         if (Type.fromName(tn.name)) |typ| return typ;
         if (self.findStructIndex(tn.name) != null) return .aggregate;
+        if (self.findEnumIndex(tn.name) != null) return .enumeration;
         try self.diags.add(
             .unknown_type,
             tn.span,
-            "unsupported type '{s}' (available: i32, bool, str, void and declared structs)",
+            "unsupported type '{s}' (available: i32, bool, str, void, declared structs and enums)",
             .{tn.name},
         );
         return .unknown;
@@ -473,6 +627,24 @@ pub const Checker = struct {
         };
     }
 
+    /// Enum tied to the annotated type, when present.
+    fn enumIdOfTypeName(self: *const Checker, tn: ast.TypeName) ?u32 {
+        return self.findEnumIndex(tn.name);
+    }
+
+    /// Enum tied to an expression producing an enum value.
+    fn enumIdOfExpr(self: *const Checker, expr: *const ast.Expr) ?u32 {
+        return switch (expr.kind) {
+            .identifier => if (expr.resolved) |idx| blk: {
+                const sym = self.symbols.items[idx];
+                break :blk if (sym.typ == .enumeration) sym.enum_id else null;
+            } else null,
+            .field_access => |access| access.resolved_enum,
+            .method_call => |call| call.resolved_enum,
+            else => null,
+        };
+    }
+
     fn checkFunctionBody(self: *Checker, func: *const ast.Function, index: u32) std.mem.Allocator.Error!void {
         const info = &self.functions.items[index];
         self.fn_index = index;
@@ -487,7 +659,8 @@ pub const Checker = struct {
         for (func.params) |param| {
             const typ = try self.resolveTypeName(param.type_name);
             const struct_id = self.structIdOfTypeName(param.type_name) orelse 0;
-            _ = try self.declare(param.name, param.span, typ, false, .param, struct_id);
+            const enum_id = self.enumIdOfTypeName(param.type_name) orelse 0;
+            _ = try self.declare(param.name, param.span, typ, false, .param, struct_id, enum_id);
         }
 
         try self.checkStatements(func.body);
@@ -528,6 +701,7 @@ pub const Checker = struct {
         mutable: bool,
         kind: SymbolKind,
         struct_id: u32,
+        enum_id: u32,
     ) !?u32 {
         if (self.scopes.items.len > 0) {
             const start = self.scopes.items[self.scopes.items.len - 1];
@@ -549,7 +723,7 @@ pub const Checker = struct {
         // `str` occupies two consecutive slots: pointer and length.
         const extra_slots: u32 = if (typ == .aggregate and struct_id < self.structs.items.len)
             @intCast(self.structs.items[struct_id].fields.len)
-        else if (typ == .str)
+        else if (typ == .str or typ == .enumeration)
             1
         else
             0;
@@ -564,6 +738,7 @@ pub const Checker = struct {
             .kind = kind,
             .decl_span = span,
             .struct_id = struct_id,
+            .enum_id = enum_id,
         });
         return @intCast(self.symbols.items.len - 1);
     }
@@ -680,6 +855,27 @@ pub const Checker = struct {
                     }
                 }
 
+                // Same `enum` type, different enums (nominal identity).
+                const init_enum = self.enumIdOfExpr(decl.init);
+                const declared_enum: u32 = if (decl.type_name) |tn|
+                    self.enumIdOfTypeName(tn) orelse 0
+                else
+                    0;
+                if (decl.type_name != null and declared_type == .enumeration and init_type == .enumeration) {
+                    if (init_enum != null and init_enum.? != declared_enum) {
+                        try self.diags.add(
+                            .type_mismatch,
+                            decl.init.span,
+                            "initializer of '{s}' is enum '{s}', but the annotation is '{s}'",
+                            .{
+                                decl.name,
+                                self.enums.items[init_enum.?].decl.name,
+                                self.enums.items[declared_enum].decl.name,
+                            },
+                        );
+                    }
+                }
+
                 // Struct variable without annotation: the struct comes from the initializer.
                 const struct_id: u32 = if (declared_type != .aggregate)
                     0
@@ -688,6 +884,15 @@ pub const Checker = struct {
                 else
                     init_struct;
 
+                // Same rule for enums: without annotation the enum comes from
+                // the initializer.
+                const enum_id: u32 = if (declared_type != .enumeration)
+                    0
+                else if (decl.type_name != null)
+                    declared_enum
+                else
+                    init_enum orelse 0;
+
                 stmt.decl_symbol = try self.declare(
                     decl.name,
                     decl.name_span,
@@ -695,6 +900,7 @@ pub const Checker = struct {
                     decl.mutable,
                     .local,
                     struct_id,
+                    enum_id,
                 );
             },
 
@@ -730,6 +936,21 @@ pub const Checker = struct {
                             self.typeLabel(value_type, self.structIdOfExpr(assign.value) orelse 0),
                         },
                     );
+                }
+                if (sym.typ == .enumeration and value_type == .enumeration) {
+                    const got = self.enumIdOfExpr(assign.value);
+                    if (got != null and got.? != sym.enum_id) {
+                        try self.diags.add(
+                            .type_mismatch,
+                            assign.value.span,
+                            "'{s}' is enum '{s}', but the assigned value is enum '{s}'",
+                            .{
+                                assign.name,
+                                self.enums.items[sym.enum_id].decl.name,
+                                self.enums.items[got.?].decl.name,
+                            },
+                        );
+                    }
                 }
                 if (sym.typ == .aggregate and value_type == .aggregate) {
                     const got = self.structIdOfExpr(assign.value);
@@ -854,6 +1075,13 @@ pub const Checker = struct {
                         "a struct value can only initialize or be assigned to a variable",
                         .{},
                     );
+                } else if (typ == .enumeration) {
+                    try self.diags.add(
+                        .unsupported,
+                        expr.span,
+                        "an enum value can only initialize or be assigned to a variable, or be used in 'switch'",
+                        .{},
+                    );
                 }
             },
 
@@ -889,7 +1117,141 @@ pub const Checker = struct {
                 try self.checkScopedBlock(while_stmt.body);
             },
 
+            .switch_stmt => |*sw| try self.checkSwitch(sw),
+
             .block => |stmts| try self.checkScopedBlock(stmts),
+        }
+    }
+
+    /// `switch` over an enum: resolves every arm against the enum cases,
+    /// checks the payload bindings and the exhaustiveness rule (every case or
+    /// an `else` arm, never both).
+    fn checkSwitch(self: *Checker, sw: *ast.Stmt.SwitchStmt) std.mem.Allocator.Error!void {
+        const scrutinee_type = try self.checkExpr(sw.scrutinee);
+        const enum_id = self.enumIdOfExpr(sw.scrutinee) orelse {
+            if (scrutinee_type != .unknown and scrutinee_type != .enumeration) {
+                try self.diags.add(
+                    .type_mismatch,
+                    sw.scrutinee.span,
+                    "'switch' requires an enum value, found '{s}'",
+                    .{self.typeLabel(scrutinee_type, self.structIdOfExpr(sw.scrutinee) orelse 0)},
+                );
+            }
+            for (sw.arms) |arm| {
+                try self.pushScope();
+                try self.checkStatements(arm.body);
+                self.popScope();
+            }
+            if (sw.else_body) |body| try self.checkScopedBlock(body);
+            return;
+        };
+        sw.resolved_enum = enum_id;
+        const info = &self.enums.items[enum_id];
+
+        // Both backends read the tag from the variable slot, so the scrutinee
+        // must be a place (an enum variable), not a constructed value.
+        if (sw.scrutinee.kind != .identifier) {
+            try self.diags.add(
+                .unsupported,
+                sw.scrutinee.span,
+                "'switch' over a constructed enum value is not supported yet; store it in a variable first",
+                .{},
+            );
+            // Keep checking the arms so the payload bindings exist; the
+            // backend restriction is the only problem reported here.
+        }
+
+        const covered = try self.arena.alloc(bool, info.cases.len);
+        @memset(covered, false);
+
+        for (sw.arms) |*arm| {
+            const case_index = findCaseIndex(info, arm.case_name) orelse {
+                try self.diags.add(
+                    .unknown_case,
+                    arm.case_span,
+                    "enum '{s}' has no case '{s}'",
+                    .{ info.decl.name, arm.case_name },
+                );
+                try self.checkScopedBlock(arm.body);
+                continue;
+            };
+            arm.resolved_case = case_index;
+            const case = info.cases[case_index];
+
+            if (covered[case_index]) {
+                try self.diags.add(
+                    .invalid_switch_arm,
+                    arm.case_span,
+                    "case '{s}' of enum '{s}' is already handled in this switch",
+                    .{ case.name, info.decl.name },
+                );
+            }
+            covered[case_index] = true;
+
+            if (case.payload != null and arm.binding == null) {
+                try self.diags.add(
+                    .invalid_switch_arm,
+                    arm.case_span,
+                    "case '{s}' of enum '{s}' carries a payload; bind it with '{s}(name)'",
+                    .{ case.name, info.decl.name, case.name },
+                );
+            } else if (case.payload == null and arm.binding != null) {
+                try self.diags.add(
+                    .invalid_switch_arm,
+                    arm.binding_span orelse arm.case_span,
+                    "case '{s}' of enum '{s}' has no payload; '{s}' cannot be bound",
+                    .{ case.name, info.decl.name, arm.binding.? },
+                );
+            }
+
+            try self.pushScope();
+            if (arm.binding) |name| {
+                if (case.payload != null) {
+                    arm.binding_symbol = try self.declare(
+                        name,
+                        arm.binding_span orelse arm.case_span,
+                        case.payload.?,
+                        false,
+                        .local,
+                        0,
+                        0,
+                    );
+                }
+            }
+            try self.checkStatements(arm.body);
+            self.popScope();
+        }
+
+        // Cases not handled by any arm, in declaration order.
+        var missing: std.ArrayList(CaseInfo) = .empty;
+        defer missing.deinit(self.arena);
+        for (info.cases, 0..) |case, i| {
+            if (!covered[i]) try missing.append(self.arena, case);
+        }
+
+        if (sw.else_body) |body| {
+            if (missing.items.len == 0) {
+                try self.diags.add(
+                    .unreachable_arm,
+                    sw.else_span orelse sw.scrutinee.span,
+                    "'else' arm is unreachable: the switch already covers every case of '{s}'",
+                    .{info.decl.name},
+                );
+            }
+            try self.checkScopedBlock(body);
+        } else if (missing.items.len > 0) {
+            var list: std.ArrayList(u8) = .empty;
+            defer list.deinit(self.arena);
+            for (missing.items, 0..) |case, i| {
+                if (i != 0) try list.appendSlice(self.arena, ", ");
+                try list.print(self.arena, "'{s}'", .{case.name});
+            }
+            try self.diags.add(
+                .non_exhaustive_switch,
+                sw.scrutinee.span,
+                "'switch' on '{s}' is not exhaustive: missing {s}",
+                .{ info.decl.name, list.items },
+            );
         }
     }
 
@@ -965,6 +1327,35 @@ pub const Checker = struct {
             .call => |*call| return self.checkCall(expr.span, call),
 
             .field_access => |*access| {
+                // `Color.Red`: the base is an enum name, not a variable.
+                if (access.base.kind == .identifier and self.lookup(access.base.kind.identifier) == null) {
+                    if (self.findEnumIndex(access.base.kind.identifier)) |enum_id| {
+                        const info = &self.enums.items[enum_id];
+                        const case_index = findCaseIndex(info, access.name) orelse {
+                            try self.diags.add(
+                                .unknown_case,
+                                access.name_span,
+                                "enum '{s}' has no case '{s}'",
+                                .{ info.decl.name, access.name },
+                            );
+                            return .unknown;
+                        };
+                        const case = info.cases[case_index];
+                        access.resolved_enum = enum_id;
+                        access.resolved_case = case_index;
+                        if (case.payload != null) {
+                            try self.diags.add(
+                                .invalid_call,
+                                access.name_span,
+                                "case '{s}' of enum '{s}' needs a payload: use '{s}.{s}(value)'",
+                                .{ case.name, info.decl.name, info.decl.name, case.name },
+                            );
+                            return .unknown;
+                        }
+                        return .enumeration;
+                    }
+                }
+
                 const base_index = try self.resolveFieldBase(access.base);
                 if (base_index == null) return .unknown;
 
@@ -991,6 +1382,76 @@ pub const Checker = struct {
                 };
                 access.field_index = field_index;
                 return info.fields[field_index].typ;
+            },
+
+            .method_call => |*call| {
+                // A variable shadows the enum name: `x.Case(...)` is not a
+                // constructor either, so both cases fail the same way.
+                const base_name: ?[]const u8 = if (call.base.kind == .identifier and
+                    self.lookup(call.base.kind.identifier) == null)
+                    call.base.kind.identifier
+                else
+                    null;
+                const enum_id = if (base_name) |name| self.findEnumIndex(name) else null;
+                if (enum_id == null) {
+                    try self.diags.add(
+                        .unsupported,
+                        call.base.span,
+                        "method calls are not supported yet (only enum constructors)",
+                        .{},
+                    );
+                    for (call.args) |arg| _ = try self.checkExpr(arg);
+                    return .unknown;
+                }
+                const info = &self.enums.items[enum_id.?];
+                const case_index = findCaseIndex(info, call.name) orelse {
+                    try self.diags.add(
+                        .unknown_case,
+                        call.name_span,
+                        "enum '{s}' has no case '{s}'",
+                        .{ info.decl.name, call.name },
+                    );
+                    for (call.args) |arg| _ = try self.checkExpr(arg);
+                    return .unknown;
+                };
+                call.resolved_enum = enum_id.?;
+                call.resolved_case = case_index;
+                const case = info.cases[case_index];
+
+                if (case.payload == null) {
+                    try self.diags.add(
+                        .invalid_call,
+                        call.name_span,
+                        "case '{s}' of enum '{s}' has no payload; use '{s}.{s}'",
+                        .{ case.name, info.decl.name, info.decl.name, case.name },
+                    );
+                    for (call.args) |arg| _ = try self.checkExpr(arg);
+                    return .unknown;
+                }
+
+                if (call.args.len != 1) {
+                    try self.diags.add(
+                        .invalid_call,
+                        call.name_span,
+                        "case '{s}' of enum '{s}' expects 1 payload argument, received {d}",
+                        .{ case.name, info.decl.name, call.args.len },
+                    );
+                    for (call.args) |arg| _ = try self.checkExpr(arg);
+                    return .unknown;
+                }
+
+                const arg_type = try self.checkExpr(call.args[0]);
+                if (case.payload) |payload| {
+                    if (arg_type != .unknown and arg_type != payload) {
+                        try self.diags.add(
+                            .type_mismatch,
+                            call.args[0].span,
+                            "payload of '{s}.{s}' has type '{s}', found '{s}'",
+                            .{ info.decl.name, case.name, payload.name(), arg_type.name() },
+                        );
+                    }
+                }
+                return .enumeration;
             },
 
             .struct_literal => |*lit| {
@@ -1068,6 +1529,18 @@ pub const Checker = struct {
         rhs: Type,
     ) !Type {
         if (lhs == .unknown or rhs == .unknown) return .unknown;
+
+        // Enums take part in no operator: `==` would compare tags and hide the
+        // payload, and arithmetic has no meaning for them.
+        if (lhs == .enumeration or rhs == .enumeration) {
+            try self.diags.add(
+                .unsupported,
+                span,
+                "operator '{s}' is not supported on an enum value; use 'switch'",
+                .{op.spelling()},
+            );
+            return .unknown;
+        }
 
         // `str` is a slice (pointer + length): comparing would require comparing
         // bytes, which does not exist yet; diagnose instead of silently
@@ -1209,7 +1682,7 @@ pub const Checker = struct {
             try self.diags.add(
                 .invalid_call,
                 span,
-                "'{s}' espera {d} argumento(s), recebeu {d}",
+                "'{s}' expects {d} argument(s), received {d}",
                 .{ call.callee, func.params.len, arg_types.items.len },
             );
             return func.return_type;
@@ -1294,6 +1767,16 @@ fn stmtAlwaysReturns(stmt: *const ast.Stmt) bool {
                 .block => |stmts| alwaysReturns(stmts),
                 .if_stmt => |nested| stmtAlwaysReturns(nested),
             };
+        },
+        // A switch terminates when every arm terminates. Without `else` this
+        // relies on exhaustiveness, which the checker enforces and reports
+        // separately, so the return diagnostic does not pile up on top of it.
+        .switch_stmt => |sw| blk: {
+            for (sw.arms) |arm| {
+                if (!alwaysReturns(arm.body)) break :blk false;
+            }
+            if (sw.else_body) |body| break :blk alwaysReturns(body);
+            break :blk true;
         },
         else => false,
     };
@@ -2209,4 +2692,323 @@ test "sema: 'print_i32' produces no value for variable initialization" {
     , .{});
     defer f.deinit();
     try expectOnly(&f, .type_mismatch);
+}
+
+test "sema: enum case without payload and exhaustive switch are accepted" {
+    var f = try Fixture.check(
+        \\enum Color { Red, Green, Blue }
+        \\fn main() -> i32 {
+        \\    let c = Color.Green;
+        \\    var total: i32 = 0;
+        \\    switch c {
+        \\        Red => { total = 1; }
+        \\        Green => { total = 2; }
+        \\        Blue => { total = 3; }
+        \\    }
+        \\    return total;
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 0), f.diags.count());
+
+    const checked = f.checked.?;
+    try testing.expectEqual(@as(usize, 1), checked.enums.len);
+    try testing.expectEqualStrings("Color", checked.enums[0].decl.name);
+    try testing.expectEqual(@as(usize, 3), checked.enums[0].cases.len);
+    try testing.expectEqual(@as(i32, 0), checked.enums[0].cases[0].tag);
+    try testing.expectEqual(@as(i32, 2), checked.enums[0].cases[2].tag);
+    try testing.expectEqual(Type.enumeration, checked.symbols[0].typ);
+    // Tag slot + payload slot for the enum, one slot for the counter.
+    try testing.expectEqual(@as(u32, 3), checked.functions[0].slot_count);
+}
+
+test "sema: payload binding declares an i32 symbol for the arm" {
+    var f = try Fixture.check(
+        \\enum Shape { Circle(i32), Empty }
+        \\fn main() -> i32 {
+        \\    let s = Shape.Empty;
+        \\    switch s {
+        \\        Circle(r) => { return r; }
+        \\        Empty => { return 0; }
+        \\    }
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 0), f.diags.count());
+
+    const sw = f.checked.?.functions[0].decl.body[1].kind.switch_stmt;
+    try testing.expectEqual(@as(usize, 2), sw.arms.len);
+    try testing.expectEqual(@as(u32, 0), sw.arms[0].resolved_case.?);
+    try testing.expectEqual(Type.i32, f.checked.?.symbols[sw.arms[0].binding_symbol.?].typ);
+    // `r` lives in its own scope: it is not visible after the switch.
+    try testing.expectEqual(@as(usize, 2), f.checked.?.functions[0].symbol_count);
+}
+
+test "sema: non-exhaustive switch lists the missing cases" {
+    var f = try Fixture.check(
+        \\enum Color { Red, Green, Blue }
+        \\fn main() -> i32 {
+        \\    let c = Color.Red;
+        \\    switch c {
+        \\        Red => { return 1; }
+        \\    }
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .non_exhaustive_switch);
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "missing 'Green', 'Blue'") != null,
+    );
+}
+
+test "sema: 'else' arm in an exhaustive switch is unreachable" {
+    var f = try Fixture.check(
+        \\enum Color { Red, Green }
+        \\fn main() -> i32 {
+        \\    let c = Color.Red;
+        \\    switch c {
+        \\        Red => { return 1; }
+        \\        Green => { return 2; }
+        \\        else => { return 3; }
+        \\    }
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .unreachable_arm);
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "already covers every case") != null,
+    );
+}
+
+test "sema: unknown and duplicated cases are diagnosed" {
+    var f = try Fixture.check(
+        \\enum Color { Red, Green }
+        \\fn main() -> i32 {
+        \\    let c = Color.Red;
+        \\    switch c {
+        \\        Purple => { return 1; }
+        \\        Red => { return 2; }
+        \\        Red => { return 3; }
+        \\        Green => { return 4; }
+        \\    }
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 2), f.diags.count());
+    try testing.expectEqual(diagnostics.Kind.unknown_case, f.diags.items.items[0].kind);
+    try testing.expectEqual(diagnostics.Kind.invalid_switch_arm, f.diags.items.items[1].kind);
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[1].message, "already handled") != null,
+    );
+}
+
+test "sema: payload binding rules" {
+    var f = try Fixture.check(
+        \\enum Shape { Circle(i32), Empty }
+        \\fn main() -> i32 {
+        \\    let s = Shape.Empty;
+        \\    switch s {
+        \\        Circle => { return 1; }
+        \\        Empty(x) => { return 2; }
+        \\    }
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 2), f.diags.count());
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "carries a payload; bind it with 'Circle(name)'") != null,
+    );
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[1].message, "has no payload; 'x' cannot be bound") != null,
+    );
+}
+
+test "sema: constructor payload is checked" {
+    var f = try Fixture.check(
+        \\enum Shape { Circle(i32), Empty }
+        \\fn main() -> i32 {
+        \\    let a = Shape.Circle(true);
+        \\    let b = Shape.Circle(1, 2);
+        \\    let c = Shape.Empty(1);
+        \\    let d = Shape.Circle;
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 4), f.diags.count());
+    try testing.expectEqual(diagnostics.Kind.type_mismatch, f.diags.items.items[0].kind);
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "payload of 'Shape.Circle' has type 'i32', found 'bool'") != null,
+    );
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[1].message, "expects 1 payload argument, received 2") != null,
+    );
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[2].message, "has no payload; use 'Shape.Empty'") != null,
+    );
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[3].message, "needs a payload: use 'Shape.Circle(value)'") != null,
+    );
+}
+
+test "sema: enums are nominal in annotations and assignments" {
+    var f = try Fixture.check(
+        \\enum A { One, Two }
+        \\enum B { One, Two }
+        \\fn main() -> i32 {
+        \\    let a: A = B.One;
+        \\    var b: A = A.Two;
+        \\    b = B.One;
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 2), f.diags.count());
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "is enum 'B', but the annotation is 'A'") != null,
+    );
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[1].message, "is enum 'A', but the assigned value is enum 'B'") != null,
+    );
+}
+
+test "sema: enum in parameters, returns and struct fields is unsupported" {
+    var f = try Fixture.check(
+        \\enum Color { Red }
+        \\struct Holder { c: Color }
+        \\fn takes(c: Color) -> i32 { return 0; }
+        \\fn gives() -> Color { return Color.Red; }
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 3), f.diags.count());
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "of enum type is not supported yet") != null,
+    );
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[1].message, "in parameters is not supported yet") != null,
+    );
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[2].message, "in returns is not supported yet") != null,
+    );
+}
+
+test "sema: switch requires an enum value" {
+    var f = try Fixture.check(
+        \\fn main() -> i32 {
+        \\    let x = 1;
+        \\    switch x {
+        \\        Red => { return 1; }
+        \\    }
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .type_mismatch);
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "'switch' requires an enum value, found 'i32'") != null,
+    );
+}
+
+test "sema: switch over a constructed value is unsupported" {
+    var f = try Fixture.check(
+        \\enum Color { Red }
+        \\fn main() -> i32 {
+        \\    switch Color.Red {
+        \\        Red => { return 1; }
+        \\    }
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .unsupported);
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "store it in a variable first") != null,
+    );
+}
+
+test "sema: duplicated case inside an enum is diagnosed" {
+    var f = try Fixture.check(
+        \\enum Color { Red, Red }
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .duplicate_declaration);
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "case 'Red' already declared in enum 'Color'") != null,
+    );
+}
+
+test "sema: a struct and an enum cannot share a name" {
+    var f = try Fixture.check(
+        \\struct Color { x: i32 }
+        \\enum Color { Red }
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .duplicate_declaration);
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "enum 'Color' already declared as a struct or enum") != null,
+    );
+}
+
+test "sema: non-i32 payload and empty enum are unsupported" {
+    var f = try Fixture.check(
+        \\enum Weird { Box(bool) }
+        \\enum Nothing { }
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 2), f.diags.count());
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "payload type 'bool' is not supported yet") != null,
+    );
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[1].message, "with no cases is not supported") != null,
+    );
+}
+
+test "sema: operators on enum values are unsupported" {
+    var f = try Fixture.check(
+        \\enum Color { Red, Green }
+        \\fn main() -> i32 {
+        \\    let a = Color.Red;
+        \\    let b = Color.Green;
+        \\    if a == b { return 1; }
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .unsupported);
+    try testing.expect(
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "'==' is not supported on an enum value") != null,
+    );
+}
+
+test "sema: an enum value cannot be used as a statement" {
+    var f = try Fixture.check(
+        \\enum Color { Red }
+        \\fn main() -> i32 {
+        \\    Color.Red;
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .unsupported);
+}
+
+test "sema: alwaysReturns understands a switch with every arm returning" {
+    var f = try Fixture.check(
+        \\enum Color { Red, Green }
+        \\fn pick(c: i32) -> i32 {
+        \\    let color = Color.Red;
+        \\    switch color {
+        \\        Red => { return 1; }
+        \\        Green => { return 2; }
+        \\    }
+        \\}
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 0), f.diags.count());
 }

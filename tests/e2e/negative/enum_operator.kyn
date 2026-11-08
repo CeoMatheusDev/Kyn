@@ -1,0 +1,14 @@
+// Enums take part in no operator; `switch` is the only consumer.
+enum Color {
+    Red,
+    Green,
+}
+
+fn main() -> i32 {
+    let a = Color.Red;
+    let b = Color.Green;
+    if a == b {
+        return 1;
+    }
+    return 0;
+}

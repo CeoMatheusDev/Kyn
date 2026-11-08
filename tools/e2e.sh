@@ -62,7 +62,7 @@ build_binary() {
         return 1
     fi
     if ! ld "$obj_file" -o "$bin_file" 2>"$WORK/$name.err"; then
-        echo "  FALHA  $name: 'ld' falhou" >&2
+        echo "  FAIL   $name: 'ld' failed" >&2
         sed 's/^/         /' "$WORK/$name.err" >&2
         return 1
     fi

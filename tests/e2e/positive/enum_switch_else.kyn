@@ -1,0 +1,52 @@
+// `else` arm covers the remaining cases; tag order follows the declaration.
+// expect-stdout: 1000
+// expect-stdout: 30
+// expect-exit: 30
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
+enum Shape {
+    Circle(i32),
+    Square(i32),
+    Empty,
+}
+
+fn main() -> i32 {
+    let blue = Color.Blue;
+    switch blue {
+        Red => {
+            print_i32(1);
+        }
+        else => {
+            print_i32(1000);
+        }
+    }
+
+    let square = Shape.Square(3);
+    var result: i32 = 0;
+    switch square {
+        Square(side) => {
+            result = side * 10;
+        }
+        else => {
+            result = 0;
+        }
+    }
+    print_i32(result);
+
+    // A copy keeps tag and payload.
+    let copy = square;
+    switch copy {
+        Square(side) => {
+            result = result + side;
+        }
+        else => {
+            result = result + 1;
+        }
+    }
+
+    return result - 3;
+}

@@ -1,12 +1,12 @@
 (* Kyn — syntactic grammar of the implemented subset.
    This file describes exactly what the parser in src/parser/parser.zig accepts
-   today. Constructs from the language vision (enum, impl, generics, slices,
+   today. Constructs from the language vision (impl, generics, slices,
    pointers, unsafe, attributes) are NOT part of this subset yet; see
    docs/language_reference.md and docs/status.md. *)
 
 (* Imports come before any declaration; the path is a string literal and is
    resolved relative to the directory of the importing file. *)
-program          = { import_decl }, { struct_decl | function_decl }, EOF ;
+program          = { import_decl }, { struct_decl | enum_decl | function_decl }, EOF ;
 
 import_decl      = "import", string_literal, ";" ;
 
@@ -16,13 +16,22 @@ import_decl      = "import", string_literal, ";" ;
 struct_decl      = "struct", identifier, "{", [ field, { ",", field }, [ "," ] ], "}" ;
 field            = identifier, ":", type_expr ;
 
+(* Enum: cases in declaration order, which is also the tag value. A case may
+   carry one payload, written as a type name between parentheses; only `i32` is
+   supported today. The trailing comma is optional. *)
+enum_decl        = "enum", identifier, "{", [ enum_case, { ",", enum_case }, [ "," ] ], "}" ;
+enum_case        = identifier, [ "(", type_expr, ")" ] ;
+
 function_decl    = "fn", identifier, "(", [ parameters ], ")",
                    [ "->", type_expr ], block ;
 
 parameters       = parameter, { ",", parameter } ;
 parameter        = identifier, ":", type_expr ;
 
-(* Accepted by semantics: i32, bool, str, void and names of declared structs. *)
+(* Accepted by semantics: i32, bool, str, void, names of declared structs and
+   names of declared enums. An enum is only storable in a local variable:
+   parameters, returns and struct fields of enum type are diagnosed as
+   unsupported. *)
 type_expr        = identifier ;
 
 block            = "{", { statement }, "}" ;
@@ -34,6 +43,7 @@ statement        = let_decl
                  | return_stmt
                  | if_stmt
                  | while_stmt
+                 | switch_stmt
                  | block
                  | expression_stmt ;
 
@@ -50,6 +60,14 @@ return_stmt      = "return", [ expression ], ";" ;
 if_stmt          = "if", condition, block, [ "else", ( block | if_stmt ) ] ;
 condition        = expression ;
 while_stmt       = "while", condition, block ;
+
+(* `switch` over an enum *variable*: every arm names one case; `Case(name)`
+   binds the payload of a case that declares one, a bare `Case` matches a case
+   without payload. The switch must be exhaustive (all cases, or an `else` arm),
+   never both: an `else` that cannot run is reported as unreachable. *)
+switch_stmt      = "switch", condition, "{", { switch_arm }, "}" ;
+switch_arm       = ( identifier, [ "(", identifier, ")" ] | "else" ), "=>", block ;
+
 expression_stmt  = expression, ";" ;
 
 (* Precedence, from loosest to tightest:
@@ -72,8 +90,10 @@ multiplicative   = unary, { ( "*" | "/" | "%" ), unary } ;
 unary            = ( "-" | "!" ), unary | postfix ;
 
 (* Field access: the base must be an identifier (a struct with a struct field
-   does not exist in semantics yet). *)
-postfix          = primary, { ".", identifier } ;
+   does not exist in semantics yet). `Name.Case(...)` is parsed as a call and
+   resolved by semantics as an enum constructor; any other dotted call is
+   diagnosed as an unsupported method call. *)
+postfix          = primary, { ".", identifier, [ "(", [ arguments ], ")" ] } ;
 
 primary          = integer
                  | string_literal
@@ -112,3 +132,9 @@ builtin_call     = ( "print" | "print_i32" ), "(", expression, ")" ;
    up to 6 parameter/argument registers per function, counting `str` as two and
    each struct field as one; no external calls; no nested struct or `str`
    field. *)
+
+(* Enum values carry a tag (the case index in declaration order) and one
+   payload slot. They take part in no operator (`==`, arithmetic and conditions
+   are diagnosed) and are consumed only by `switch`, which reads the tag from
+   the variable slots. A case without payload is written `Color.Red`; a case
+   with payload is written `Shape.Circle(5)`. *)

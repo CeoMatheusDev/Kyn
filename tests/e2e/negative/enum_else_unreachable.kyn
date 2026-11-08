@@ -1,0 +1,20 @@
+// `else` is redundant when every case is already handled.
+enum Color {
+    Red,
+    Green,
+}
+
+fn main() -> i32 {
+    let c = Color.Red;
+    switch c {
+        Red => {
+            return 1;
+        }
+        Green => {
+            return 2;
+        }
+        else => {
+            return 3;
+        }
+    }
+}

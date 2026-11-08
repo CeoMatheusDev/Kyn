@@ -136,9 +136,11 @@ pub fn compilePath(
     if (result.diags.hasErrors()) return result;
 
     var structs: std.ArrayList(*ast.StructDecl) = .empty;
+    var enums: std.ArrayList(*ast.EnumDecl) = .empty;
     var functions: std.ArrayList(*ast.Function) = .empty;
     for (modules) |module| {
         for (module.program.?.structs) |decl| try structs.append(a, decl);
+        for (module.program.?.enums) |decl| try enums.append(a, decl);
         for (module.program.?.functions) |func| try functions.append(a, func);
     }
 
@@ -148,6 +150,7 @@ pub fn compilePath(
     program.* = .{
         .imports = &.{},
         .structs = try structs.toOwnedSlice(a),
+        .enums = try enums.toOwnedSlice(a),
         .functions = try functions.toOwnedSlice(a),
         .span = modules[0].program.?.span,
     };
@@ -205,6 +208,7 @@ const Loader = struct {
         const program = try parseSource(self.a, text, self.diags) orelse return;
         for (program.functions) |func| func.file_id = file_id;
         for (program.structs) |decl| decl.file_id = file_id;
+        for (program.enums) |decl| decl.file_id = file_id;
         self.modules.items[file_id].program = program;
 
         const dir = std.fs.path.dirname(key) orelse ".";

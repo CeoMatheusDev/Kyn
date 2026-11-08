@@ -26,6 +26,8 @@ pub const Program = struct {
     imports: []Import = &.{},
     /// `struct` declarations of every module, in pre-order.
     structs: []*StructDecl = &.{},
+    /// `enum` declarations of every module, in pre-order.
+    enums: []*EnumDecl = &.{},
     functions: []*Function,
     span: Span,
 };
@@ -37,6 +39,28 @@ pub const StructDecl = struct {
     fields: []Field,
     /// Source file of origin, assigned by the module loader.
     file_id: u32 = 0,
+    span: Span,
+};
+
+/// `enum Name { Case, Case(type), ... }` — top-level declaration.
+///
+/// Cases are ordered: the index in this slice is the tag used by the backends,
+/// so declaration order is part of the value representation.
+pub const EnumDecl = struct {
+    name: []const u8,
+    name_span: Span,
+    cases: []EnumCase,
+    /// Source file of origin, assigned by the module loader.
+    file_id: u32 = 0,
+    span: Span,
+};
+
+pub const EnumCase = struct {
+    name: []const u8,
+    name_span: Span,
+    /// `null` for a case without payload (`Red`); the payload type name for
+    /// `Circle(i32)`. Only `i32` is supported at this stage.
+    payload: ?TypeName,
     span: Span,
 };
 
@@ -93,6 +117,23 @@ pub const Expr = struct {
         field_access: FieldAccess,
         /// `Name { field: value, ... }`
         struct_literal: StructLiteral,
+        /// `Enum.Case(value)` — enum constructor with payload. A dotted name
+        /// without parentheses is a `field_access` whose base is the enum name.
+        method_call: MethodCall,
+    };
+
+    /// `base.name(args)`. Today only enum constructors (`Shape.Circle(5)`);
+    /// the parser produces it for any dotted name followed by `(`.
+    pub const MethodCall = struct {
+        base: *Expr,
+        name: []const u8,
+        name_span: Span,
+        args: []*Expr,
+        /// Enum index resolved by semantic analysis (`null` when the base is
+        /// not an enum name).
+        resolved_enum: ?u32 = null,
+        /// Index of the case in `EnumDecl.cases`.
+        resolved_case: ?u32 = null,
     };
 
     pub const FieldAccess = struct {
@@ -101,6 +142,10 @@ pub const Expr = struct {
         name_span: Span,
         /// Field index in the struct declaration, filled in by semantic analysis.
         field_index: ?u32 = null,
+        /// Enum and case resolved by semantic analysis when the base is an enum
+        /// name (`Color.Red`); `field_index` stays null in that case.
+        resolved_enum: ?u32 = null,
+        resolved_case: ?u32 = null,
     };
 
     pub const StructLiteral = struct {
@@ -239,7 +284,33 @@ pub const Stmt = struct {
         expr_stmt: *Expr,
         if_stmt: IfStmt,
         while_stmt: WhileStmt,
+        switch_stmt: SwitchStmt,
         block: []*Stmt,
+    };
+
+    /// `switch value { Case => {...} Case(binding) => {...} else => {...} }`
+    pub const SwitchStmt = struct {
+        scrutinee: *Expr,
+        arms: []SwitchArm,
+        else_body: ?[]*Stmt,
+        /// Span of the `else` keyword, when present.
+        else_span: ?Span = null,
+        /// Enum index resolved by semantic analysis.
+        resolved_enum: ?u32 = null,
+    };
+
+    pub const SwitchArm = struct {
+        case_name: []const u8,
+        case_span: Span,
+        /// `Case(name)` binds the payload; `null` for a bare `Case`.
+        binding: ?[]const u8,
+        binding_span: ?Span,
+        body: []*Stmt,
+        span: Span,
+        /// Index of the case in `EnumDecl.cases`.
+        resolved_case: ?u32 = null,
+        /// Symbol declared for the payload binding, filled in by semantics.
+        binding_symbol: ?u32 = null,
     };
 
     pub const VarDecl = struct {
