@@ -1,7 +1,7 @@
 # Kyn
 
 [![CI](https://github.com/CeoMatheusDev/Kyn/actions/workflows/ci.yml/badge.svg)](https://github.com/CeoMatheusDev/Kyn/actions/workflows/ci.yml)
-[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-blue.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 **Kyn** is an experimental systems programming language focused on explicit resource control, predictable compilation and low-level software.
 
@@ -162,4 +162,4 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/development.md](docs/developme
 
 ## License
 
-The project is dual-licensed under **MIT OR Apache-2.0**. See [LICENSE](LICENSE) for the applicable terms.
+The project is licensed exclusively under **Apache-2.0**. See [LICENSE](LICENSE) for the complete license text.
