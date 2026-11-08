@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Replace the repository-wide MIT licensing with Apache License 2.0, including the VS Code extension metadata and project documentation.
+- Expand the VS Code extension with compiler-backed diagnostics, unsaved-buffer checking, LLVM/Assembly emit commands, static completions, document outline, configurable compiler discovery and extension CI validation.
 
 — Kyn
 

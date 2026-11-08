@@ -61,3 +61,33 @@ jobs:
 
       - name: Validate LLVM IR with llvm-as (strict)
         run: zig build validate-ir-strict
+
+  extension-check:
+    name: VS Code extension validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate extension JavaScript
+        working-directory: extension
+        run: npm run check
+
+      - name: Validate extension manifests
+        working-directory: extension
+        run: |
+          node -e "for (const f of ['package.json', 'language-configuration.json', 'syntaxes/kyn.tmLanguage.json', 'snippets/kyn.json', '.vscode/launch.json']) JSON.parse(require('node:fs').readFileSync(f, 'utf8')); console.log('Extension JSON manifests are valid.')"
+
+      - name: Package VSIX
+        working-directory: extension
+        run: |
+          npm install --global @vscode/vsce
+          vsce package --no-dependencies --out "$RUNNER_TEMP/kyn-language.vsix"
+          test -s "$RUNNER_TEMP/kyn-language.vsix"
