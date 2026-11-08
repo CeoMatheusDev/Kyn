@@ -248,7 +248,7 @@ const Builder = struct {
         }
     }
 
-    fn walkStatements(self: *Builder, statements: []*ast.Stmt, file: u32) anyerror!void {
+    fn walkStatements(self: *Builder, statements: []*ast.Stmt, file: u32) std.mem.Allocator.Error!void {
         for (statements) |stmt| {
             switch (stmt.kind) {
                 .let_decl => |decl| {
@@ -297,7 +297,7 @@ const Builder = struct {
         }
     }
 
-    fn walkProgram(self: *Builder) anyerror!void {
+    fn walkProgram(self: *Builder) std.mem.Allocator.Error!void {
         for (self.program.functions) |function| {
             try self.walkStatements(function.body, function.file_id);
         }
@@ -309,7 +309,7 @@ pub fn generate(
     program: *const ast.Program,
     checked: *const sema.Checked,
     source_paths: []const []const u8,
-) ![]const u8 {
+) std.mem.Allocator.Error![]const u8 {
     var builder: Builder = .{
         .arena = arena,
         .program = program,
