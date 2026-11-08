@@ -21,7 +21,7 @@ Verified facts, with the validation that backs each one (see
 | --- | --- | --- |
 | Lexer → parser → AST → semantics → backend pipeline | Implemented | 276 compiler unit tests + 7 std tests locally on the integer-width branch; earlier `main` CI green |
 | Native backend without libc (`_start`, `write`/`exit` syscalls, Kyn register ABI) | Implemented, executed | `as` + `ld` + exit code and stdout checked by 157 e2e cases locally; earlier `main` CI green |
-| Textual LLVM IR backend (fixed Linux x86-64 triple; not yet the chosen official backend) | Implemented for the current subset | 110/110 modules verified locally via LLVM 20; earlier strict `llvm-as` CI green on `main`, pending for this branch |
+| Textual LLVM IR backend (fixed Linux x86-64 triple; not yet the chosen official backend) | Implemented for the current subset | 110/110 modules verified locally via LLVM 20; strict `llvm-as` CI green on PR #40; post-merge `main` CI is a separate gate |
 | Multi-file programs (`import "path.kyn";`) | Implemented | 9 executed module fixtures, 3 negative ones |
 | Nominal `struct`/`enum` with documented layout and call ABI | Implemented (tag/payload pair, one register per field) | Structural tests in both backends + executed fixtures |
 | `impl`/methods, by value, no hidden parameter | Implemented | 157 local e2e cases, mangled `Type_method` symbols |

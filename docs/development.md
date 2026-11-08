@@ -143,8 +143,9 @@ On the integer-width branch, local results are 276 compiler + 7 std tests,
 independent required CI previously passed for
 [PR #38](https://github.com/CeoMatheusDev/Kyn/pull/38) (run 42529572145),
 [PR #39](https://github.com/CeoMatheusDev/Kyn/pull/39) (run 42530026620) and
-post-merge `main` (run 42530205764), including strict `llvm-as`. CI for the
-integer-width branch must run separately.
+post-merge `main` (run 42530205764), including strict `llvm-as`.
+[PR #40](https://github.com/CeoMatheusDev/Kyn/pull/40) independently passed
+both jobs (run 42531409558); post-merge `main` CI must be checked separately.
 
 A missing LLVM in CI **fails** the build, so IR validation cannot be skipped
 silently.

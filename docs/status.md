@@ -2,10 +2,11 @@
 
 This document separates the integrated IR/native/pointer stabilization in
 PRs #38/#39 from the current integer-width/ABI work on
-`arena/cf4124a3-kyn` (November 8, 2026). The current work is locally tested
-with Zig 0.17.0, Linux x86-64, GNU `as`/`ld` and LLVM 20 (`llvmlite`), but
-strict `llvm-as` CI on this branch is still pending. Earlier validation
-remains historical evidence, not a claim about outstanding feature branches.
+`arena/cf4124a3-kyn` (November 8, 2026; PR #40). The work is locally tested
+with Zig 0.17.0, Linux x86-64, GNU `as`/`ld` and LLVM 20 (`llvmlite`). The
+required PR CI also passed, including strict `llvm-as`; post-merge `main` CI
+must be checked independently. Earlier validation remains historical evidence,
+not a claim about outstanding feature branches.
 
 ## Summary
 
@@ -61,13 +62,13 @@ and embedded targets is analysed in `docs/embedded.md`.
 | Parser | `src/parser/parser.zig` | Whole program, `import` before declarations, `struct`, `enum` with optional payload, `impl` blocks (their methods join `Program.functions` in source order), `switch` arms (`Case`, `Case(name)`, `else`), struct literals and field access, enum constructors (`Shape.Circle(5)`), method calls (`value.method(args)`), precedence and associativity (including bitwise `|`/`^`/`&`/`<<`/`>>`), unary `~`, address-of `&`, dereference `*`, `expr as Type` cast syntax, errors with span | Unit and negative tests |
 | Modules | `src/driver.zig` | `compilePath` loads the import graph in pre-order, normalizes paths, deduplicates and flattens into one `Program` | Tests with a temporary directory + 3 executed e2e fixtures + 3 negative ones |
 | Semantics | `src/sema/sema.zig` | Nested scopes, name resolution, types `i8`/`i16`/`i32`/`i64`/`u8`/`u16`/`u32`/`u64`/`usize`/`bool`/`str`/`void`/struct/enum (`isInteger`, `isValue`, `bitWidth`, `isSigned`, `fromName`, `name`, `registerWords`), enum cases (unique name and case, `i32` payload only), enum nominality in annotations, assignments, arguments and returns (`param_enum_ids`/`return_enum_id`), exhaustive `switch` (missing cases listed, unreachable `else`, unknown/duplicated case, payload binding rules), struct fields and literals, methods (`impl` target resolution, per-type name space, `Type_method` mangling, receiver `self: Name` rules, field/duplicate/symbol clash checks, shared argument checking between free and method calls), `str` and struct by value in parameters/returns (nominal identity preserved), six-register limit through `registerWordsOf` (`str`/enum/64-bit scalar = 2, struct field/pointer = 1, receiver included), `print`/`print_i32` builtins (arity and type checked, reserved names), mutability, calls, stack slots, `main` validation, `checkBinary` width-aware (arithmetic/comparison/bitwise require same non-bool integer type; shift result = left operand type; logical requires bool; `==`/`!=` fallback via `isValue()`), `checkExpr` for unary `-`/`~` (integer only, same type) and `.cast` (int↔int only, `bool`/`str` rejected, clear diagnostic), implicit narrowing rejected (initializer of `u8` from `i32` literal `300` fails) | Unit tests |
-| LLVM IR backend | `src/codegen/llvm.zig` | Textual IR derived from the AST (arithmetic, comparisons, `&&`/`||` with `phi`, `if`, `while`, calls, `switch` lowered to `switch i32` on the tag with one block per arm); enums as two `alloca i32` slots (tag + payload), two `i32` parameters and a `{ i32, i32 }` return (`insertvalue`/`extractvalue`); structs in a contiguous `[n+1 x i64]` local frame with a reserved base word; `str` in `@.strN` with `declare i64 @write(i32, ptr, i64)`, `str` by value as `ptr`+`i64` in parameters and `{ ptr, i64 }` return, struct by value with parameters flattened into scalars and aggregate return `{ i32, i1, … }` (`insertvalue`/`extractvalue`); `print` calling `write` and `print_i32` through `@kyn_print_i32` (`urem`/`udiv`); `llvmType` maps `i8/u8`→`i8`, `i16/u16`→`i16`, `i32/u32`→`i32`, `i64/u64/usize`→`i64`; `typeAlign` maps 1/2/4/8; bitwise operators emit `and`/`or`/`xor`/`shl`/`ashr`/`lshr`; `~` emits `xor -1`; `as` emits `trunc`/`zext`/`sext`; address-of/typed scalar dereference and struct pointer-field reads use opaque `ptr`; pointer arithmetic scales signed offsets by `codegen.pointeeStride` | 110/110 modules locally verified via LLVM 20 `llvmlite` on this branch; strict `llvm-as` CI passed previously on PR #38/#39 and `main`, pending here |
-| x86-64 backend | `src/codegen/x86_64.zig` | Linux assembly without libc, `_start` + `exit` syscall; enums (tag/payload) and `str` (pointer/length) use register pairs, structs use one register per field; 64-bit scalar integer parameters use low/high 32-bit halves in two registers while returns use `%rax`; pointers and wide struct fields use one 64-bit register. Narrow operations normalize results to 8/16 bits, wide operations use 64-bit ALU, casts extend/truncate without losing high bits. Typed pointer operations, strings and `print`/`print_i32` retain their tested paths. This is an internal Kyn ABI, not C-compatible. | `as` + `ld` execution (157/157 local fixtures; CI pending for this branch) |
+| LLVM IR backend | `src/codegen/llvm.zig` | Textual IR derived from the AST (arithmetic, comparisons, `&&`/`||` with `phi`, `if`, `while`, calls, `switch` lowered to `switch i32` on the tag with one block per arm); enums as two `alloca i32` slots (tag + payload), two `i32` parameters and a `{ i32, i32 }` return (`insertvalue`/`extractvalue`); structs in a contiguous `[n+1 x i64]` local frame with a reserved base word; `str` in `@.strN` with `declare i64 @write(i32, ptr, i64)`, `str` by value as `ptr`+`i64` in parameters and `{ ptr, i64 }` return, struct by value with parameters flattened into scalars and aggregate return `{ i32, i1, … }` (`insertvalue`/`extractvalue`); `print` calling `write` and `print_i32` through `@kyn_print_i32` (`urem`/`udiv`); `llvmType` maps `i8/u8`→`i8`, `i16/u16`→`i16`, `i32/u32`→`i32`, `i64/u64/usize`→`i64`; `typeAlign` maps 1/2/4/8; bitwise operators emit `and`/`or`/`xor`/`shl`/`ashr`/`lshr`; `~` emits `xor -1`; `as` emits `trunc`/`zext`/`sext`; address-of/typed scalar dereference and struct pointer-field reads use opaque `ptr`; pointer arithmetic scales signed offsets by `codegen.pointeeStride` | 110/110 modules locally verified via LLVM 20 `llvmlite`; strict `llvm-as` passed in PR #40 CI |
+| x86-64 backend | `src/codegen/x86_64.zig` | Linux assembly without libc, `_start` + `exit` syscall; enums (tag/payload) and `str` (pointer/length) use register pairs, structs use one register per field; 64-bit scalar integer parameters use low/high 32-bit halves in two registers while returns use `%rax`; pointers and wide struct fields use one 64-bit register. Narrow operations normalize results to 8/16 bits, wide operations use 64-bit ALU, casts extend/truncate without losing high bits. Typed pointer operations, strings and `print`/`print_i32` retain their tested paths. This is an internal Kyn ABI, not C-compatible. | `as` + `ld` execution (157/157 local fixtures; PR #40 CI green) |
 | FFI | `src/ffi/ffi.zig` | Isolated `extern "c" printf` experiment | Not integrated |
 | `unsafe`/`repr(C)` | `src/sema/unsafe.zig` | Isolated, tested policy; the AST still has no such nodes | Unit tests of the module |
 | Self-hosting | `src/kyn/*.kyn`, `src/compiler/*.kyn` | Placeholders; not executed by `kync` | Not demonstrated |
 | Standard library | `std/core/core.zig`, `std/os/*.zig` | Experimental stubs; some APIs do no real I/O | Compile in the std tests |
-| Fixtures | `tests/` | Numbered integration fixtures plus positive/negative programs and multi-file module scenarios under `tests/e2e/`; unsupported language experiments are kept separate from the accepted subset | `zig build e2e` (157/157 locally on this branch; earlier CI green on PR #38 and `main`) |
+| Fixtures | `tests/` | Numbered integration fixtures plus positive/negative programs and multi-file module scenarios under `tests/e2e/`; unsupported language experiments are kept separate from the accepted subset | `zig build e2e` (157/157 locally on this branch and in PR #40 CI) |
 
 ## Language subset accepted today
 
@@ -141,8 +142,8 @@ imports and packages.
   width/ABI cases and two negative diagnostics. Existing fixtures remain.
 - LLVM 20 `llvmlite.parse_assembly` + `.verify`: **110/110** emitted modules;
   all four new positive cases executed with MCJIT (exit 0). The local
-  environment has no `llvm-as`; this is **not** the CI `validate-ir-strict`
-  result for this branch.
+  environment has no `llvm-as`; these local checks are separate from the
+  strict `llvm-as` result in PR #40's CI.
 - CI formatting source set plus changed backend files, `git diff --check`:
   passed; extension check/tests/manifests: 4/4 tests passed. Earlier CI on
   PRs #38/#39 and post-merge `main` passed; PRs #36/#37 remain separate and red.
@@ -156,8 +157,11 @@ imports and packages.
 - PR #39 (documentation) merged as `d2c067e7c39d3a42cbeb83d40d8ad7dd9fba1e17`.
   Post-merge `main` [CI run 42530205764](https://github.com/CeoMatheusDev/Kyn/actions/runs/42530205764)
   passed both jobs (including strict LLVM validation). No branches were deleted.
-- The integer-width/ABI changes on `arena/cf4124a3-kyn` must pass their own PR
-  checks and post-merge `main` CI before being called integrated.
+- [PR #40](https://github.com/CeoMatheusDev/Kyn/pull/40) passed both jobs,
+  including strict LLVM validation and 157 native E2E cases
+  ([run 42531409558](https://github.com/CeoMatheusDev/Kyn/actions/runs/42531409558)).
+  Verify the final PR head and post-merge `main` CI separately before calling
+  this integrated; a green PR alone is not proof of the merge.
 - PR #37 (target foundations, 10 exclusive commits) and PR #36 (editor rename,
   4 exclusive commits) remain open with failing compiler checks. Neither was
   merged or discarded; evaluate them independently after their required checks
