@@ -1,0 +1,15 @@
+// Erro esperado: struct ocupa um registrador por campo; 4 campos + 3 inteiros excedem 6.
+struct Quatro {
+    a: i32,
+    b: i32,
+    c: i32,
+    d: i32,
+}
+
+fn nao_cabe(p: Quatro, x: i32, y: i32, z: i32) -> i32 {
+    return x + y + z;
+}
+
+fn main() -> i32 {
+    return 0;
+}

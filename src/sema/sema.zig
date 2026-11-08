@@ -92,7 +92,11 @@ pub const StructInfo = struct {
 pub const FunctionInfo = struct {
     decl: *const ast.Function,
     return_type: Type,
+    /// Struct associado ao retorno quando `return_type == .aggregate`.
+    return_struct_id: u32 = 0,
     params: []Type,
+    /// Struct associado a cada parâmetro (0 quando o parâmetro não é struct).
+    param_struct_ids: []u32 = &.{},
     /// Quantidade de slots de pilha usados pela função (parâmetros + locais).
     slot_count: u32,
     /// Intervalo de símbolos desta função em `Checked.symbols`
@@ -122,6 +126,15 @@ pub const Checked = struct {
         return null;
     }
 };
+
+/// Palavras de registrador que um tipo ocupa na convenção de chamada: cada
+/// campo escalar de struct conta um, `str` conta dois (ponteiro e tamanho) e os
+/// demais escalares um. Fonte única para o limite da semântica e para os
+/// backends — assim declaração, chamada e emissão de código não divergem.
+pub fn registerWordsOf(structs: []const StructInfo, typ: Type, struct_id: u32) usize {
+    if (typ == .aggregate and struct_id < structs.len) return structs[struct_id].fields.len;
+    return typ.registerWords();
+}
 
 /// Limite de **registradores** de argumento por chamada no backend x86-64
 /// (SysV). Não é um limite de parâmetros: cada `str` consome dois
@@ -329,28 +342,22 @@ pub const Checker = struct {
         }
 
         const params = try self.arena.alloc(Type, func.params.len);
+        const param_struct_ids = try self.arena.alloc(u32, func.params.len);
         // Índice provisório: as assinaturas são anexadas na ordem da fonte.
         var register_words: usize = 0;
         for (func.params, 0..) |param, i| {
             params[i] = try self.resolveTypeName(param.type_name);
-            register_words += params[i].registerWords();
-            if (params[i] == .aggregate) {
-                try self.diags.add(
-                    .unsupported,
-                    param.type_name.span,
-                    "parâmetro '{s}' de '{s}': passagem de struct por valor ainda não é suportada",
-                    .{ param.name, func.name },
-                );
-            }
+            param_struct_ids[i] = self.structIdOfTypeName(param.type_name) orelse 0;
+            register_words += self.wordsOf(params[i], param_struct_ids[i]);
         }
 
         // O limite do backend nativo é em registradores, não em parâmetros:
-        // cada `str` consome dois.
+        // cada `str` consome dois e cada campo de struct um.
         if (register_words > max_arg_registers) {
             try self.diags.add(
                 .unsupported,
                 func.name_span,
-                "função '{s}' ocupa {d} registradores em parâmetros; o backend atual suporta no máximo {d} ('str' ocupa dois)",
+                "função '{s}' ocupa {d} registradores em parâmetros; o backend atual suporta no máximo {d} ('str' ocupa dois e cada campo de struct um)",
                 .{ func.name, register_words, max_arg_registers },
             );
         }
@@ -359,19 +366,30 @@ pub const Checker = struct {
             try self.resolveTypeName(tn)
         else
             .void;
-        if (return_type == .aggregate) {
-            try self.diags.add(
-                .unsupported,
-                func.return_type.?.span,
-                "função '{s}': retorno de struct por valor ainda não é suportado",
-                .{func.name},
-            );
+        const return_struct_id: u32 = if (func.return_type) |tn|
+            self.structIdOfTypeName(tn) orelse 0
+        else
+            0;
+
+        // Struct volta em um registrador por campo, na ordem de declaração.
+        if (return_type == .aggregate and return_struct_id < self.structs.items.len) {
+            const field_count = self.structs.items[return_struct_id].fields.len;
+            if (field_count > max_arg_registers) {
+                try self.diags.add(
+                    .unsupported,
+                    func.return_type.?.span,
+                    "função '{s}' retorna struct com {d} campos; o backend atual suporta no máximo {d}",
+                    .{ func.name, field_count, max_arg_registers },
+                );
+            }
         }
 
         try self.functions.append(self.arena, .{
             .decl = func,
             .return_type = return_type,
+            .return_struct_id = return_struct_id,
             .params = params,
+            .param_struct_ids = param_struct_ids,
             .slot_count = 0,
         });
     }
@@ -428,6 +446,12 @@ pub const Checker = struct {
         return .unknown;
     }
 
+    /// Palavras de registrador de um valor cujo tipo depende do struct
+    /// concreto (ver `registerWordsOf`, usado também pelos backends).
+    fn wordsOf(self: *const Checker, typ: Type, struct_id: u32) usize {
+        return registerWordsOf(self.structs.items, typ, struct_id);
+    }
+
     /// Struct associado ao tipo anotado, quando houver.
     fn structIdOfTypeName(self: *const Checker, tn: ast.TypeName) ?u32 {
         return self.findStructIndex(tn.name);
@@ -440,6 +464,10 @@ pub const Checker = struct {
             .identifier => if (expr.resolved) |idx| blk: {
                 const sym = self.symbols.items[idx];
                 break :blk if (sym.typ == .aggregate) sym.struct_id else null;
+            } else null,
+            .call => |call| if (call.callee_fn) |index| blk: {
+                const func = self.functions.items[index];
+                break :blk if (func.return_type == .aggregate) func.return_struct_id else null;
             } else null,
             else => null,
         };
@@ -653,7 +681,12 @@ pub const Checker = struct {
                 }
 
                 // Variável de struct sem anotação: o struct vem do inicializador.
-                const struct_id: u32 = if (declared_type == .aggregate) declared_struct else 0;
+                const struct_id: u32 = if (declared_type != .aggregate)
+                    0
+                else if (decl.type_name != null)
+                    declared_struct
+                else
+                    init_struct;
 
                 stmt.decl_symbol = try self.declare(
                     decl.name,
@@ -782,6 +815,18 @@ pub const Checker = struct {
                             "tipo de retorno esperado '{s}', encontrado '{s}'",
                             .{ expected.name(), actual.name() },
                         );
+                    } else if (expected == .aggregate and actual == .aggregate) {
+                        // Structs são nominais: mesma forma não basta.
+                        const got = self.structIdOfExpr(expr) orelse 0;
+                        const want = self.functions.items[self.fn_index].return_struct_id;
+                        if (got != want) {
+                            try self.diags.add(
+                                .invalid_return,
+                                expr.span,
+                                "retorno esperado do struct '{s}', encontrado '{s}'",
+                                .{ self.structs.items[want].decl.name, self.structs.items[got].decl.name },
+                            );
+                        }
                     }
                 } else if (expected.isValue()) {
                     try self.diags.add(
@@ -1148,12 +1193,14 @@ pub const Checker = struct {
         call.callee_fn = fn_index;
 
         var arg_words: usize = 0;
-        for (arg_types.items) |typ| arg_words += typ.registerWords();
+        for (arg_types.items, 0..) |typ, i| {
+            arg_words += self.wordsOf(typ, self.structIdOfExpr(call.args[i]) orelse 0);
+        }
         if (arg_words > max_arg_registers) {
             try self.diags.add(
                 .unsupported,
                 span,
-                "chamada de '{s}' ocupa {d} registradores; o backend atual suporta no máximo {d} ('str' ocupa dois)",
+                "chamada de '{s}' ocupa {d} registradores; o backend atual suporta no máximo {d} ('str' ocupa dois e cada campo de struct um)",
                 .{ call.callee, arg_words, max_arg_registers },
             );
         }
@@ -1169,16 +1216,20 @@ pub const Checker = struct {
         }
 
         for (arg_types.items, func.params, 0..) |actual, expected, i| {
-            if (actual == .aggregate) {
-                try self.diags.add(
-                    .unsupported,
-                    call.args[i].span,
-                    "argumento {d} de '{s}': passagem de struct por valor ainda não é suportada",
-                    .{ i + 1, call.callee },
-                );
+            if (actual == .unknown or expected == .unknown) continue;
+            if (actual == .aggregate and expected == .aggregate) {
+                const got = self.structIdOfExpr(call.args[i]) orelse 0;
+                const want = if (i < func.param_struct_ids.len) func.param_struct_ids[i] else 0;
+                if (got != want) {
+                    try self.diags.add(
+                        .type_mismatch,
+                        call.args[i].span,
+                        "argumento {d} de '{s}' é do struct '{s}', esperado '{s}'",
+                        .{ i + 1, call.callee, self.structs.items[got].decl.name, self.structs.items[want].decl.name },
+                    );
+                }
                 continue;
             }
-            if (actual == .unknown or expected == .unknown) continue;
             if (actual != expected) {
                 try self.diags.add(
                     .type_mismatch,
@@ -1636,23 +1687,81 @@ test "sema: atribuição a campo de variável imutável" {
     try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "declarado com 'let'") != null);
 }
 
-test "sema: struct por valor em parâmetro, retorno e argumento é rejeitado" {
+test "sema: struct por valor em parâmetro, retorno e argumento é aceito" {
     var f = try Fixture.check(
-        \\struct P { x: i32 }
+        \\struct P { x: i32, y: i32 }
         \\fn id(p: P) -> P { return p; }
+        \\fn soma(p: P) -> i32 { return p.x + p.y; }
         \\fn main() -> i32 {
-        \\    let a: P = P { x: 1 };
-        \\    let b: P = id(a);
-        \\    return 0;
+        \\    let a: P = P { x: 1, y: 2 };
+        \\    let b = id(a);
+        \\    let c: P = id(P { x: 3, y: 4 });
+        \\    return soma(b) + soma(c);
         \\}
     , .{});
     defer f.deinit();
-    try testing.expectEqual(@as(usize, 3), f.diags.count());
-    try testing.expectEqual(diagnostics.Kind.unsupported, f.diags.items.items[0].kind); // parâmetro
-    try testing.expectEqual(diagnostics.Kind.unsupported, f.diags.items.items[1].kind); // retorno
-    try testing.expectEqual(diagnostics.Kind.unsupported, f.diags.items.items[2].kind); // argumento
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "parâmetro 'p'") != null);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[2].message, "argumento 1") != null);
+    try testing.expectEqual(@as(usize, 0), f.diags.count());
+
+    const checked = f.checked.?;
+    // Identidades nominais preservadas na assinatura e no retorno.
+    try testing.expectEqual(Type.aggregate, checked.functions[0].return_type);
+    try testing.expectEqual(@as(u32, 0), checked.functions[0].return_struct_id);
+    try testing.expectEqual(@as(u32, 0), checked.functions[0].param_struct_ids[0]);
+    // Variável inferida de chamada que devolve struct fica com o struct certo.
+    try testing.expectEqual(Type.aggregate, checked.symbols[4].typ);
+    try testing.expectEqual(@as(u32, 0), checked.symbols[4].struct_id);
+}
+
+test "sema: struct de retorno com 7 campos excede o backend" {
+    var f = try Fixture.check(
+        \\struct Grande { a: i32, b: i32, c: i32, d: i32, e: i32, f: i32, g: i32 }
+        \\fn grande() -> Grande { return Grande { a: 1, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7 }; }
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .unsupported);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "retorna struct com 7 campos") != null);
+}
+
+test "sema: structs diferentes não são intercambiáveis como argumento" {
+    var f = try Fixture.check(
+        \\struct A { x: i32 }
+        \\struct B { x: i32 }
+        \\fn usa(a: A) -> i32 { return a.x; }
+        \\fn main() -> i32 {
+        \\    let b: B = B { x: 1 };
+        \\    return usa(b);
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .type_mismatch);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "é do struct 'B', esperado 'A'") != null);
+}
+
+test "sema: retorno de struct com identidade trocada é diagnosticado" {
+    var f = try Fixture.check(
+        \\struct A { x: i32 }
+        \\struct B { x: i32 }
+        \\fn faz() -> A { return B { x: 1 }; }
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .invalid_return);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "esperado do struct 'A', encontrado 'B'") != null);
+}
+
+test "sema: struct conta um registrador por campo na assinatura e na chamada" {
+    var f = try Fixture.check(
+        \\struct Tres { a: i32, b: i32, c: i32 }
+        \\struct Quatro { a: i32, b: i32, c: i32, d: i32 }
+        \\fn cabe(p: Tres, x: i32, s: str) -> i32 { return x; }
+        \\fn nao_cabe(p: Quatro, x: i32, y: i32, z: i32) -> i32 { return x + y + z; }
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .unsupported);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "função 'nao_cabe' ocupa 7 registradores") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "cada campo de struct um") != null);
 }
 
 test "sema: struct aninhado, vazio e duplicado são diagnosticados" {

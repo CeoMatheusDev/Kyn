@@ -37,14 +37,14 @@ interpretados como garantias de recursos completos.
 | Lexer | `src/lexer/lexer.zig` com tokens tipados e spans | Funcional, testado |
 | Parser e AST | `src/parser/`, `src/ast/` para o subconjunto documentado | Funcional, testado |
 | Módulos | `src/driver.zig` (`compilePath`): `import "arquivo.kyn";` resolvido no disco | Funcional; caminhos relativos ao arquivo importador |
-| Structs | `struct`, literais `Nome { campo: valor }`, acesso e atribuição a campo | Funcional em variáveis locais (sem passagem por valor) |
+| Structs | `struct`, literais `Nome { campo: valor }`, acesso e atribuição a campo, por valor em parâmetros/retornos | Funcional localmente, em chamadas (até 6 campos) e entre módulos |
 | Texto e números | `str` como fatia estática (por valor em parâmetros/retornos), `print(...)` e `print_i32(...)` embutidos (texto/decimais + quebra de linha) | Funcional localmente e com módulos; stdout conferido no e2e |
 | Análise semântica | `src/sema/` com escopos, tipos e mutabilidade | Funcional para `i32`/`bool`/`str`/`void` e structs |
-| Backend LLVM IR | `src/codegen/llvm.zig` derivado da AST | Aceito por `llvm-as` no CI (79/79 módulos) |
+| Backend LLVM IR | `src/codegen/llvm.zig` derivado da AST | Aceito por `llvm-as` no CI (83/83 módulos) |
 | Backend x86-64 | `src/codegen/x86_64.zig` (asm + `as`/`ld`) | Validado por execução |
 | Implementação em Kyn | `src/kyn/`, `src/compiler/` | Esqueleto / placeholders |
 | Biblioteca padrão | `std/` | Experimental |
-| Testes | Unitários (`zig build test`), e2e (`zig build e2e`) e IR (`zig build validate-ir`) | 193 testes unitários (186 do compilador + 7 da std); 97 casos e2e (com stdout conferido); IR validado por `llvm-as` no CI |
+| Testes | Unitários (`zig build test`), e2e (`zig build e2e`) e IR (`zig build validate-ir`) | 204 testes unitários (197 do compilador + 7 da std); 102 casos e2e (com stdout conferido); IR validado por `llvm-as` no CI |
 
 Consulte [o estado detalhado](docs/status.md) e o
 [subconjunto aceito hoje](docs/syntax.ebnf) antes de depender de qualquer
@@ -177,6 +177,9 @@ suportado por valor (ponteiro + tamanho, dois registradores por `str`).
 `kync` retorna `0` em sucesso, `1` para erros de compilação, `2` para uso
 inválido e `3` para falhas de E/S. Detalhes em
 [docs/development.md](docs/development.md).
+
+Novo na linguagem? Comece pelo **[tutorial](docs/tutorial.md)**: guia completo,
+do primeiro programa a structs por valor, módulos, diagnósticos e testes.
 
 Os arquivos `.kyn` em `tests/` cobrem tanto o subconjunto suportado
 (`tests/integration/`, `tests/e2e/`) quanto casos de linguagem ainda **não**

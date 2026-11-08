@@ -10,6 +10,44 @@ Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
 > e testes, está em [docs/status.md](docs/status.md). O versionamento será
 > reconciliado antes de qualquer release pública.
 
+## [v0.3.7-alpha.1] — 2026-11-07
+
+Struct por valor: structs atravessam chamadas em parâmetros, argumentos e
+retornos, com identidade nominal verificada.
+
+- **Semântica:** os diagnósticos de "struct por valor não suportado" (parâmetro,
+  retorno e argumento) saíram; `FunctionInfo` passou a carregar
+  `param_struct_ids` e `return_struct_id`, e `structIdOfExpr` reconhece chamadas
+  que devolvem struct — inclusive para `let b = origem();` (inferência preserva o
+  struct). Structs diferentes com a mesma forma são recusados em argumento,
+  retorno e anotação (`é do struct 'B', esperado 'A'`). O limite de registradores
+  virou `sema.registerWordsOf` (campo de struct = 1, `str` = 2, escalar = 1),
+  fonte única para declaração, chamada e retorno; retorno de struct acima de 6
+  campos é diagnosticado.
+- **x86-64:** um registrador por campo na entrada (`%rdi`, `%rsi`, …), chamadas
+  empilham uma palavra por campo e desempilham na ordem inversa, e o retorno usa
+  `%eax`/`%edx`/`%ecx`/`%r8d`/`%r9d`/`%r10d`. Campos de literal são avaliados na
+  pilha antes de irem para os registradores de retorno, então um campo nunca
+  clobbera o resultado do outro; struct devolvido por chamada pode ser passado
+  direto como argumento de outra.
+- **LLVM IR:** parâmetros achatados em argumentos escalares (`define i32
+  @soma(i32 %arg0, i32 %arg1)`), armazenamento por substituição escalar (um
+  `alloca` por campo) e retorno agregado `{ i32, i1, … }` com
+  `insertvalue`/`extractvalue`; `return f()` devolve o agregado da chamada
+  direto, sem reconstruí-lo.
+- **Testes:** 197 testes do compilador (+11) e 7 da std — **204 no total**; o
+  negativo antigo que exigia "struct por valor não suportado" virou positivo do
+  novo contrato. 3 fixtures e2e novas (`struct_passagem`, `struct_retorno`,
+  `struct_campos_tipos`), 1 módulo com struct por valor (`import_struct_abi`) e
+  2 negativas novas (`struct_nominal`, `struct_registradores`) — **102/102
+  casos**; `validate-ir` cobre **83 módulos**.
+- **Docs:** novo [docs/tutorial.md](docs/tutorial.md) (guia completo da
+  linguagem, com exemplos verificados pelo compilador), além de
+  `docs/architecture.md` (contrato de chamada de struct),
+  `docs/language_reference.md`, `docs/syntax.ebnf`, `docs/status.md`,
+  `docs/development.md`, `README.md`, `ROADMAP.md` e `DEVELOPMENT_STATE.md`.
+- **Versão:** `0.3.7-alpha.1` (derivada de `build.zig.zon`).
+
 ## [v0.3.6-alpha.1] — 2026-11-07
 
 `str` por valor: texto atravessa chamadas de função em parâmetros e retornos.

@@ -33,6 +33,14 @@ const arg_registers = [_][]const u8{ "%edi", "%esi", "%edx", "%ecx", "%r8d", "%r
 /// tamanho são valores de 8 bytes).
 const arg_registers_64 = [_][]const u8{ "%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9" };
 
+/// Registradores de retorno de um struct: um por campo, na ordem de declaração.
+/// Não colidem com os de argumento porque o chamador já consumiu os deles.
+const struct_return_registers = [_][]const u8{ "%eax", "%edx", "%ecx", "%r8d", "%r9d", "%r10d" };
+
+/// Os mesmos registradores em 64 bits, usados ao empilhar um struct devolvido
+/// por chamada para repassá-lo como argumento de outra chamada.
+const struct_return_registers_64 = [_][]const u8{ "%rax", "%rdx", "%rcx", "%r8", "%r9", "%r10" };
+
 pub fn emit(
     arena: std.mem.Allocator,
     program: *const ast.Program,
@@ -189,12 +197,26 @@ const FnEmitter = struct {
         return &self.checked.symbols[index];
     }
 
+    /// Palavras de registrador que o tipo consome (struct: um por campo).
+    fn registerWordsOf(self: *FnEmitter, typ: sema.Type, struct_id: u32) usize {
+        return sema.registerWordsOf(self.checked.structs, typ, struct_id);
+    }
+
+    fn structFields(self: *FnEmitter, struct_id: u32) Error![]const sema.FieldInfo {
+        if (struct_id >= self.checked.structs.len) return error.MiscompiledAst;
+        return self.checked.structs[struct_id].fields;
+    }
+
     fn emitFunction(self: *FnEmitter, out: *std.ArrayList(u8)) !void {
         self.out = out;
 
-        // `str` consome dois registradores; a semântica já limita o total.
+        // `str` consome dois registradores e cada campo de struct um; a
+        // semântica já limita o total.
         var register_words: usize = 0;
-        for (self.info.params) |ptype| register_words += ptype.registerWords();
+        for (self.info.params, 0..) |ptype, i| {
+            const struct_id = if (i < self.info.param_struct_ids.len) self.info.param_struct_ids[i] else 0;
+            register_words += self.registerWordsOf(ptype, struct_id);
+        }
         if (register_words > arg_registers.len) return error.UnsupportedNode;
 
         const frame_bytes: u32 = std.mem.alignForward(u32, self.info.slot_count * 8, 16);
@@ -211,6 +233,18 @@ const FnEmitter = struct {
         var reg: usize = 0;
         for (self.func.params, 0..) |_, i| {
             const sym = &self.checked.symbols[self.info.symbol_start + i];
+            if (sym.typ == .aggregate) {
+                if (sym.struct_id >= self.checked.structs.len) return error.MiscompiledAst;
+                const fields = self.checked.structs[sym.struct_id].fields;
+                for (fields, 0..) |_, field_index| {
+                    try self.print("    movl {s}, -{d}(%rbp)\n", .{
+                        arg_registers[reg],
+                        slotOffset(sym.slot + 1 + @as(u32, @intCast(field_index))),
+                    });
+                    reg += 1;
+                }
+                continue;
+            }
             if (sym.typ == .str) {
                 try self.print("    movq {s}, -{d}(%rbp)\n", .{ arg_registers_64[reg], slotOffset(sym.slot) });
                 try self.print("    movq {s}, -{d}(%rbp)\n", .{ arg_registers_64[reg + 1], slotOffset(sym.slot + 1) });
@@ -284,6 +318,9 @@ const FnEmitter = struct {
                     if (self.info.return_type == .str) {
                         // Fatia de volta em `%rax` (ponteiro) e `%rdx` (tamanho).
                         try self.emitStrValue(expr);
+                    } else if (self.info.return_type == .aggregate) {
+                        // Struct volta com um registrador por campo.
+                        try self.emitStructReturn(expr);
                     } else {
                         try self.emitExpr(expr);
                     }
@@ -387,7 +424,16 @@ const FnEmitter = struct {
                 }
             },
 
-            .call => |call| try self.emitCall(call),
+            .call => |call| {
+                // Valor de struct não cabe em `%eax`: quem consome usa
+                // `emitStructStore`/`emitStructReturn`/`emitCall` direto.
+                if (call.callee_fn) |index| {
+                    if (self.checked.functions[index].return_type == .aggregate) {
+                        return error.UnsupportedNode;
+                    }
+                }
+                try self.emitCall(call);
+            },
 
             .field_access => |access| {
                 const base = self.symbolAt(access.base.resolved orelse return error.MiscompiledAst);
@@ -435,6 +481,89 @@ const FnEmitter = struct {
                     try self.print("    movl %eax, -{d}(%rbp)\n", .{
                         slotOffset(dst.slot + 1 + index),
                     });
+                }
+            },
+            .call => |call| {
+                if (info.fields.len > struct_return_registers.len) return error.UnsupportedNode;
+                try self.emitCall(call);
+                for (info.fields, 0..) |_, i| {
+                    const index: u32 = @intCast(i);
+                    try self.print("    movl {s}, -{d}(%rbp)\n", .{
+                        struct_return_registers[i],
+                        slotOffset(dst.slot + 1 + index),
+                    });
+                }
+            },
+            else => return error.MiscompiledAst,
+        }
+    }
+
+    /// Deixa um struct em `struct_return_registers`: um por campo, na ordem de
+    /// declaração. Campos são avaliados na pilha para que um não clobbere o
+    /// resultado do outro.
+    fn emitStructReturn(self: *FnEmitter, value: *ast.Expr) Error!void {
+        const fields = try self.structFields(self.info.return_struct_id);
+        if (fields.len > struct_return_registers.len) return error.UnsupportedNode;
+
+        switch (value.kind) {
+            .identifier => {
+                const src = self.symbolAt(value.resolved orelse return error.MiscompiledAst);
+                if (src.typ != .aggregate) return error.MiscompiledAst;
+                for (fields, 0..) |_, i| {
+                    const index: u32 = @intCast(i);
+                    try self.print("    movl -{d}(%rbp), {s}\n", .{
+                        slotOffset(src.slot + 1 + index),
+                        struct_return_registers[i],
+                    });
+                }
+            },
+            .call => |call| try self.emitCall(call),
+            .struct_literal => |lit| {
+                for (fields, 0..) |field, i| {
+                    const init_value = findFieldInit(lit.fields, field.name) orelse return error.MiscompiledAst;
+                    try self.emitExpr(init_value);
+                    try self.print("    pushq %rax\n", .{});
+                    _ = i;
+                }
+                var i: usize = fields.len;
+                while (i > 0) {
+                    i -= 1;
+                    try self.print("    popq %rax\n", .{});
+                    try self.print("    movl %eax, {s}\n", .{struct_return_registers[i]});
+                }
+            },
+            else => return error.MiscompiledAst,
+        }
+    }
+
+    /// Empilha um struct campo a campo (para passagem por valor em chamadas).
+    fn emitStructArgsPush(self: *FnEmitter, struct_id: u32, value: *ast.Expr) Error!void {
+        const fields = try self.structFields(struct_id);
+
+        switch (value.kind) {
+            .identifier => {
+                const src = self.symbolAt(value.resolved orelse return error.MiscompiledAst);
+                if (src.typ != .aggregate) return error.MiscompiledAst;
+                for (fields, 0..) |_, i| {
+                    const index: u32 = @intCast(i);
+                    try self.print("    movl -{d}(%rbp), %eax\n", .{
+                        slotOffset(src.slot + 1 + index),
+                    });
+                    try self.print("    pushq %rax\n", .{});
+                }
+            },
+            .struct_literal => |lit| {
+                for (fields) |field| {
+                    const init_value = findFieldInit(lit.fields, field.name) orelse return error.MiscompiledAst;
+                    try self.emitExpr(init_value);
+                    try self.print("    pushq %rax\n", .{});
+                }
+            },
+            .call => |call| {
+                if (fields.len > struct_return_registers.len) return error.UnsupportedNode;
+                try self.emitCall(call);
+                for (fields, 0..) |_, i| {
+                    try self.print("    pushq {s}\n", .{struct_return_registers_64[i]});
                 }
             },
             else => return error.MiscompiledAst,
@@ -583,15 +712,19 @@ const FnEmitter = struct {
         const callee = self.checked.functions[callee_index];
         if (call.args.len != callee.params.len) return error.MiscompiledAst;
 
-        // Cada argumento ocupa 1 registrador, ou 2 quando é `str` (ponteiro e
-        // tamanho, nesta ordem). A semântica já validou o total.
+        // Cada argumento ocupa 1 registrador, 2 quando é `str` (ponteiro e
+        // tamanho, nesta ordem) e um por campo quando é struct. A semântica já
+        // validou o total.
         var words: usize = 0;
-        for (callee.params) |ptype| words += ptype.registerWords();
+        for (callee.params, 0..) |ptype, i| {
+            const struct_id = if (i < callee.param_struct_ids.len) callee.param_struct_ids[i] else 0;
+            words += self.registerWordsOf(ptype, struct_id);
+        }
         if (words > arg_registers.len) return error.UnsupportedNode;
 
         // Caminho rápido: com um único argumento nada pode clobberar os
         // registradores de destino, então movemos direto sem passar pela pilha.
-        if (call.args.len == 1) {
+        if (call.args.len == 1 and callee.params[0] != .aggregate) {
             if (callee.params[0] == .str) {
                 try self.emitStrValue(call.args[0]);
                 try self.print("    movq %rax, {s}\n", .{arg_registers_64[0]});
@@ -604,8 +737,14 @@ const FnEmitter = struct {
             return;
         }
 
-        for (call.args, callee.params) |arg, ptype| {
-            if (ptype == .str) {
+        for (call.args, callee.params, 0..) |arg, ptype, arg_index| {
+            if (ptype == .aggregate) {
+                const struct_id = if (arg_index < callee.param_struct_ids.len)
+                    callee.param_struct_ids[arg_index]
+                else
+                    0;
+                try self.emitStructArgsPush(struct_id, arg);
+            } else if (ptype == .str) {
                 try self.emitStrValue(arg);
                 try self.print("    pushq %rax\n", .{});
                 try self.print("    pushq %rdx\n", .{});
@@ -745,6 +884,72 @@ test "x86_64: limite de argumentos da semântica coincide com a tabela SysV" {
     // tamanho, senão o diagnóstico e o backend divergem silenciosamente.
     try testing.expectEqual(sema.max_arg_registers, arg_registers.len);
     try testing.expectEqual(sema.max_arg_registers, arg_registers_64.len);
+}
+
+test "x86_64: struct por valor chega um campo por registrador" {
+    var f = try support.Fixture.build(
+        \\struct P { x: i32, y: i32 }
+        \\fn eco(p: P) -> P { return p; }
+        \\fn main() -> i32 { return 0; }
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+
+    // Slots 1 e 2 do struct (slot 0 é a base interna) recebem %edi e %esi.
+    try support.expectContains(asm_text, "movl %edi, -16(%rbp)");
+    try support.expectContains(asm_text, "movl %esi, -24(%rbp)");
+    // `return p` devolve campo a campo em %eax e %edx.
+    try support.expectContains(asm_text, "movl -16(%rbp), %eax");
+    try support.expectContains(asm_text, "movl -24(%rbp), %edx");
+}
+
+test "x86_64: chamada com struct empilha um campo por vez" {
+    var f = try support.Fixture.build(
+        \\struct P { x: i32, y: i32 }
+        \\fn soma(p: P) -> i32 { return p.x + p.y; }
+        \\fn main() -> i32 {
+        \\    let a: P = P { x: 1, y: 2 };
+        \\    return soma(a);
+        \\}
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+
+    try support.expectContains(asm_text, "movl -16(%rbp), %eax\n    pushq %rax\n    movl -24(%rbp), %eax\n    pushq %rax");
+    try support.expectContains(asm_text, "popq %rax\n    movq %rax, %rsi\n    popq %rax\n    movq %rax, %rdi\n    call kyn_soma");
+}
+
+test "x86_64: let de chamada que devolve struct grava os campos" {
+    var f = try support.Fixture.build(
+        \\struct P { x: i32, y: i32 }
+        \\fn eco(p: P) -> P { return p; }
+        \\fn main() -> i32 {
+        \\    let b = eco(P { x: 7, y: 9 });
+        \\    return b.x;
+        \\}
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+
+    try support.expectContains(asm_text, "call kyn_eco");
+    try support.expectContains(asm_text, "movl %eax, -16(%rbp)");
+    try support.expectContains(asm_text, "movl %edx, -24(%rbp)");
+}
+
+test "x86_64: struct aninhado em expressão usa a pilha na ordem certa" {
+    var f = try support.Fixture.build(
+        \\struct P { x: i32, y: i32 }
+        \\fn eco(p: P) -> P { return p; }
+        \\fn soma(p: P) -> i32 { return p.x + p.y; }
+        \\fn main() -> i32 { return soma(eco(P { x: 3, y: 4 })); }
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+
+    // O struct devolvido por `eco` é empilhado campo a campo (%rax/%rdx).
+    try support.expectContains(asm_text, "call kyn_eco");
+    try support.expectContains(asm_text, "pushq %rax\n    pushq %rdx");
+    try support.expectContains(asm_text, "call kyn_soma");
 }
 
 test "x86_64: parâmetro 'str' chega em %rdi/%rsi e é salvo em dois slots" {

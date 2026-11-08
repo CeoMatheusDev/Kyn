@@ -188,9 +188,34 @@ fn main() -> i32 {
 }
 ```
 
-Limites atuais, todos diagnosticados: struct por valor em parâmetro, retorno ou
-argumento; campo de tipo struct (struct aninhado); `struct` vazio; struct como
-condição, operando aritmético ou de comparação; literal de struct fora de
+Structs atravessam chamadas **por valor**, com um registrador por campo:
+
+```kyn
+struct Ponto {
+    x: i32,
+    y: i32,
+}
+
+fn origem() -> Ponto {
+    return Ponto { x: 3, y: 4 };
+}
+
+fn soma(p: Ponto) -> i32 {
+    return p.x + p.y;
+}
+
+fn main() -> i32 {
+    let a = origem();  // retorno de struct
+    return soma(a);    // parâmetro por valor (7)
+}
+```
+
+O limite de seis registradores vale para parâmetros/argumentos e para o retorno
+(portanto, no máximo seis campos), contando `str` como dois.
+
+Limites atuais, todos diagnosticados: campo de tipo struct (struct aninhado);
+`struct` vazio; struct como condição, operando aritmético ou de comparação;
+literal de struct fora de
 inicialização/atribuição.
 
 **Visão de design (não implementada):** o exemplo abaixo mostra agregados com

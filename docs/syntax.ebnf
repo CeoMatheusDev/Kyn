@@ -104,6 +104,11 @@ arguments        = expression, { ",", expression } ;
    fonte. *)
 builtin_call     = ( "print" | "print_i32" ), "(", expression, ")" ;
 
+(* Structs também atravessam chamadas por valor: cada campo escalar ocupa um
+   registrador, na ordem de declaração, e o retorno usa um registrador por campo
+   (até 6 campos). *)
+
 (* Limites do backend nativo atual (documentados como pendência de projeto):
    até 6 registradores em parâmetros/argumentos por função, contando `str` como
-   dois; sem chamadas externas; sem struct por valor. *)
+   dois e cada campo de struct como um; sem chamadas externas; sem struct
+   aninhado nem campo `str`. *)
