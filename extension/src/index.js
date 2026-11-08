@@ -90,4 +90,21 @@ function referencesFor(snapshot, id, includeDeclaration) {
   return result;
 }
 
-module.exports = { validateSnapshot, filePathOf, targetAt, findSymbol, referencesFor, remapSnapshotOffsets };
+const KEYWORDS = new Set([
+  "fn", "import", "struct", "let", "var", "return", "if", "else", "while",
+  "enum", "switch", "impl", "as", "true", "false"
+]);
+
+function isIdentifier(name) {
+  return typeof name === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && !KEYWORDS.has(name);
+}
+
+function renameEntries(snapshot, id, newName) {
+  if (!isIdentifier(newName) || !findSymbol(snapshot, id)) return null;
+  return referencesFor(snapshot, id, true);
+}
+
+module.exports = {
+  validateSnapshot, filePathOf, targetAt, findSymbol, referencesFor,
+  remapSnapshotOffsets, isIdentifier, renameEntries
+};
