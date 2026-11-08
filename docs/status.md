@@ -65,7 +65,7 @@ to freestanding/embedded targets is analysed in `docs/embedded.md`.
 | `unsafe`/`repr(C)` | `src/sema/unsafe.zig` | Isolated, tested policy; the AST still has no such nodes | Unit tests of the module |
 | Self-hosting | `src/kyn/*.kyn`, `src/compiler/*.kyn` | Placeholders; not executed by `kync` | Not demonstrated |
 | Standard library | `std/core/core.zig`, `std/os/*.zig` | Experimental stubs; some APIs do no real I/O | Compile in the std tests |
-| Fixtures | `tests/` | 50 `integration/case_N.kyn` + 71 entries in `tests/e2e` (31 positive with `struct_*`/`print_*`/`print_int_*`/`str_*`/`enum_*`/`method_*`, 9 modules including `import_enum` and `import_method`, 28 negative, 3 negative modules) + remaining language cases not supported yet | `zig build e2e` (121 cases) |
+| Fixtures | `tests/` | Numbered integration fixtures plus positive/negative programs and multi-file module scenarios under `tests/e2e/`; unsupported language experiments are kept separate from the accepted subset | `zig build e2e` (130 cases in the latest recorded local run) |
 
 ## Language subset accepted today
 
