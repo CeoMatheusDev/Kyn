@@ -93,7 +93,7 @@ class KynClient {
         this.fail(error, "temporary source file");
         return;
       }
-      if (this.generations.get(key) !== generation || this.dead) {
+      if (this.generations.get(key) !== generation || this.dead || doc.isClosed) {
         void fs.promises.unlink(temporaryPath).catch(() => {});
         return;
       }
@@ -119,13 +119,14 @@ class KynClient {
     child.stdout.on("data", chunk => collect("stdout", chunk));
     child.stderr.on("data", chunk => collect("stderr", chunk));
     child.on("error", error => {
+      cleanup();
       if (this.generations.get(key) !== generation) return;
-      this.children.delete(key); cleanup(); this.clearRoot(doc.uri); this.fail(error, executable);
+      this.children.delete(key); this.clearRoot(doc.uri); this.fail(error, executable);
     });
     child.on("close", code => {
+      cleanup();
       if (this.generations.get(key) !== generation || this.dead) return;
       this.children.delete(key);
-      cleanup();
       if (overflow) { this.clearRoot(doc.uri); this.output.appendLine("[error] Compiler output exceeded 4 MiB."); return; }
       this.publish(doc.uri, parseDiagnostics(stderr + "\n" + stdout, cwd, aliases));
       if (code === 0) this.output.appendLine("[ok] " + doc.uri.fsPath);
@@ -268,6 +269,7 @@ function activate(context) {
     }),
     vscode.workspace.onDidCloseTextDocument(doc => {
       const key = doc.uri.toString(), timer = client.pending.get(key), child = client.children.get(key);
+      client.generations.set(key, (client.generations.get(key) || 0) + 1);
       if (timer) clearTimeout(timer);
       if (child) child.kill();
       client.pending.delete(key); client.children.delete(key); client.clearRoot(doc.uri);
