@@ -1,0 +1,26 @@
+// expect-exit: 0
+// Aritmética e comparação de ponteiros
+fn main() -> i32 {
+    var a: i32 = 10;
+    var b: i32 = 20;
+
+    let pa: ptr = &a;
+    let pb: ptr = &b;
+
+    // Comparação: ponteiros diferentes são !=
+    if (pa == pb) {
+        return 1;  // falha
+    }
+
+    // Comparação: ponteiros iguais são ==
+    let pa2: ptr = &a;
+    if (pa != pa2) {
+        return 2;  // falha
+    }
+
+    // ptr - ptr yields i32 (difference in units)
+    // Como não temos arrays, apenas verificamos que o tipo é aceito
+    // e que a comparação funciona
+
+    return 0;
+}

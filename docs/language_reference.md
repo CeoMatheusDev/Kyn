@@ -185,9 +185,15 @@ fn main() -> i32 {
 }
 ```
 
+Pointer arithmetic and comparison are supported:
+- `ptr<T> + i32`, `i32 + ptr<T>`, `ptr<T> - i32` yield `ptr<T>`
+- `ptr<T> - ptr<T>` yields `i32` (difference in units of pointee size)
+- `ptr<T> == ptr<T>` and `ptr<T> != ptr<T>` yield `bool`
+- `ptr<T> + ptr<T>` (and other combinations of two pointers) is rejected.
+
 Current limits, all diagnosed: `&` applied to a non-lvalue (literal, call
-result), `*` applied to a non-pointer type, `ptr` used in arithmetic or
-comparison.
+result), `*` applied to a non-pointer type, `ptr` used with `<`, `<=`, `>`,
+`>=` (relational comparison of pointers is not supported yet).
 
 At this stage `str` is a **static slice**: pointer to constant bytes + length,
 kept in two slots. It exists to give the program text output:

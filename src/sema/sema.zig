@@ -2098,6 +2098,25 @@ pub const Checker = struct {
         const both_bool = lhs.eq(.bool) and rhs.eq(.bool);
 
         if (op.isArithmetic()) {
+            // Pointer arithmetic: ptr + i32, i32 + ptr, ptr - i32 yield ptr;
+            // ptr - ptr yields i32 (difference in units of pointee size).
+            if (lhs.isPtr() and rhs.isInteger()) {
+                if (op == .sub) {
+                    // ptr - i32
+                    return lhs;
+                }
+                // ptr + i32 (commutative)
+                return lhs;
+            }
+            if (rhs.isPtr() and lhs.isInteger()) {
+                // i32 + ptr (commutative)
+                return rhs;
+            }
+            if (lhs.isPtr() and rhs.isPtr()) {
+                // ptr - ptr yields i32
+                if (op == .sub) return .i32;
+            }
+
             // Arithmetic: both operands must be the same integer type (not bool).
             if (lhs.eq(.bool) or rhs.eq(.bool) or !lhs.isInteger() or !rhs.isInteger() or !lhs.eq(rhs)) {
                 try self.diags.add(
@@ -2112,6 +2131,10 @@ pub const Checker = struct {
         }
 
         if (op.isComparison()) {
+            // Pointer comparison: ptr == ptr and ptr != ptr yield bool.
+            if (lhs.isPtr() and rhs.isPtr()) {
+                return .bool;
+            }
             // Relational comparisons: both operands must be the same integer type.
             if (lhs.eq(.bool) or rhs.eq(.bool) or !lhs.isInteger() or !rhs.isInteger() or !lhs.eq(rhs)) {
                 try self.diags.add(
