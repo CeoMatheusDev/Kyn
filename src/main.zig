@@ -17,9 +17,13 @@ const usage =
     \\
     \\Commands:
     \\  check <file>      validate syntax and semantics without generating code
+    \\  symbols <file>    emit compiler-resolved symbols and references as JSON
     \\  emit <file>       emit the selected backend artifact
     \\  help              show this help
     \\  version           show the version and available backends
+    \\
+    \\symbols options:
+    \\  --json            emit the semantic index as JSON (default)
     \\
     \\emit options:
     \\  --llvm            textual LLVM IR (default)
@@ -100,10 +104,13 @@ pub fn main(init: std.process.Init) !void {
     }
 
     var action: driver.Action = .check;
+    var symbols_mode = false;
     if (std.mem.eql(u8, command, "check")) {
         action = .check;
     } else if (std.mem.eql(u8, command, "emit")) {
         action = .emit;
+    } else if (std.mem.eql(u8, command, "symbols")) {
+        symbols_mode = true;
     } else {
         cli.printStderr("error: unknown command '{s}'\n\n", .{command});
         cli.writeStderr(usage);
@@ -125,6 +132,11 @@ pub fn main(init: std.process.Init) !void {
             backend = .llvm_ir;
         } else if (std.mem.eql(u8, arg, "--asm")) {
             backend = .x86_64_asm;
+        } else if (std.mem.eql(u8, arg, "--json")) {
+            if (!symbols_mode) {
+                cli.writeStderr("error: --json is only valid with the symbols command\n");
+                std.process.exit(exit_usage);
+            }
         } else if (std.mem.eql(u8, arg, "--lib")) {
             require_main = false;
         } else if (std.mem.eql(u8, arg, "-o")) {
@@ -177,6 +189,16 @@ pub fn main(init: std.process.Init) !void {
         driver.renderDiagnostics(&writer.interface, result.sources, result.diags) catch {};
         writer.interface.flush() catch {};
         std.process.exit(exit_compile_error);
+    }
+
+    if (symbols_mode) {
+        const json = driver.semanticJson(&result) catch {
+            cli.writeStderr("error: semantic index unavailable\n");
+            std.process.exit(exit_io);
+        };
+        cli.stdout.writeStreamingAll(init.io, json) catch std.process.exit(exit_io);
+        cli.stdout.writeStreamingAll(init.io, "\n") catch std.process.exit(exit_io);
+        std.process.exit(exit_success);
     }
 
     if (action == .check) {
