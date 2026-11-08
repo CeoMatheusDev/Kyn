@@ -24,13 +24,14 @@ function compilerOf(doc) {
   }
   return "kync";
 }
-function parseDiagnostics(output, cwd) {
+function parseDiagnostics(output, cwd, aliases = new Map()) {
   const result = new Map();
   const pattern = /^(.+?):(\d+):(\d+): (error|warning): (.*)$/;
   for (const line of output.split(/\r?\n/)) {
     const m = line.match(pattern);
     if (!m) continue;
-    const file = canonical(path.isAbsolute(m[1]) ? m[1] : path.resolve(cwd, m[1]));
+    const rawFile = canonical(path.isAbsolute(m[1]) ? m[1] : path.resolve(cwd, m[1]));
+    const file = aliases.get(rawFile) || rawFile;
     const row = Math.max(0, Number(m[2]) - 1), col = Math.max(0, Number(m[3]) - 1);
     const item = new vscode.Diagnostic(new vscode.Range(row, col, row, col + 1), m[5],
       m[4] === "warning" ? vscode.DiagnosticSeverity.Warning : vscode.DiagnosticSeverity.Error);
@@ -75,13 +76,34 @@ class KynClient {
     }
     this.published.set(root.toString(), targets);
   }
-  check(doc) {
+  async check(doc) {
     if (this.dead || doc.isClosed) return;
     const key = doc.uri.toString(), generation = (this.generations.get(key) || 0) + 1;
     this.generations.set(key, generation);
     const old = this.children.get(key);
     if (old) old.kill();
-    const executable = compilerOf(doc), cwd = cwdOf(doc), args = ["check", doc.uri.fsPath];
+    const executable = compilerOf(doc), cwd = cwdOf(doc);
+    let sourcePath = doc.uri.fsPath, temporaryPath = null;
+    if (doc.isDirty) {
+      temporaryPath = path.join(path.dirname(sourcePath),
+        "." + path.basename(sourcePath) + "." + process.pid + "." + generation + ".kyn-check.tmp.kyn");
+      try {
+        await fs.promises.writeFile(temporaryPath, doc.getText(), "utf8");
+      } catch (error) {
+        this.fail(error, "temporary source file");
+        return;
+      }
+      if (this.generations.get(key) !== generation || this.dead) {
+        void fs.promises.unlink(temporaryPath).catch(() => {});
+        return;
+      }
+      sourcePath = temporaryPath;
+    }
+    const args = ["check", sourcePath];
+    const aliases = new Map([[canonical(sourcePath), canonical(doc.uri.fsPath)]]);
+    const cleanup = () => {
+      if (temporaryPath) void fs.promises.unlink(temporaryPath).catch(() => {});
+    };
     this.output.appendLine("[check] " + doc.uri.fsPath);
     let child;
     try { child = cp.spawn(executable, args, { cwd, windowsHide: true, shell: false }); }
@@ -98,13 +120,14 @@ class KynClient {
     child.stderr.on("data", chunk => collect("stderr", chunk));
     child.on("error", error => {
       if (this.generations.get(key) !== generation) return;
-      this.children.delete(key); this.clearRoot(doc.uri); this.fail(error, executable);
+      this.children.delete(key); cleanup(); this.clearRoot(doc.uri); this.fail(error, executable);
     });
     child.on("close", code => {
       if (this.generations.get(key) !== generation || this.dead) return;
       this.children.delete(key);
+      cleanup();
       if (overflow) { this.clearRoot(doc.uri); this.output.appendLine("[error] Compiler output exceeded 4 MiB."); return; }
-      this.publish(doc.uri, parseDiagnostics(stderr + "\n" + stdout, cwd));
+      this.publish(doc.uri, parseDiagnostics(stderr + "\n" + stdout, cwd, aliases));
       if (code === 0) this.output.appendLine("[ok] " + doc.uri.fsPath);
       else if (code !== 1 && !stderr) this.output.appendLine("[error] kync exited with code " + code);
     });
