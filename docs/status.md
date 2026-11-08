@@ -129,7 +129,11 @@ and formatting of `str`, `f32`/`f64` and other types, `[]T` slices, generics,
 `Result<T, E>`/`?`, closures, `for`, visibility (`pub`), qualified/selective
 imports and packages.
 
-## Validation executed in this cycle
+## Last recorded validation baseline
+
+The results below are historical evidence from the November 8, 2026 review, before the repository-modernization follow-up. The current branch adds four regression tests (two span tests and two semantic type-metadata tests), plus a keyword assertion. These additions have **not** been executed in this environment; rerun the commands below and update the totals only from actual output.
+
+## Validation executed in the previous cycle
 
 - `zig build` — success.
 - `zig build test` — 246 tests in the compiler suite (spans, lexer,
