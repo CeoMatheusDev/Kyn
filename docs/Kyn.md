@@ -206,7 +206,10 @@ let right: u8 = a >> (1 as u8);
 `&`, `|`, `^` e `~` usam operandos do mesmo tipo. Em `<<` e `>>`, o operando
 esquerdo define o tipo do resultado e a contagem pode ter outro tipo inteiro;
 o deslocamento à direita é aritmético para tipos com sinal e lógico para tipos
-sem sinal. Contagens fora da largura do valor ainda não têm contrato portável.
+sem sinal. A contagem é reduzida módulo a largura (8, 16, 32 ou 64 bits) do
+operando esquerdo, inclusive quando tem outro tipo ou é negativa: usam-se os
+bits baixos da representação em complemento de dois. Assim, `1 as u8 << 8`
+usa contagem zero; valores válidos menores que a largura não mudam.
 
 ### Conversão explícita (`as`)
 

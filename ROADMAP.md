@@ -53,20 +53,22 @@ implementation and reproducible tests.
       pointer arithmetic and pointer equality/inequality for the current target.
       Generic pointer parameters/struct fields now preserve full addresses, but
       the language still lacks bounds, lifetime and pointer-safety contracts.
-- [ ] Specify and validate the remaining integer overflow, division-by-zero
-      and out-of-range shift behavior, plus a stable external ABI, before making
-      general cross-backend or C-compatibility claims. The documented `i64`
-      discrepancy and selected width/argument paths now have native + LLVM
-      regressions (`docs/status.md`); other targets and edge cases remain open.
+- [ ] Specify and validate the remaining arithmetic overflow and division-by-zero
+      behavior, plus a stable external ABI, before making general cross-backend
+      or C-compatibility claims. The documented `i64` discrepancy, selected
+      width/argument paths and out-of-range shifts (counts modulo width) now
+      have native + LLVM regressions (`docs/status.md`); other targets and edge
+      cases remain open.
 - [ ] Complete the language beyond the implemented subset: slices, arrays,
       nested aggregates, enum struct fields, richer payloads, `unsafe`,
       attributes, generics and a formal ownership/lifetime model.
 - [ ] Extend semantic analysis with floating-point types, richer flow
       analysis, ownership/lifetime checking and a complete error model.
 - [ ] Define and validate the official backend. The x86-64 backend is validated
-      by execution; earlier LLVM IR passed `llvm-as` in CI, but the current
-      changes still need a green strict verifier run. The choice of the
-      official backend and a configurable `target triple` remain pending.
+      by execution; LLVM IR passed strict `llvm-as` on the integrated PR #40
+      and `main`. This shift-count cycle still needs its own strict CI. The
+      choice of the official backend and a configurable `target triple` remain
+      pending.
 
 ## Phase 2 — Freestanding and embedded targets
 

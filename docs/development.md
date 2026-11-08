@@ -138,14 +138,13 @@ requests and manual dispatch. On `ubuntu-24.04` the workflow:
 5. runs `zig build validate-ir-strict` (LLVM verifier required), then
    `zig build e2e` if IR validation succeeds.
 
-On the integer-width branch, local results are 276 compiler + 7 std tests,
-157/157 E2E cases and 110/110 LLVM 20-verified modules via `llvmlite`. The
-independent required CI previously passed for
-[PR #38](https://github.com/CeoMatheusDev/Kyn/pull/38) (run 42529572145),
-[PR #39](https://github.com/CeoMatheusDev/Kyn/pull/39) (run 42530026620) and
-post-merge `main` (run 42530205764), including strict `llvm-as`.
-[PR #40](https://github.com/CeoMatheusDev/Kyn/pull/40) independently passed
-both jobs (run 42531409558); post-merge `main` CI must be checked separately.
+On the current shift-count branch, local results are 278 compiler + 7 std
+tests (285/285), 158/158 E2E cases and 111/111 LLVM 20-verified modules
+via `llvmlite`; its strict `llvm-as` PR check is still required. Earlier
+[PR #40](https://github.com/CeoMatheusDev/Kyn/pull/40) passed both jobs on
+its final head (run 42531600138); `main` also passed both jobs on the merge
+commit `33a61cd` (run 42531803954), including strict LLVM validation. PRs
+#36/#37 remain separate and have a failing compiler check.
 
 A missing LLVM in CI **fails** the build, so IR validation cannot be skipped
 silently.
