@@ -84,3 +84,10 @@ jobs:
         working-directory: extension
         run: |
           node -e "for (const f of ['package.json', 'language-configuration.json', 'syntaxes/kyn.tmLanguage.json', 'snippets/kyn.json']) JSON.parse(require('node:fs').readFileSync(f, 'utf8')); console.log('Extension JSON manifests are valid.')"
+
+      - name: Package VSIX
+        working-directory: extension
+        run: |
+          npm install --global @vscode/vsce
+          vsce package --no-dependencies --out "$RUNNER_TEMP/kyn-language.vsix"
+          test -s "$RUNNER_TEMP/kyn-language.vsix"
