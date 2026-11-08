@@ -370,12 +370,15 @@ function activate(context) {
     vscode.languages.registerWorkspaceSymbolProvider({ provideWorkspaceSymbols: query => symbolIndex.workspaceSymbols(query) }),
     vscode.workspace.onDidOpenTextDocument(doc => { symbolIndex.invalidate(); client.schedule(doc, true); }),
     vscode.workspace.onDidChangeTextDocument(event => {
+      symbolIndex.invalidate();
       if (vscode.workspace.getConfiguration("kyn", event.document.uri).get("checkOnType", true)) client.schedule(event.document);
     }),
     vscode.workspace.onDidSaveTextDocument(doc => {
+      symbolIndex.invalidate();
       if (vscode.workspace.getConfiguration("kyn", doc.uri).get("checkOnSave", true)) client.schedule(doc, true);
     }),
     vscode.workspace.onDidCloseTextDocument(doc => {
+      symbolIndex.invalidate();
       const key = doc.uri.toString(), timer = client.pending.get(key), child = client.children.get(key);
       client.generations.set(key, (client.generations.get(key) || 0) + 1);
       if (timer) clearTimeout(timer);
