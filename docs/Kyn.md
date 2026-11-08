@@ -15,9 +15,14 @@ que **realmente compilam** com o compilador atual (`kync`).
 O compilador Kyn se chama `kync`. Ele é construído com Zig:
 
 ```bash
-zig build            # constrói o kync
-./.zig-cache/o/*/kync --help
+zig build                  # compila e instala o kync em zig-out/bin/kync
+zig-out/bin/kync --help
 ```
+
+O bootstrap atual do compilador é escrito em **Zig 0.17.0**. O projeto usa
+`build.zig` e o Zig Build System para compilar o compilador e executar os testes.
+**Ainda não existe um sistema de build próprio em Kyn (`kyn.build`)**; isso é
+uma possibilidade futura, não um recurso disponível.
 
 Crie um arquivo `hello.kyn`:
 
@@ -113,6 +118,32 @@ let y = true;     // bool
 let s = "olá";    // str
 ```
 
+### Inteiros de largura fixa
+
+O compilador aceita inteiros com largura e sinal explícitos:
+
+| Tipo | Largura | Representação |
+|---|---:|---|
+| `i8`, `i16`, `i32`, `i64` | 8–64 bits | Com sinal |
+| `u8`, `u16`, `u32`, `u64` | 8–64 bits | Sem sinal |
+| `usize` | 64 bits no alvo x86-64 atual | Sem sinal |
+
+Literais inteiros sem anotação são inferidos como `i32`. Operações binárias
+entre inteiros exigem operandos do mesmo tipo; não há conversão implícita entre
+larguras ou entre tipos com/sem sinal. Overflow de literal fora da faixa do tipo
+é diagnosticado. Para converter, use `as`:
+
+```kyn
+let small: u8 = 255 as u8;
+let wide: u64 = small as u64;  // extensão com zero
+let signed: i64 = (-42 as i32) as i64; // extensão de sinal
+let truncated: u8 = (300 as u32) as u8; // mantém os bits inferiores
+```
+
+`as` só aceita conversões entre tipos inteiros. Conversões para/de `bool`, `str`
+e `void` não são suportadas. Redução de largura trunca; aumento de largura usa
+extensão de sinal ou zero conforme o tipo de origem.
+
 ### Mutabilidade
 
 ```kyn
@@ -157,14 +188,21 @@ let b = true || false;   // true
 
 ### Bitwise
 
+Os operadores bitwise estão disponíveis para operandos inteiros do mesmo tipo:
+
 ```kyn
-let a = 5 & 3;    // 1
-let b = 5 | 3;    // 7
-let c = 5 ^ 3;    // 6
-let d = ~5;       // -6
-let e = 1 << 2;   // 4
-let f = 8 >> 1;   // 4
+let a: u8 = 5 as u8;
+let b: u8 = 3 as u8;
+let and: u8 = a & b;   // 1
+let or: u8 = a | b;    // 7
+let xor: u8 = a ^ b;   // 6
+let not: u8 = ~a;      // inversão dos bits de u8
+let left: u8 = a << (2 as u8);
+let right: u8 = a >> (1 as u8);
 ```
+
+`&`, `|`, `^`, `~`, `<<` e `>>` preservam o tipo inteiro do operando esquerdo
+(para shifts, ambos os operandos precisam ter o mesmo tipo).
 
 ### Conversão explícita (`as`)
 
@@ -367,44 +405,55 @@ Enums cruzam funções por valor (2 registradores: tag + payload).
 
 ## 10. Ponteiros (`ptr`)
 
-`&variavel` produz um ponteiro para a variável. `*ptr` faz desreferência.
+O operador `&` obtém o endereço de uma variável e produz um ponteiro tipado
+`ptr<T>`. O operador `*` desreferencia o ponteiro e produz um valor do tipo
+apontado. A forma abreviada `ptr` em uma anotação representa `ptr<unknown>`.
 
 ```kyn
 var x: i32 = 42;
-let p: ptr = &x;       // ptr<unknown>, compatível com qualquer ptr<T>
-return *p;             // 42
+let p: ptr = &x;
+let value: i32 = *p;   // 42
 ```
+
+O tipo apontado é acompanhado pelo compilador quando conhecido. Um `ptr` sem
+parâmetro de tipo é compatível com ponteiros tipados, mas perde informação de
+tipo na anotação. Ponteiros ocupam uma palavra/registrador no limite atual de
+argumentos.
 
 ### Acesso a campos via ponteiro: `(*ptr).field`
 
-Se o ponteiro vier de `&struct_var`, o compilador sabe o layout da struct:
+Quando o endereço foi obtido de uma variável `struct`, o compilador preserva a
+identidade/layout da estrutura para permitir acesso aos campos:
 
 ```kyn
 struct Point { x: i32, y: i32 }
+
 fn main() -> i32 {
-    var p: Point = Point { x: 7, y: 8 };
-    let ptr: ptr = &p;
-    return (*ptr).x + (*ptr).y;   // 15
+    var point: Point = Point { x: 7, y: 8 };
+    let p: ptr = &point;
+    return (*p).x + (*p).y;   // 15
 }
 ```
 
-### Aritmética de ponteiros
+### Aritmética e comparação
+
+O subconjunto atual aceita `ptr + i32`, `i32 + ptr` e `ptr - i32`, que produzem
+ponteiros, além de `ptr - ptr`, que produz `i32`. Também aceita `==` e `!=` entre
+ponteiros:
 
 ```kyn
 let p: ptr = &x;
-let q = p + 4;   // ptr (avança 4 unidades do tipo pointee)
-let r = p - 2;   // ptr
-let d = p - q;   // i32 (diferença em unidades)
+let q = p + 4;
+let r = p - 2;
+let distance: i32 = q - p;
+let same: bool = p == q;
 ```
 
-### Comparação de ponteiros
-
-```kyn
-if p == q { ... }   // bool
-if p != q { ... }   // bool
-```
-
-**Não suportado:** `<`, `<=`, `>`, `>=` entre ponteiros; `ptr + ptr`.
+**Limites importantes:** não há verificação de bounds, lifetime, validade,
+nullability ou aliasing; não há referências (`&T`, `&mut T`) nem bloco `unsafe`
+integrado à linguagem. A aritmética aceita pelo frontend não deve ser entendida
+como garantia de segurança ou de compatibilidade com uma ABI externa. Comparações
+relacionais (`<`, `<=`, `>`, `>=`) e `ptr + ptr` não são suportados.
 
 ---
 
@@ -501,19 +550,27 @@ fn main() -> i32 {
 
 ---
 
-## 13. Limites atuais (diagnostados pelo compilador)
+## 13. Limites atuais
 
-O seguinte **não está implementado** e gera erro de compilação:
+Os itens abaixo não fazem parte do subconjunto implementado ou são rejeitados
+pelo compilador:
 
-- `unsafe`, `#[...]` atributos;
-- Generics, slices `[]T`;
-- `str` em campo de struct, comparação relacional de `str` (`<`, `<=`, `>`, `>=`);
-- Struct com campo de struct (aninhado), struct vazia;
-- Enum como campo de struct, tipos de payload além de `i32`;
-- `f32`/`f64` e outros tipos não-inteiros;
-- `for`, closures, `Result<T, E>`/`?`, visibilidade `pub`;
+- `unsafe` integrado à sintaxe/AST, atributos `#[...]` e referências `&T`/`&mut T`;
+- Generics, slices `[]T`, arrays e indexação;
+- `str` em campo de struct, concatenação/formatação e comparações relacionais de
+  strings (`<`, `<=`, `>`, `>=`); `==` e `!=` comparam ponteiro e comprimento;
+- Struct com campo de struct (aninhado) e struct vazia;
+- Enum como campo de struct e payload de enum diferente de `i32`;
+- `f32`, `f64` e demais tipos não-inteiros;
+- `for`, closures, `Result<T, E>`/`?` e visibilidade `pub`;
 - `main` retornando `str`;
-- Mais de 6 registradores de argumento (cada `str` conta 2, cada campo de struct conta 1).
+- Chamadas com mais de 6 palavras/registradores de argumento: `str` e enum
+  ocupam 2; ponteiros ocupam 1; structs contam um por campo. Não há ainda
+  passagem de argumentos excedentes pela stack.
+
+A presença de ponteiros não implica um modelo de memória seguro ou completo:
+o compilador ainda não formaliza ownership, lifetimes, aliasing, nullability,
+validade de endereço ou operações `volatile`.
 
 ---
 
@@ -522,14 +579,20 @@ O seguinte **não está implementado** e gera erro de compilação:
 Use o conjunto de testes e2e:
 
 ```bash
-# Todos os testes
-zig build e2e
-
-# Apenas build
+# Compilar o compilador (gera zig-out/bin/kync)
 zig build
 
-# Apenas testes unitários
+# Checar um arquivo sem gerar código
+zig-out/bin/kync check hello.kyn
+
+# Emitir LLVM IR ou Assembly
+zig-out/bin/kync emit --llvm hello.kyn -o hello.ll
+zig-out/bin/kync emit --asm hello.kyn -o hello.s
+
+# Testes unitários, e2e e validação LLVM
 zig build test
+zig build e2e
+zig build validate-ir
 ```
 
 Cada fixture positiva usa `// expect-exit: N` para declarar o código de
