@@ -46,16 +46,18 @@ implementation and reproducible tests.
       for free and method calls.
 - [x] Add fixed-width signed/unsigned integer types, `usize`, explicit casts,
       bitwise operators and shifts; validate the currently tested operations
-      in both backends. Full native arithmetic at every declared width remains
-      open below (the LLVM representation is not a native parity guarantee).
+      in both backends. The native `i64` boundary and selected narrow/wide
+      cases now have executable regressions. This is not a formal overflow or
+      cross-backend ABI guarantee.
 - [x] Add typed pointers, address-of, dereference, pointer field access,
       pointer arithmetic and pointer equality/inequality for the current target.
       Generic pointer parameters/struct fields now preserve full addresses, but
       the language still lacks bounds, lifetime and pointer-safety contracts.
-- [ ] Close remaining native integer-width/overflow and ABI gaps before making
-      cross-backend parity claims: an `i64` overflow-boundary probe currently
-      differs between native assembly and LLVM (see `docs/status.md`). Add
-      executable regressions as these paths become correct.
+- [ ] Specify and validate the remaining integer overflow, division-by-zero
+      and out-of-range shift behavior, plus a stable external ABI, before making
+      general cross-backend or C-compatibility claims. The documented `i64`
+      discrepancy and selected width/argument paths now have native + LLVM
+      regressions (`docs/status.md`); other targets and edge cases remain open.
 - [ ] Complete the language beyond the implemented subset: slices, arrays,
       nested aggregates, enum struct fields, richer payloads, `unsafe`,
       attributes, generics and a formal ownership/lifetime model.

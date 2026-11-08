@@ -89,8 +89,8 @@ fn main() -> i32 {
 
 - O corpo da função é um bloco entre `{` e `}`;
 - `return` encerra a função com um valor;
-- Até 6 registradores de argumento (SysV). `str` conta como 2;
-- Cada campo de `struct` conta como 1 registrador;
+- Até 6 registradores de argumento x86-64, com convenção interna de Kyn (não é ABI C). `str`, `i64`, `u64` e `usize` contam como 2;
+- Ponteiros e cada campo de `struct` contam como 1 registrador;
 - `main` deve retornar `i32` (ou `void`, nesse caso o código de saída é 0).
 
 ---
