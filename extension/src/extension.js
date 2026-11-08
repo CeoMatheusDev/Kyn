@@ -52,6 +52,7 @@ class KynClient {
     this.generations = new Map();
     this.published = new Map();
     this.dead = false;
+    this.semanticGeneration = 0;
     context.subscriptions.push(this.diagnostics, this.output);
   }
   schedule(doc, immediate = false) {
@@ -164,8 +165,9 @@ class KynClient {
     const originalPath = doc.uri.fsPath;
     let sourcePath = originalPath, temporaryPath = null;
     if (doc.isDirty) {
+      const generation = ++this.semanticGeneration;
       temporaryPath = path.join(path.dirname(originalPath),
-        "." + path.basename(originalPath) + "." + process.pid + "." + doc.version + ".symbols.tmp.kyn");
+        "." + path.basename(originalPath) + "." + process.pid + "." + generation + ".symbols.tmp.kyn");
       try {
         await fs.promises.writeFile(temporaryPath, doc.getText(), "utf8");
         sourcePath = temporaryPath;
