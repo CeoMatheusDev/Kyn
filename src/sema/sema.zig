@@ -1,16 +1,17 @@
-//! Bootstrap semantic analysis.
+//! Semantic analysis for the Zig bootstrap compiler.
 //!
 //! Responsibilities:
-//! - resolve names (variables, parameters and functions) and annotates the AST
-//!   with symbol indices (`Expr.resolved`, `Stmt.decl_symbol`, `Call.callee_fn`);
-//! - check types (`i32`, `bool`, `void`), mutability and conditions;
-//! - assign one stack slot per variable of each function, consumed by the
-//!   backends;
-//! - validate the `main` entry point.
+//! - register nominal struct, enum and function declarations before checking
+//!   bodies, allowing recursion and calls before declarations;
+//! - resolve variables, parameters, functions, methods, enum cases and fields,
+//!   annotating AST nodes with stable indices rather than rewriting the tree;
+//! - validate fixed-width integer types, bool, str, void, aggregates, enums and
+//!   pointer types, including casts, mutability, operators and control flow;
+//! - compute symbol slots and argument-register usage consumed by the backends;
+//! - validate the entry-point contract and produce structured diagnostics.
 //!
-//! The AST is not modified structurally: it only receives resolved indices.
-//! Every symbol and signature is allocated in the received arena.
-
+//! The AST is not modified structurally. Symbols, signatures and semantic
+//! metadata are allocated from the compilation arena supplied to Checker.
 const std = @import("std");
 const ast = @import("../ast/ast.zig");
 const diagnostics = @import("../diagnostics.zig");
