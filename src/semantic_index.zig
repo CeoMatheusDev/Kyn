@@ -327,4 +327,3 @@ pub fn generate(
     };
     return try std.json.Stringify.valueAlloc(arena, document, .{});
 }
-
