@@ -1,40 +1,40 @@
-# Modelo de memória
+# Memory model
 
-**Estado:** diretrizes de projeto; não constitui uma garantia formal da implementação atual.
+**Status:** design guidelines; this is not a formal guarantee of the current implementation.
 
-O Kyn pretende oferecer controle explícito sobre memória e recursos, com foco em sistemas de baixo nível. O modelo definitivo ainda precisa ser especificado e validado pelo compilador.
+Kyn aims to offer explicit control over memory and resources, focused on low-level systems. The final model still needs to be specified and validated by the compiler.
 
-## Objetivos
+## Goals
 
-- Não depender de garbage collector.
-- Tornar alocação e liberação de recursos explícitas.
-- Permitir allocators escolhidos pelo programa.
-- Oferecer operações de baixo nível em contextos delimitados e auditáveis.
-- Permitir interoperabilidade com C quando o layout e a ABI forem especificados.
+- No dependency on a garbage collector.
+- Make allocation and resource release explicit.
+- Allow allocators chosen by the program.
+- Offer low-level operations inside delimited, auditable contexts.
+- Allow interoperability with C when layout and ABI are specified.
 
-## Conceitos em avaliação
+## Concepts under evaluation
 
 ### Allocators
 
-O código em `std/core/arena.kyn` apresenta um protótipo de arena com buffer e offset. Ele não deve ser considerado uma implementação segura ou completa: verificações de overflow, limites, alinhamento, falhas de alocação e contratos de vida útil ainda precisam ser definidos.
+The code in `std/core/arena.kyn` shows an arena prototype with a buffer and an offset. It must not be considered a safe or complete implementation: overflow checks, bounds, alignment, allocation failures and lifetime contracts still have to be defined.
 
-### Operações unsafe
+### Unsafe operations
 
-Operações que possam violar invariantes de memória devem ser explicitamente delimitadas. A semântica exata de `unsafe`, suas obrigações e o que o compilador verifica ainda precisam de especificação.
+Operations that may violate memory invariants must be explicitly delimited. The exact semantics of `unsafe`, its obligations and what the compiler verifies still need a specification.
 
-### Layout e ABI
+### Layout and ABI
 
-Atributos como `#[repr(C)]`, alinhamento e empacotamento são objetivos de interoperabilidade. A compatibilidade só poderá ser garantida após testes de layout e integração com toolchains C suportadas.
+Attributes such as `#[repr(C)]`, alignment and packing are interoperability goals. Compatibility can only be guaranteed after layout tests and integration with the supported C toolchains.
 
-### Ownership e aliasing
+### Ownership and aliasing
 
-Ownership, move semantics e regras de aliasing são tópicos de projeto. Não há, no estado atual, evidência suficiente para afirmar que o compilador impõe essas garantias de ponta a ponta.
+Ownership, move semantics and aliasing rules are design topics. In the current state there is not enough evidence to claim that the compiler enforces those guarantees end to end.
 
-## Requisitos para estabilização
+## Requirements for stabilization
 
-- Regras formais de ownership e empréstimo, se adotadas.
-- Definição de lifetime e validade de referências.
-- Regras para ponteiros crus e aritmética de ponteiros.
-- Garantias de alinhamento e tamanho de tipos.
-- Comportamento em caso de falha de alocação.
-- Testes de segurança, regressão e interoperabilidade ABI.
+- Formal ownership and borrowing rules, if adopted.
+- Definition of lifetimes and reference validity.
+- Rules for raw pointers and pointer arithmetic.
+- Alignment and size guarantees for types.
+- Behavior on allocation failure.
+- Safety, regression and ABI interoperability tests.

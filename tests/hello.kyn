@@ -1,4 +1,4 @@
-// Teste básico de sintaxe para o Marco 1.1
+// Basic syntax test for Milestone 1.1
 fn main() {
     let x = 42;
     return x;

@@ -1,0 +1,12 @@
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn origin() -> Point {
+    return Point { x: 6, y: 7 };
+}
+
+fn mirror(p: Point) -> Point {
+    return Point { x: p.y, y: p.x };
+}

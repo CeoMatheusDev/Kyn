@@ -1,0 +1,3 @@
+fn suffix() -> i32 {
+    return 4;
+}

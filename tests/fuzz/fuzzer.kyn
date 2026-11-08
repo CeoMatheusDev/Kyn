@@ -1,9 +1,9 @@
-// tests/fuzz/fuzzer.kyn — Motor de mutação sintática
+// tests/fuzz/fuzzer.kyn — syntax mutation engine
 import "core";
 
 pub fn mutate(source: []u8) []u8 {
-    // Remove/substitui tokens aleatoriamente, injeta caracteres binários/ASCII
-    // Manipula limites de inteiros, strings sem fechamento, recursões profundas
-    // Retorna o código mutado
+    // Randomly removes/replaces tokens, injects binary/ASCII characters
+    // Exercises integer limits, unclosed strings, deep recursion
+    // Returns the mutated code
     return source;
 }

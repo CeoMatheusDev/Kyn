@@ -1,7 +1,7 @@
-//! Suporte a testes dos backends: compila uma fonte Kyn até `sema.Checked`
-//! usando uma arena no heap (ponteiro estável) e falha se houver diagnósticos.
+//! Backend test support: compiles Kyn source down to `sema.Checked`
+//! using a heap arena (stable pointer) and fails when there are diagnostics.
 //!
-//! Uso exclusivo de testes; não faz parte da API pública do compilador.
+//! Test-only; not part of the compiler's public API.
 
 const std = @import("std");
 const ast = @import("../ast/ast.zig");
@@ -40,7 +40,7 @@ pub const Fixture = struct {
         const checked = try checker.checkProgram(program);
 
         for (diags.items.items) |d| {
-            std.debug.print("diagnóstico inesperado {d}:{d}: {s}\n", .{ d.span.line, d.span.column, d.message });
+            std.debug.print("unexpected diagnostic {d}:{d}: {s}\n", .{ d.span.line, d.span.column, d.message });
         }
         try std.testing.expectEqual(@as(usize, 0), diags.count());
 
@@ -68,8 +68,8 @@ fn isTerminator(line: []const u8) bool {
         std.mem.eql(u8, line, "unreachable");
 }
 
-/// Verifica que todo bloco básico do IR emitido termina com um terminador
-/// válido, evitando IR malformado que um montador LLVM rejeitaria.
+/// Checks that every basic block of the emitted IR ends with a valid
+/// terminator, avoiding malformed IR an LLVM assembler would reject.
 pub fn expectAllBlocksTerminated(ir: []const u8) !void {
     var in_block = false;
     var last_instruction: []const u8 = "";
@@ -83,7 +83,7 @@ pub fn expectAllBlocksTerminated(ir: []const u8) !void {
         if (std.mem.eql(u8, line, "}")) {
             if (in_block) {
                 if (!isTerminator(last_instruction)) {
-                    std.debug.print("bloco '{s}' sem terminador; última instrução: '{s}'\n", .{ block_label, last_instruction });
+                    std.debug.print("block '{s}' has no terminator; last instruction: '{s}'\n", .{ block_label, last_instruction });
                 }
                 try std.testing.expect(isTerminator(last_instruction));
             }
@@ -95,7 +95,7 @@ pub fn expectAllBlocksTerminated(ir: []const u8) !void {
         if (!starts_indented and std.mem.endsWith(u8, line, ":")) {
             if (in_block) {
                 if (!isTerminator(last_instruction)) {
-                    std.debug.print("bloco '{s}' sem terminador; última instrução: '{s}'\n", .{ block_label, last_instruction });
+                    std.debug.print("block '{s}' has no terminator; last instruction: '{s}'\n", .{ block_label, last_instruction });
                 }
                 try std.testing.expect(isTerminator(last_instruction));
             }

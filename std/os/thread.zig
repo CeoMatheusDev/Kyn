@@ -9,7 +9,7 @@ pub const Thread = struct {
     }
 };
 
-test "thread: spawn/join compilam e não criam thread real" {
+test "thread: spawn/join compile and create no real thread" {
     const std = @import("std");
     const Runner = struct {
         fn run() void {}

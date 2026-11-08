@@ -1,0 +1,13 @@
+// Text and values on the same output, in the order they are written.
+// expect-exit: 0
+// expect-stdout: sum
+// expect-stdout: 42
+// expect-stdout: end
+fn main() -> i32 {
+    let a = 20;
+    let b = 22;
+    print("sum");
+    print_i32(a + b);
+    print("end");
+    return 0;
+}

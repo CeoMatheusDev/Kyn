@@ -1,4 +1,4 @@
-// Erro semântico esperado: variável não declarada.
+// Expected semantic error: undeclared variable.
 fn main() -> i32 {
     return missing;
 }

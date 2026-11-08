@@ -1,3 +1,3 @@
-# Código de Conduta
+# Code of Conduct
 
-Todos são bem-vindos. Sem discriminação. Mantenha o respeito. Erros são corrigidos com fatos, não opiniões destrutivas.
+Everyone is welcome. No discrimination. Stay respectful. Mistakes are fixed with facts, not destructive opinions.

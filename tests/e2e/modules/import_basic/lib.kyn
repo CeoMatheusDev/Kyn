@@ -1,4 +1,4 @@
-// Módulo auxiliar: dobra um inteiro.
-fn dobro(x: i32) -> i32 {
+// Helper module: doubles an integer.
+fn double(x: i32) -> i32 {
     return x * 2;
 }

@@ -1,4 +1,4 @@
-// `print` dentro de laço: a mesma variável `str` impressa a cada iteração.
+// `print` inside a loop: the same `str` variable printed on every iteration.
 // expect-exit: 3
 // expect-stdout: kyn
 // expect-stdout: kyn

@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# Valida o LLVM IR emitido pelo kync com uma ferramenta LLVM real.
+# Validates the LLVM IR emitted by kync with a real LLVM tool.
 #
-# Motivação: os testes unitários de `src/codegen/llvm.zig` verificam apenas a
-# estrutura do IR (blocos terminados, tipos, instruções). Este script fecha a
-# lacuna rodando o verificador do LLVM sobre o IR de todas as fixtures que o
-# compilador aceita hoje.
+# Motivation: the unit tests in `src/codegen/llvm.zig` only check the IR
+# structure (terminated blocks, types, instructions). This script closes the
+# gap by running the LLVM verifier over the IR of every fixture the compiler
+# accepts today.
 #
-# Uso: tools/validate-ir.sh [caminho-do-kync] [--require-tool]
+# Usage: tools/validate-ir.sh [path-to-kync] [--require-tool]
 #
-#   --require-tool  falha (código 1) quando nenhuma ferramenta LLVM existir, em
-#                   vez de avisar e ignorar. Usado pelo CI, para que a ausência
-#                   do verificador nunca passe silenciosamente.
+#   --require-tool  fails (code 1) when no LLVM tool exists, instead of
+#                   warning and skipping. Used by CI so that a missing
+#                   verifier never passes silently.
 #
-# Ferramentas procuradas, nesta ordem:
-#   1. llvm-as (llvm-as, llvm-as-NN ou /usr/lib/llvm-NN/bin/llvm-as)
-#   2. clang  (clang, clang-NN) usando `-x ir -c`
-# Se nenhuma existir, o script avisa e sai com código 0 (skip), para não
-# quebrar ambientes sem LLVM. Em CI a ferramenta é instalada e a validação roda.
+# Tools looked up, in this order:
+#   1. llvm-as (llvm-as, llvm-as-NN or /usr/lib/llvm-NN/bin/llvm-as)
+#   2. clang  (clang, clang-NN) using `-x ir -c`
+# If none exists the script warns and exits with code 0 (skip), so it does not
+# break environments without LLVM. CI installs the tool and runs the validation.
 
 set -u
 
@@ -25,7 +25,7 @@ REQUIRE_TOOL=0
 for arg in "$@"; do
     case "$arg" in
         --require-tool) REQUIRE_TOOL=1 ;;
-        -*) echo "validate-ir: opção desconhecida '$arg'" >&2; exit 2 ;;
+        -*) echo "validate-ir: unknown option '$arg'" >&2; exit 2 ;;
         *) KYNC="$arg" ;;
     esac
 done
@@ -33,7 +33,7 @@ done
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [ ! -x "$KYNC" ]; then
-    echo "validate-ir: kync não encontrado/executável em '$KYNC'" >&2
+    echo "validate-ir: kync not found/executable at '$KYNC'" >&2
     exit 1
 fi
 
@@ -49,7 +49,7 @@ find_tool() {
     return 1
 }
 
-# 1) llvm-as no PATH e com sufixo de versão.
+# 1) llvm-as on PATH and with a version suffix.
 for candidate in llvm-as llvm-as-21 llvm-as-20 llvm-as-19 llvm-as-18 llvm-as-17 llvm-as-16 llvm-as-15 llvm-as-14; do
     if found="$(find_tool "$candidate")"; then
         VALIDATOR="$found"
@@ -58,7 +58,7 @@ for candidate in llvm-as llvm-as-21 llvm-as-20 llvm-as-19 llvm-as-18 llvm-as-17 
     fi
 done
 
-# 2) llvm-as em /usr/lib/llvm-*/bin (instalação Debian/Ubuntu sem PATH).
+# 2) llvm-as in /usr/lib/llvm-*/bin (Debian/Ubuntu install without PATH).
 if [ -z "$VALIDATOR" ]; then
     for path in /usr/lib/llvm-*/bin/llvm-as /usr/local/opt/llvm/bin/llvm-as; do
         if [ -x "$path" ]; then
@@ -69,7 +69,7 @@ if [ -z "$VALIDATOR" ]; then
     done
 fi
 
-# 3) clang como alternativa.
+# 3) clang as an alternative.
 if [ -z "$VALIDATOR" ]; then
     for candidate in clang clang-21 clang-20 clang-19 clang-18 clang-17 clang-16 clang-15 clang-14; do
         if found="$(find_tool "$candidate")"; then
@@ -82,16 +82,16 @@ fi
 
 if [ -z "$VALIDATOR" ]; then
     if [ "$REQUIRE_TOOL" -eq 1 ]; then
-        echo "validate-ir: ERRO — nenhuma ferramenta LLVM encontrada e --require-tool foi passado" >&2
-        echo "validate-ir: instale 'llvm' ou 'clang' para validar o IR" >&2
+        echo "validate-ir: ERROR — no LLVM tool found and --require-tool was passed" >&2
+        echo "validate-ir: install 'llvm' or 'clang' to validate the IR" >&2
         exit 1
     fi
-    echo "validate-ir: nenhum llvm-as/clang encontrado — validação de IR ignorada" >&2
-    echo "validate-ir: instale LLVM (ex.: 'apt-get install llvm' ou 'apt-get install clang') para validar" >&2
+    echo "validate-ir: no llvm-as/clang found — IR validation skipped" >&2
+    echo "validate-ir: install LLVM (e.g. 'apt-get install llvm' or 'apt-get install clang') to validate" >&2
     exit 0
 fi
 
-echo "validate-ir: usando $VALIDATOR ($VALIDATOR_KIND)"
+echo "validate-ir: using $VALIDATOR ($VALIDATOR_KIND)"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -110,7 +110,7 @@ validate_one() {
 
     if ! "$KYNC" emit --llvm "$src" -o "$ir" 2>"$log"; then
         failed=$((failed + 1))
-        echo "  FALHA  $name: emissão de IR falhou"
+        echo "  FAIL   $name: IR emission failed"
         sed 's/^/         /' "$log"
         return
     fi
@@ -129,29 +129,29 @@ validate_one() {
         passed=$((passed + 1))
     else
         failed=$((failed + 1))
-        echo "  FALHA  $name: $VALIDATOR_KIND rejeitou o IR"
+        echo "  FAIL   $name: $VALIDATOR_KIND rejected the IR"
         sed 's/^/         /' "$log"
     fi
 }
 
-echo "validate-ir: fixtures comportamentais (tests/e2e/positive)"
+echo "validate-ir: behavioral fixtures (tests/e2e/positive)"
 for src in "$ROOT"/tests/e2e/positive/*.kyn; do
     validate_one "$src" "$(basename "$src" .kyn)"
 done
 
-echo "validate-ir: fixtures de integração (tests/integration/case_N.kyn)"
+echo "validate-ir: integration fixtures (tests/integration/case_N.kyn)"
 for src in "$ROOT"/tests/integration/case_*.kyn; do
     validate_one "$src" "$(basename "$src" .kyn)"
 done
 
-echo "validate-ir: módulos importados (tests/e2e/modules/<caso>/main.kyn)"
+echo "validate-ir: imported modules (tests/e2e/modules/<case>/main.kyn)"
 for src in "$ROOT"/tests/e2e/modules/*/main.kyn; do
     [ -e "$src" ] || continue
     validate_one "$src" "mod_$(basename "$(dirname "$src")")"
 done
 
 echo
-echo "validate-ir: $passed/$total módulos aceitos pelo verificador LLVM, $failed rejeitados"
+echo "validate-ir: $passed/$total modules accepted by the LLVM verifier, $failed rejected"
 
 [ "$failed" -eq 0 ] || exit 1
 exit 0

@@ -1,45 +1,45 @@
-# Contribuindo com o Kyn
+# Contributing to Kyn
 
-Obrigado pelo interesse no Kyn. Como o compilador e a linguagem ainda são experimentais, contribuições pequenas, testáveis e documentadas são especialmente importantes.
+Thanks for your interest in Kyn. Since the compiler and the language are still experimental, small, testable and documented contributions matter especially.
 
-## Antes de começar
+## Before you start
 
-- Leia [README.md](README.md), [docs/architecture.md](docs/architecture.md) e [docs/status.md](docs/status.md).
-- Use a versão de Zig declarada pelo projeto (atualmente 0.17.0) e informe a versão efetivamente utilizada.
-- Verifique se a funcionalidade já existe ou está registrada no roadmap.
+- Read [README.md](README.md), [docs/architecture.md](docs/architecture.md) and [docs/status.md](docs/status.md).
+- Use the Zig version declared by the project (currently 0.17.0) and report the version actually used.
+- Check whether the feature already exists or is tracked in the roadmap.
 
 ## Pull requests
 
-Cada PR deve:
+Every PR must:
 
-1. Ter um escopo claro e limitado.
-2. Explicar o problema e a solução.
-3. Incluir testes para o comportamento alterado, quando aplicável.
-4. Informar os comandos executados e seus resultados.
-5. Atualizar a documentação quando houver mudança de sintaxe, semântica, API, memória, FFI ou fluxo de build.
-6. Distinguir claramente código funcional, protótipo e placeholder.
+1. Have a clear, limited scope.
+2. Explain the problem and the solution.
+3. Include tests for the changed behavior, when applicable.
+4. Report the commands executed and their results.
+5. Update the documentation when syntax, semantics, API, memory, FFI or the build flow changes.
+6. Clearly distinguish working code, prototype and placeholder.
 
-## Diretrizes técnicas
+## Technical guidelines
 
-- Respeite a separação pretendida entre `kyn:core` e recursos dependentes do SO.
-- Evite cópias e alocações desnecessárias; documente ownership e lifetime.
-- Não introduza garantias de segurança ou performance sem evidência e testes.
-- Não adicione dependências sem justificar o custo, o impacto no build e a alternativa considerada.
-- Preserve compatibilidade ou documente explicitamente mudanças incompatíveis.
+- Respect the intended separation between `kyn:core` and OS-dependent features.
+- Avoid unnecessary copies and allocations; document ownership and lifetime.
+- Do not introduce safety or performance guarantees without evidence and tests.
+- Do not add dependencies without justifying the cost, build impact and the alternative considered.
+- Preserve compatibility or explicitly document incompatible changes.
 
-## Testes
+## Tests
 
-Execute `zig build test` para os testes unitários. Para mudanças em lexer, parser, semântica ou backends, rode também `zig build e2e`, que compila fixtures `.kyn` do subconjunto suportado, monta com `as`, liga com `ld` e confere o código de saída de cada programa. Casos ainda não implementados (por exemplo `impl`, `Result<T, E>`, `unsafe`) permanecem como documentação e não devem ser apresentados como suportados.
+Run `zig build test` for the unit tests. For changes in lexer, parser, semantics or backends, also run `zig build e2e`, which compiles `.kyn` fixtures of the supported subset, assembles with `as`, links with `ld` and checks each program's exit code (plus the `// expect-stdout:` lines when present). Cases not implemented yet (for example `impl`, `Result<T, E>`, `unsafe`) remain documentation and must not be presented as supported.
 
 ## Commits
 
-Prefira commits pequenos, com mensagens objetivas, por exemplo:
+Prefer small commits with objective messages, for example:
 
 - `feat(parser): parse grouped expressions`
 - `fix(lexer): preserve line positions`
 - `test(sema): cover duplicate declarations`
 - `docs: clarify memory model status`
 
-## Relato de bugs
+## Reporting bugs
 
-Inclua versão do Zig, sistema operacional, passos para reproduzir, entrada mínima e saída observada. Remova dados sensíveis antes de compartilhar logs.
+Include the Zig version, operating system, reproduction steps, minimal input and observed output. Remove sensitive data before sharing logs.

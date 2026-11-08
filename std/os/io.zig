@@ -16,9 +16,9 @@ pub const File = struct {
     }
 };
 
-// Testes do contrato atual (stub): nenhuma E/S real é feita ainda.
+// Tests of the current (stub) contract: no real I/O is performed yet.
 
-test "io: File.open/read/close compilam e não fazem E/S real" {
+test "io: File.open/read/close compile and do no real I/O" {
     const std = @import("std");
     var f = try File.open("unused.txt");
     var buf: [4]u8 = undefined;

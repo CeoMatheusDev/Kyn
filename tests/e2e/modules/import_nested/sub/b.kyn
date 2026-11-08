@@ -1,4 +1,4 @@
-// Módulo no subdiretório: multiplica por dez.
-fn dez(x: i32) -> i32 {
+// Module in the subdirectory: multiplies by ten.
+fn ten(x: i32) -> i32 {
     return x * 10;
 }

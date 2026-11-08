@@ -1,5 +1,5 @@
 // expect-exit: 0
-// Programa sem valor de retorno: `_start` encerra com 0.
+// Program without a return value: `_start` exits with 0.
 fn main() -> void {
     var x: i32 = 1;
     x = x + 1;

@@ -1,7 +1,7 @@
-//! Localização de um trecho de código-fonte.
+//! Location of a fragment of source code.
 //!
-//! Spans não copiam texto: guardam offsets na entrada original, permitindo que
-//! lexer, parser, semântica e diagnósticos se refiram ao mesmo buffer.
+//! Spans do not copy text: they store offsets into the original input, so the
+//! lexer, parser, semantic analysis and diagnostics all refer to one buffer.
 
 const std = @import("std");
 

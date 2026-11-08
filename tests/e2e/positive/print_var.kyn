@@ -1,4 +1,4 @@
-// `str` em variáveis: literal, cópia e atribuição, com código de saída próprio.
+// `str` in variables: literal, copy and assignment, with its own exit code.
 // expect-exit: 9
 // expect-stdout: a
 // expect-stdout: b

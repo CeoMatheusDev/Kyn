@@ -1,8 +1,8 @@
-//! Diagnósticos do compilador: severidade, span e mensagem.
+//! Compiler diagnostics: severity, span and message.
 //!
-//! O `kind` identifica a categoria do erro de forma estável (usada por testes
-//! e pela CLI para decidir o código de saída); a mensagem é texto legível já
-//! formatado no allocator do chamador (normalmente uma arena por compilação).
+//! `kind` identifies the error category in a stable way (used by tests and by
+//! the CLI to decide the exit code); the message is human-readable text already
+//! formatted in the caller's allocator (usually one arena per compilation).
 
 const std = @import("std");
 const Span = @import("span.zig").Span;
@@ -10,10 +10,10 @@ const Span = @import("span.zig").Span;
 pub const Severity = enum { @"error", warning };
 
 pub const Kind = enum {
-    // sintaxe
+    // syntax
     syntax,
     integer_overflow,
-    // semântica
+    // semantics
     undefined_variable,
     duplicate_declaration,
     unknown_type,
@@ -22,16 +22,16 @@ pub const Kind = enum {
     invalid_condition,
     invalid_return,
     invalid_call,
-    /// Campo inexistente em struct.
+    /// Field that does not exist in a struct.
     undefined_field,
-    /// Literal de struct incompleto ou com campo repetido.
+    /// Incomplete struct literal or repeated field.
     invalid_struct_literal,
     missing_main,
     invalid_main,
-    // módulos
+    // modules
     import_not_found,
     import_cycle,
-    // infraestrutura
+    // infrastructure
     unsupported,
     internal,
 };
@@ -41,16 +41,16 @@ pub const Diagnostic = struct {
     span: Span,
     message: []const u8,
     severity: Severity = .@"error",
-    /// Índice do arquivo de origem (ver `driver.Result.sources`).
+    /// Source file index (see `driver.Result.sources`).
     file: u32 = 0,
 };
 
-/// Lista de diagnósticos alocada em uma arena.
+/// Diagnostic list allocated in an arena.
 pub const List = struct {
     arena: std.mem.Allocator,
     items: std.ArrayList(Diagnostic) = .empty,
-    /// Arquivo atribuído aos diagnósticos adicionados via `add`. O driver e a
-    /// semântica o atualizam ao entrar em cada módulo/função.
+    /// File assigned to diagnostics added through `add`. The driver and
+    /// semantics update it when entering each module/function.
     current_file: u32 = 0,
 
     pub fn init(arena: std.mem.Allocator) List {
@@ -109,8 +109,8 @@ pub const List = struct {
     }
 };
 
-/// Renderiza um diagnóstico como `arquivo:linha:coluna: erro: mensagem`
-/// seguido da linha de código e de um marcador `^`.
+/// Renders a diagnostic as `file:line:column: error: message`
+/// followed by the source line and a `^` marker.
 pub fn render(
     writer: *std.Io.Writer,
     filename: []const u8,
@@ -118,8 +118,8 @@ pub fn render(
     diag: Diagnostic,
 ) std.Io.Writer.Error!void {
     const severity = switch (diag.severity) {
-        .@"error" => "erro",
-        .warning => "aviso",
+        .@"error" => "error",
+        .warning => "warning",
     };
     try writer.print("{s}:{d}:{d}: {s}: {s}\n", .{
         filename,
@@ -133,7 +133,7 @@ pub fn render(
     if (line_text.len == 0) return;
     try writer.print("    {s}\n", .{line_text});
 
-    // Marcador: prefixo com a indentação da linha, depois `^` na coluna.
+    // Marker: prefix with the line's indentation, then `^` at the column.
     try writer.writeAll("    ");
     var i: usize = 1;
     while (i < diag.span.column) : (i += 1) {
@@ -165,29 +165,29 @@ fn lineAt(source: []const u8, line: u32) ?[]const u8 {
     return null;
 }
 
-test "diagnostics: lista acumula e detecta erros" {
+test "diagnostics: list accumulates and detects errors" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var list = List.init(arena.allocator());
     try std.testing.expect(!list.hasErrors());
-    try list.add(.undefined_variable, .{ .line = 1, .column = 5 }, "variável '{s}' não declarada", .{"x"});
+    try list.add(.undefined_variable, .{ .line = 1, .column = 5 }, "variable '{s}' is not declared", .{"x"});
     try std.testing.expectEqual(@as(usize, 1), list.count());
     try std.testing.expect(list.hasErrors());
-    try std.testing.expectEqualStrings("variável 'x' não declarada", list.last().?.message);
+    try std.testing.expectEqualStrings("variable 'x' is not declared", list.last().?.message);
 }
 
-test "diagnostics: render aponta linha e coluna" {
+test "diagnostics: render points at line and column" {
     const source = "fn main() {\n    let x = y;\n}\n";
     var buf: [512]u8 = undefined;
     var writer = std.Io.Writer.fixed(&buf);
     const diag: Diagnostic = .{
         .kind = .undefined_variable,
         .span = .{ .start = 21, .end = 22, .line = 2, .column = 13 },
-        .message = "variável 'y' não declarada",
+        .message = "variable 'y' is not declared",
     };
-    try render(&writer, "teste.kyn", source, diag);
+    try render(&writer, "test.kyn", source, diag);
     const out = writer.buffered();
-    try std.testing.expect(std.mem.startsWith(u8, out, "teste.kyn:2:13: erro: variável 'y' não declarada\n"));
+    try std.testing.expect(std.mem.startsWith(u8, out, "test.kyn:2:13: error: variable 'y' is not declared\n"));
     try std.testing.expect(std.mem.indexOf(u8, out, "let x = y;") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "^") != null);
 }

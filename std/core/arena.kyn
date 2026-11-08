@@ -1,4 +1,4 @@
-// std/core/arena.kyn — ArenaAllocator nativo sem dependência de OS (v1.5.0)
+// std/core/arena.kyn — native ArenaAllocator with no OS dependency (v1.5.0)
 import "core";
 
 pub struct Arena {

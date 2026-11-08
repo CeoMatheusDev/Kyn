@@ -1,4 +1,4 @@
-// Erro esperado: 'print' espera 'str'.
+// Expected error: 'print' expects 'str'.
 fn main() -> i32 {
     print(1);
     return 0;

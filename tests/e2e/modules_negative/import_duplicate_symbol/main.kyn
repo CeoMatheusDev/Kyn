@@ -1,4 +1,4 @@
-// Erro esperado: mesma função declarada na raiz e no módulo importado.
+// Expected error: same function declared in the root and in the imported module.
 import "lib.kyn";
 
 fn dup() -> i32 {

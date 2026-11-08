@@ -1,19 +1,19 @@
-// tests/fuzz/edge_cases.kyn — Casos de borda fixos (payloads agressivos)
-// Remoção de ponto e vírgula
+// tests/fuzz/edge_cases.kyn — fixed edge cases (aggressive payloads)
+// Missing semicolon
 let x = 10
 
-// Parênteses não fechados
+// Unclosed parentheses
 let y = (1 + 2;
 
-// Chaves não fechadas
+// Unclosed braces
 fn foo() {
     let z = 5;
 
-// Strings sem fechamento
+// Unclosed strings
 let s = "unclosed string
 
-// Inteiros fora do limite
+// Integers outside the limit
 let big = 9999999999999999999999999;
 
-// Recursão profunda de expressões
+// Deep expression recursion
 let r = (((((((((((1)))))))))));

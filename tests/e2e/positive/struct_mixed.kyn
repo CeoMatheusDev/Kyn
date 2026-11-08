@@ -1,17 +1,17 @@
-// Campos de tipos diferentes e atribuição inteira de struct.
+// Fields of different types and whole-struct assignment.
 // expect-exit: 21
-struct Estado {
+struct State {
     total: i32,
-    ligado: bool,
+    on: bool,
 }
 
 fn main() -> i32 {
-    var e: Estado = Estado { total: 5, ligado: true };
+    var e: State = State { total: 5, on: true };
     e.total = e.total * 4;
-    e.ligado = false;
-    var f: Estado = Estado { total: 1, ligado: true };
+    e.on = false;
+    var f: State = State { total: 1, on: true };
     f = e;
-    if !f.ligado {
+    if !f.on {
         return f.total + 1;
     }
     return 0;

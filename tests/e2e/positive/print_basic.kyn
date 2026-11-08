@@ -1,4 +1,4 @@
-// Saída de texto: dois literais impressos em sequência.
+// Text output: two literals printed in sequence.
 // expect-exit: 0
 // expect-stdout: kyn
 // expect-stdout: bootstrap

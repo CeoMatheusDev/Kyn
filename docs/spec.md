@@ -1,46 +1,46 @@
-# Especificação da linguagem Kyn
+# Kyn language specification
 
-**Estado:** documento de projeto em evolução, não uma especificação normativa congelada.
+**Status:** evolving design document, not a frozen normative specification.
 
-Este documento registra objetivos e decisões preliminares. A sintaxe e a semântica devem ser consideradas experimentais até que estejam implementadas, testadas e versionadas formalmente.
+This document records goals and preliminary decisions. Syntax and semantics must be considered experimental until they are implemented, tested and formally versioned.
 
-## Objetivos
+## Goals
 
-- Linguagem voltada a sistemas e software de baixo nível.
-- Controle explícito de alocação e ciclo de vida de recursos.
-- Sem garbage collector como objetivo de projeto.
-- Interoperabilidade com C por meio de uma ABI documentada.
-- Separação entre funcionalidades essenciais e funcionalidades dependentes do sistema operacional.
-- Tratamento explícito de erros, com a proposta de tipos como `Result<T, E>`.
+- A language aimed at systems and low-level software.
+- Explicit control of allocation and resource lifetime.
+- No garbage collector as a design goal.
+- Interoperability with C through a documented ABI.
+- Separation between essential features and operating-system-dependent features.
+- Explicit error handling, with types such as `Result<T, E>` as the proposal.
 
-## Diretrizes propostas
+## Proposed guidelines
 
-| Tema | Diretriz | Situação |
+| Theme | Guideline | Situation |
 | --- | --- | --- |
-| Memória | Alocação explícita e allocators visíveis | Proposto |
-| Segurança | Uso delimitado de operações `unsafe` | Proposto |
-| Layout | Atributos de representação e alinhamento | Proposto |
-| FFI | Interoperabilidade com ABI C | Experimental |
-| Erros | Tipos de resultado em vez de exceções | Proposto |
-| Metaprogramação | Recursos `comptime` | Planejado |
-| Módulos | Importação e organização modular | Experimental |
+| Memory | Explicit allocation and visible allocators | Proposed |
+| Safety | Delimited use of `unsafe` operations | Proposed |
+| Layout | Representation and alignment attributes | Proposed |
+| FFI | Interoperability with the C ABI | Experimental |
+| Errors | Result types instead of exceptions | Proposed |
+| Metaprogramming | `comptime` resources | Planned |
+| Modules | Imports and modular organization | Experimental |
 
-## Sintaxe e gramática
+## Syntax and grammar
 
-A [referência preliminar da linguagem](language_reference.md) reúne exemplos ilustrativos de arquivos `.kyn`. Os [princípios de design](language_design.md) registram os objetivos arquiteturais. A gramática em [grammar.ebnf](grammar.ebnf) descreve apenas um subconjunto lexical inicial observado no lexer; [syntax.ebnf](syntax.ebnf) é um esboço sintático proposto e ainda não normativo. Nenhum desses documentos deve ser interpretado como prova de que a sintaxe correspondente já é aceita pelo compilador.
+The [preliminary language reference](language_reference.md) gathers illustrative `.kyn` file examples. The [design principles](language_design.md) record the architectural goals. The grammar in [grammar.ebnf](grammar.ebnf) describes only an initial lexical subset observed in the lexer; [syntax.ebnf](syntax.ebnf) is a proposed syntactic sketch and is not normative yet. None of those documents may be read as proof that the corresponding syntax is already accepted by the compiler.
 
-## Modelo de memória
+## Memory model
 
-Consulte [memory_model.md](memory_model.md). As regras ali descritas são objetivos de projeto e não garantias formais já implementadas.
+See [memory_model.md](memory_model.md). The rules described there are design goals, not formal guarantees already implemented.
 
-## Processo de evolução
+## Evolution process
 
-Uma funcionalidade só deve ser promovida a parte estável da linguagem quando possuir:
+A feature must only be promoted to a stable part of the language when it has:
 
-1. Definição sintática e semântica não ambígua.
-2. Implementação no compilador.
-3. Testes positivos e negativos.
-4. Documentação de erros e casos de fronteira.
-5. Compatibilidade ou política explícita de breaking changes.
+1. Unambiguous syntactic and semantic definition.
+2. Implementation in the compiler.
+3. Positive and negative tests.
+4. Documentation of errors and boundary cases.
+5. Compatibility or an explicit breaking-change policy.
 
-A versão da linguagem e a versão do compilador devem ser identificadas separadamente quando o versionamento formal for adotado.
+Language version and compiler version must be identified separately once formal versioning is adopted.

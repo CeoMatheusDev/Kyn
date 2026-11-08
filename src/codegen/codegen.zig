@@ -1,17 +1,17 @@
-//! Interface de backend do gerador de código.
+//! Code-generator backend interface.
 //!
-//! Contrato: recebe uma AST já validada pela semântica (`Checked`) e devolve o
+//! Contract: receives an AST already validated by semantics (`Checked`) and
 //! texto do artefato do backend escolhido, alocado na arena.
 //!
-//! Backends disponíveis:
-//! - `.llvm_ir`: LLVM IR textual (alvo declarado do projeto, sem validação por
+//! Available backends:
+//! - `.llvm_ir`: textual LLVM IR (the project's declared target; not validated by
 //!   ferramenta LLVM neste ambiente);
-//! - `.x86_64_asm`: assembly x86-64 Linux sem libc, montável com `as` e ligável
-//!   com `ld` — caminho usado para validação executável de ponta a ponta.
+//! - `.x86_64_asm`: Linux x86-64 assembly without libc, assemblable with `as` and
+//!   linkable with `ld` — the path used for end-to-end executable validation.
 //!
-//! A interface é intencionalmente textual: o consumidor decide onde gravar o
-//! resultado. Erros de backend indicam AST/semântica inconsistente
-//! (`MiscompiledAst`) ou subconjunto ainda não suportado (`UnsupportedNode`).
+//! The interface is intentionally textual: the consumer decides where to write
+//! returns the artifact. Backend errors mean inconsistent AST/semantics
+//! (`MiscompiledAst`) or a subset not yet supported (`UnsupportedNode`).
 
 const std = @import("std");
 const ast = @import("../ast/ast.zig");
@@ -54,10 +54,10 @@ pub const Backend = enum {
 
 /// Pool de literais de string de um programa.
 ///
-/// Deduplica por conteúdo: cada texto distinto vira um único rótulo no
-/// artefato (`@.strN` no LLVM IR, `.LstrN` no assembly), não importa quantas
-/// vezes apareça na fonte. O identificador devolvido por `intern` é estável e
-/// específico do backend que o formatar.
+/// Deduplicates by content: each distinct text becomes a single label in the
+/// artifact (`@.strN` in LLVM IR, `.LstrN` in assembly), no matter how many
+/// times it appears in the source. The identifier returned by `intern` is stable
+/// specific to the backend that formats it.
 pub const StrPool = struct {
     arena: std.mem.Allocator,
     texts: std.ArrayList([]const u8) = .empty,
@@ -66,7 +66,7 @@ pub const StrPool = struct {
         return .{ .arena = arena };
     }
 
-    /// Devolve o índice do texto, inserindo-o se ainda não existir.
+    /// Returns the text index, inserting it when not present yet.
     pub fn intern(self: *StrPool, text: []const u8) !u32 {
         for (self.texts.items, 0..) |existing, i| {
             if (std.mem.eql(u8, existing, text)) return @intCast(i);
@@ -76,23 +76,23 @@ pub const StrPool = struct {
     }
 };
 
-/// Estado compartilhado entre as funções de um programa durante a emissão.
+/// State shared across a program's functions during emission.
 pub const ProgramState = struct {
     strs: StrPool,
-    /// Alguma chamada a `print` foi emitida? Controla a constante de quebra de
-    /// linha no rodapé do artefato.
+    /// Was any `print` call emitted? Controls the line break constant in the
+    /// artifact footer.
     used_print: bool = false,
-    /// Alguma chamada a `print_i32` foi emitida? Controla a rotina de
-    /// conversão decimal no rodapé do artefato (emitida uma única vez).
+    /// Was any `print_i32` call emitted? Controls the decimal conversion
+    /// routine in the artifact footer (emitted once).
     used_print_i32: bool = false,
 };
 
 pub const Error = error{
-    /// A AST não contém as anotações esperadas da semântica.
+    /// The AST lacks the annotations semantics is expected to provide.
     MiscompiledAst,
-    /// Nó ou combinação ainda não implementada no backend.
+    /// Node or combination not implemented in the backend yet.
     UnsupportedNode,
-    /// Tipo sem representação no backend.
+    /// Type with no representation in the backend.
     UnsupportedType,
 } || std.mem.Allocator.Error;
 
@@ -108,7 +108,7 @@ pub fn generate(
     };
 }
 
-test "codegen: pool de strings deduplica por conteúdo" {
+test "codegen: string pool deduplicates by content" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
@@ -120,7 +120,7 @@ test "codegen: pool de strings deduplica por conteúdo" {
     try std.testing.expectEqualStrings("bootstrap", pool.texts.items[1]);
 }
 
-test "codegen: nomes de backend para CLI" {
+test "codegen: backend names for the CLI" {
     try std.testing.expectEqualStrings("llvm", Backend.llvm_ir.cliName());
     try std.testing.expectEqualStrings("asm", Backend.x86_64_asm.cliName());
     try std.testing.expectEqual(Backend.x86_64_asm, Backend.fromCliName("asm").?);

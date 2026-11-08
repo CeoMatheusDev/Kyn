@@ -1,0 +1,20 @@
+// Functions can return 'str' (pointer in %rax, length in %rdx).
+// expect-stdout: kyn lang
+// expect-stdout: kyn lang
+// expect-stdout: echo
+// expect-exit: 0
+fn title() -> str {
+    return "kyn lang";
+}
+
+fn echo(s: str) -> str {
+    return s;
+}
+
+fn main() -> i32 {
+    let t = title();
+    print(t);
+    print(title());
+    print(echo("echo"));
+    return 0;
+}

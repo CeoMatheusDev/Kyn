@@ -1,6 +1,6 @@
 // tests/unsafe_basic.kyn
 unsafe {
-    // acesso direto ao silício
+    // direct access to the silicon
 }
 
 #[repr(C)]

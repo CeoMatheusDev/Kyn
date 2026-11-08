@@ -1,17 +1,17 @@
-// Campo de struct em condição de 'while' e de 'if'.
+// Struct field in a 'while' and in an 'if' condition.
 // expect-exit: 10
-struct Contador {
-    valor: i32,
-    ativo: bool,
+struct Counter {
+    value: i32,
+    active: bool,
 }
 
 fn main() -> i32 {
-    var c: Contador = Contador { valor: 0, ativo: true };
-    while c.valor < 10 {
-        c.valor = c.valor + 2;
+    var c: Counter = Counter { value: 0, active: true };
+    while c.value < 10 {
+        c.value = c.value + 2;
     }
-    if c.ativo && c.valor == 10 {
-        return c.valor;
+    if c.active && c.value == 10 {
+        return c.value;
     }
     return 1;
 }

@@ -1,10 +1,10 @@
-// tests/fuzz/harness.kyn — Harness de validação sem crash
+// tests/fuzz/harness.kyn — crash-free validation harness
 import "core";
 
 pub fn run_fuzz(input: []u8) bool {
-    // Executa Lexer -> Parser -> Sema em ciclo contínuo
-    // Captura e valida que a execução resulta apenas em Ok(AST) ou Err(Diagnostic)
-    // Monitora alocação de memória (retenção zero entre invocações)
-    // Retorna true se nenhum crash ocorreu
+    // Runs Lexer -> Parser -> Sema in a continuous loop
+    // Captures and validates that execution only yields Ok(AST) or Err(Diagnostic)
+    // Monitors memory allocation (zero retention between invocations)
+    // Returns true when no crash occurred
     return true;
 }

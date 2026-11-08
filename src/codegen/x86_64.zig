@@ -1,25 +1,25 @@
-//! Backend nativo x86-64 (Linux, System V AMD64), sem dependência de libc.
+//! Native x86-64 backend (Linux, System V AMD64), no libc dependency.
 //!
-//! Estratégia:
-//! - cada variável (parâmetro ou local) recebe um slot de 8 bytes no frame;
-//!   `i32`/`bool` ocupam 4 bytes no slot e são carregados em 32 bits;
-//! - variável de struct ocupa um slot de base (reservado) seguido de um slot
-//!   por campo, na ordem da declaração (`slot + 1 + índice`); structs nunca
-//!   escapam da função (sem parâmetros/retorno por valor), então cabe em
-//!   variáveis locais;
-//! - expressões são avaliadas em `%eax` com pilha de temporários;
-//! - `str` é uma fatia (ponteiro + tamanho) guardada em dois slots; em
-//!   chamadas ela ocupa **dois registradores consecutivos** (`%rdi/%rsi`,
-//!   `%rdx/%rcx`, `%r8/%r9` — no máximo três `str` por chamada) e o retorno
-//!   volta em `%rax` (ponteiro) e `%rdx` (tamanho);
-//! - `_start` chama `kyn_main` e encerra via syscall `exit` (60) com o valor
-//!   retornado por `main` (`0` quando `main` é `void`).
+//! Strategy:
+//! - every variable (parameter or local) gets an 8-byte slot in the frame;
+//!   `i32`/`bool` use 4 bytes of the slot and are loaded as 32 bits;
+//! - a struct variable takes one base slot (reserved) followed by one slot
+//!   per field, in declaration order (`slot + 1 + index`); structs never
+//!   escape the function (no by-value parameters/returns), so it fits in
+//!   local variables;
+//! - expressions are evaluated in `%eax` with a temporary stack;
+//! - `str` is a slice (pointer + length) kept in two slots; in
+//!   calls it occupies **two consecutive registers** (`%rdi/%rsi`,
+//!   `%rdx/%rcx`, `%r8/%r9` — at most three `str` per call) and the return
+//!   comes back in `%rax` (pointer) and `%rdx` (length);
+//! - `_start` calls `kyn_main` and exits through the `exit` syscall (60) with
+//!   the value returned by `main` (`0` when `main` is `void`).
 //!
-//! Este backend é o caminho validável: `as` + `ld` produzem um binário que pode
-//! ser executado e conferido pelo código de saída (ver `tools/e2e.sh`).
+//! This backend is the validatable path: `as` + `ld` produce a binary that can
+//! be run and checked through its exit code (see `tools/e2e.sh`).
 //!
-//! Limitações conhecidas: até 6 parâmetros (registradores SysV), nenhuma
-//! chamada externa, `bool` é materializado como 32 bits, sem otimização.
+//! Known limits: up to 6 parameters (SysV registers), no external
+//! calls, `bool` is materialized as 32 bits, no optimization.
 
 const std = @import("std");
 const ast = @import("../ast/ast.zig");
@@ -29,16 +29,16 @@ const codegen = @import("codegen.zig");
 pub const Error = codegen.Error;
 
 const arg_registers = [_][]const u8{ "%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d" };
-/// Nomes de 64 bits dos mesmos registradores: usados para `str` (ponteiro e
-/// tamanho são valores de 8 bytes).
+/// 64-bit names of the same registers: used for `str` (pointer and
+/// length are 8-byte values).
 const arg_registers_64 = [_][]const u8{ "%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9" };
 
-/// Registradores de retorno de um struct: um por campo, na ordem de declaração.
-/// Não colidem com os de argumento porque o chamador já consumiu os deles.
+/// Return registers of a struct: one per field, in declaration order.
+/// They do not clash with the argument ones because the caller already used those.
 const struct_return_registers = [_][]const u8{ "%eax", "%edx", "%ecx", "%r8d", "%r9d", "%r10d" };
 
-/// Os mesmos registradores em 64 bits, usados ao empilhar um struct devolvido
-/// por chamada para repassá-lo como argumento de outra chamada.
+/// The same registers in 64 bits, used when stacking a struct returned
+/// by a call to pass it as an argument of another call.
 const struct_return_registers_64 = [_][]const u8{ "%rax", "%rdx", "%rcx", "%r8", "%r9", "%r10" };
 
 pub fn emit(
@@ -49,7 +49,7 @@ pub fn emit(
     var out: std.ArrayList(u8) = .empty;
     var state = codegen.ProgramState{ .strs = codegen.StrPool.init(arena) };
 
-    // Ponto de entrada do processo: chama `kyn_main` e encerra com syscall.
+    // Process entry point: calls `kyn_main` and exits with a syscall.
     const main_index = checked.findFunction("main") orelse return error.UnsupportedNode;
     const main_info = checked.functions[main_index];
 
@@ -72,11 +72,11 @@ pub fn emit(
         try out.append(arena, '\n');
     }
 
-    // Rotina de formatação decimal, emitida uma única vez por programa quando
-    // `print_i32` aparece. Fica em `.text` (código), antes dos dados: `divl` é
-    // unsigned, então após `negl` INT_MIN vira 0x80000000 e o laço produz
-    // 2147483648 dígitos, com '-' na frente — resultado correto para
-    // -2147483648. Sem libc e sem estado global.
+    // Decimal formatting routine, emitted once per program when
+    // `print_i32` appears. It lives in `.text` (code), before the data: `divl` is
+    // unsigned, so after `negl` INT_MIN becomes 0x80000000 and the loop produces
+    // 2147483648 digits with a leading '-' — the correct result for
+    // -2147483648. No libc and no global state.
     if (state.used_print_i32) {
         try out.print(arena, ".text\n", .{});
         try out.appendSlice(arena,
@@ -127,15 +127,15 @@ pub fn emit(
         );
     }
 
-    // Rodapé: constantes de string (deduplicadas) e a quebra de linha de
-    // `print`. Só são emitidas quando o programa usa esse recurso.
+    // Footer: string constants (deduplicated) and the line break used by
+    // `print`. They are emitted only when the program uses that feature.
     if (state.strs.texts.items.len > 0 or state.used_print or state.used_print_i32) {
         try out.print(arena, ".section .rodata\n", .{});
         for (state.strs.texts.items, 0..) |text, index| {
             try out.print(arena, ".Lstr{d}:\n", .{index});
             if (text.len == 0) {
-                // `as` não aceita `.byte` sem operandos; um byte de padding
-                // mantém o rótulo válido para comprimento zero (nada é escrito).
+                // `as` does not accept `.byte` without operands; one padding byte
+                // keeps the label valid for zero length (nothing is written).
                 try out.print(arena, "    .zero 1\n", .{});
             } else {
                 try out.print(arena, "    .byte ", .{});
@@ -161,10 +161,10 @@ const FnEmitter = struct {
     checked: *const sema.Checked,
     info: sema.FunctionInfo,
     out: *std.ArrayList(u8) = undefined,
-    /// Estado compartilhado do programa (pool de strings e uso de `print`).
+    /// Shared program state (string pool and `print` usage).
     state: *codegen.ProgramState,
     label_count: u32 = 0,
-    /// Bloco corrente já terminou (return)? Evita emitir código inalcançável.
+    /// Has the current block already ended (return)? Avoids unreachable code.
     terminated: bool = false,
 
     fn init(
@@ -197,7 +197,7 @@ const FnEmitter = struct {
         return &self.checked.symbols[index];
     }
 
-    /// Palavras de registrador que o tipo consome (struct: um por campo).
+    /// Register words the type consumes (struct: one per field).
     fn registerWordsOf(self: *FnEmitter, typ: sema.Type, struct_id: u32) usize {
         return sema.registerWordsOf(self.checked.structs, typ, struct_id);
     }
@@ -210,8 +210,8 @@ const FnEmitter = struct {
     fn emitFunction(self: *FnEmitter, out: *std.ArrayList(u8)) !void {
         self.out = out;
 
-        // `str` consome dois registradores e cada campo de struct um; a
-        // semântica já limita o total.
+        // `str` consumes two registers and each struct field one;
+        // semantics already limits the total.
         var register_words: usize = 0;
         for (self.info.params, 0..) |ptype, i| {
             const struct_id = if (i < self.info.param_struct_ids.len) self.info.param_struct_ids[i] else 0;
@@ -229,7 +229,7 @@ const FnEmitter = struct {
             try self.print("    subq ${d}, %rsp\n", .{frame_bytes});
         }
 
-        // Parâmetros: registradores -> slots. `str` grava ponteiro e tamanho.
+        // Parameters: registers -> slots. `str` stores pointer and length.
         var reg: usize = 0;
         for (self.func.params, 0..) |_, i| {
             const sym = &self.checked.symbols[self.info.symbol_start + i];
@@ -316,10 +316,10 @@ const FnEmitter = struct {
             .return_stmt => |maybe_expr| {
                 if (maybe_expr) |expr| {
                     if (self.info.return_type == .str) {
-                        // Fatia de volta em `%rax` (ponteiro) e `%rdx` (tamanho).
+                        // Slice returned in `%rax` (pointer) and `%rdx` (length).
                         try self.emitStrValue(expr);
                     } else if (self.info.return_type == .aggregate) {
-                        // Struct volta com um registrador por campo.
+                        // A struct returns with one register per field.
                         try self.emitStructReturn(expr);
                     } else {
                         try self.emitExpr(expr);
@@ -398,8 +398,8 @@ const FnEmitter = struct {
 
             .identifier => {
                 const symbol = self.symbolAt(expr.resolved orelse return error.MiscompiledAst);
-                // `str` não cabe em `%eax`: só é copiado/impresso por rotinas
-                // dedicadas, e a semântica recusa usá-lo como escalar.
+                // `str` does not fit in `%eax`: it is only copied/printed by dedicated
+                // routines, and semantics refuses to use it as a scalar.
                 if (symbol.typ == .str) return error.MiscompiledAst;
                 try self.print("    movl -{d}(%rbp), %eax\n", .{slotOffset(symbol.slot)});
             },
@@ -425,8 +425,8 @@ const FnEmitter = struct {
             },
 
             .call => |call| {
-                // Valor de struct não cabe em `%eax`: quem consome usa
-                // `emitStructStore`/`emitStructReturn`/`emitCall` direto.
+                // A struct value does not fit in `%eax`: consumers use
+                // `emitStructStore`/`emitStructReturn`/`emitCall` directly.
                 if (call.callee_fn) |index| {
                     if (self.checked.functions[index].return_type == .aggregate) {
                         return error.UnsupportedNode;
@@ -444,17 +444,17 @@ const FnEmitter = struct {
                 });
             },
 
-            // Valor de struct não cabe em `%eax`: `let`/atribuição tratam o
-            // literal campo a campo em `emitStructStore`.
+            // A struct value does not fit in `%eax`: `let`/assignment handle the
+            // literal field by field in `emitStructStore`.
             .struct_literal => return error.UnsupportedNode,
-            // `str` são dois slots (ponteiro + tamanho), tratados por
-            // `emitStrStore` e `emitPrint`.
+            // `str` is two slots (pointer + length), handled by
+            // `emitStrStore` and `emitPrint`.
             .str_literal => return error.UnsupportedNode,
         }
     }
 
-    /// Copia um valor de struct para os slots de `dst`: literal (cada campo
-    /// avaliado e gravado) ou variável de struct (cópia campo a campo).
+    /// Copies a struct value into the slots of `dst`: literal (each field
+    /// evaluated and stored) or struct variable (field-by-field copy).
     fn emitStructStore(self: *FnEmitter, dst: *const sema.Symbol, value: *ast.Expr) Error!void {
         if (dst.struct_id >= self.checked.structs.len) return error.MiscompiledAst;
         const info = &self.checked.structs[dst.struct_id];
@@ -498,9 +498,9 @@ const FnEmitter = struct {
         }
     }
 
-    /// Deixa um struct em `struct_return_registers`: um por campo, na ordem de
-    /// declaração. Campos são avaliados na pilha para que um não clobbere o
-    /// resultado do outro.
+    /// Leaves a struct in `struct_return_registers`: one per field, in
+    /// declaration order. Fields are evaluated on the stack so that one does not
+    /// clobber another's result.
     fn emitStructReturn(self: *FnEmitter, value: *ast.Expr) Error!void {
         const fields = try self.structFields(self.info.return_struct_id);
         if (fields.len > struct_return_registers.len) return error.UnsupportedNode;
@@ -536,7 +536,7 @@ const FnEmitter = struct {
         }
     }
 
-    /// Empilha um struct campo a campo (para passagem por valor em chamadas).
+    /// Pushes a struct field by field (for by-value argument passing in calls).
     fn emitStructArgsPush(self: *FnEmitter, struct_id: u32, value: *ast.Expr) Error!void {
         const fields = try self.structFields(struct_id);
 
@@ -570,10 +570,10 @@ const FnEmitter = struct {
         }
     }
 
-    /// Grava um valor `str` (ponteiro e tamanho) nos dois slots de `dst`:
-    /// literal direto ou cópia de outra variável `str`.
-    /// Deixa um valor `str` em `%rax` (ponteiro) e `%rdx` (tamanho) — a mesma
-    /// convenção do retorno de função, o que permite reutilizar chamadas.
+    /// Writes a `str` value (pointer and length) into the two slots of `dst`:
+    /// a direct literal or a copy of another `str` variable.
+    /// Leaves a `str` value in `%rax` (pointer) and `%rdx` (length) — the same
+    /// convention as function returns, which lets calls be reused.
     fn emitStrValue(self: *FnEmitter, value: *ast.Expr) Error!void {
         switch (value.kind) {
             .str_literal => |text| {
@@ -602,15 +602,15 @@ const FnEmitter = struct {
         try self.print("    movq %rdx, -{d}(%rbp)\n", .{slotOffset(dst.slot + 1)});
     }
 
-    /// `print(s)`: uma syscall `write(1, ptr, len)` para o texto e outra para a
-    /// quebra de linha. `syscall` não exige alinhamento de pilha e clobbera
-    /// `%rcx`/`%r11`, que não guardam estado entre expressões neste backend.
+    /// `print(s)`: one `write(1, ptr, len)` syscall for the text and another for
+    /// the line break. `syscall` requires no stack alignment and clobbers
+    /// `%rcx`/`%r11`, which hold no state between expressions in this backend.
     fn emitPrint(self: *FnEmitter, call: ast.Expr.Call) Error!void {
         if (call.args.len != 1) return error.MiscompiledAst;
         const arg = call.args[0];
 
-        // `emitStrValue` deixa ponteiro em `%rax` e tamanho em `%rdx`; `write`
-        // espera ponteiro em `%rsi` e tamanho em `%rdx`.
+        // `emitStrValue` leaves the pointer in `%rax` and the length in `%rdx`; `write`
+        // expects the pointer in `%rsi` and the length in `%rdx`.
         try self.emitStrValue(arg);
         try self.print("    movq %rax, %rsi\n", .{});
 
@@ -625,8 +625,8 @@ const FnEmitter = struct {
         self.state.used_print = true;
     }
 
-    /// `print_i32(n)`: avalia o argumento em `%eax`, passa em `%edi` (SysV) e
-    /// chama a rotina compartilhada `kyn_print_i32`.
+    /// `print_i32(n)`: evaluates the argument in `%eax`, passes it in `%edi` (SysV)
+    /// and calls the shared `kyn_print_i32` routine.
     fn emitPrintI32(self: *FnEmitter, call: ast.Expr.Call) Error!void {
         if (call.args.len != 1) return error.MiscompiledAst;
         try self.emitExpr(call.args[0]);
@@ -673,7 +673,7 @@ const FnEmitter = struct {
         }
     }
 
-    /// Curto-circuito: `&&` só avalia o lado direito se o esquerdo for verdadeiro.
+    /// Short-circuit: `&&` only evaluates the right side when the left is true.
     fn emitLogical(self: *FnEmitter, binary: ast.Expr.Binary) Error!void {
         const is_and = binary.op == .and_op; // false => or
         const short_label = try self.label(if (is_and) "and_false" else "or_true");
@@ -712,9 +712,9 @@ const FnEmitter = struct {
         const callee = self.checked.functions[callee_index];
         if (call.args.len != callee.params.len) return error.MiscompiledAst;
 
-        // Cada argumento ocupa 1 registrador, 2 quando é `str` (ponteiro e
-        // tamanho, nesta ordem) e um por campo quando é struct. A semântica já
-        // validou o total.
+        // Each argument takes 1 register, 2 when it is `str` (pointer and
+        // length, in that order) and one per field when it is a struct. Semantics
+        // already validated the total.
         var words: usize = 0;
         for (callee.params, 0..) |ptype, i| {
             const struct_id = if (i < callee.param_struct_ids.len) callee.param_struct_ids[i] else 0;
@@ -722,8 +722,8 @@ const FnEmitter = struct {
         }
         if (words > arg_registers.len) return error.UnsupportedNode;
 
-        // Caminho rápido: com um único argumento nada pode clobberar os
-        // registradores de destino, então movemos direto sem passar pela pilha.
+        // Fast path: with a single argument nothing can clobber the target
+        // registers, so we move directly without going through the stack.
         if (call.args.len == 1 and callee.params[0] != .aggregate) {
             if (callee.params[0] == .str) {
                 try self.emitStrValue(call.args[0]);
@@ -754,8 +754,8 @@ const FnEmitter = struct {
             }
         }
 
-        // Desempilha na ordem inversa: a última palavra empilhada volta para o
-        // registrador de maior índice, preservando a ordem dos argumentos.
+        // Pops in reverse order: the last pushed word goes to the highest
+        // register index, preserving argument order.
         var word: usize = words;
         while (word > 0) {
             word -= 1;
@@ -763,14 +763,14 @@ const FnEmitter = struct {
             try self.print("    movq %rax, {s}\n", .{arg_registers_64[word]});
         }
 
-        // A pilha volta ao alinhamento de 16 bytes antes da chamada,
-        // pois todos os argumentos foram empilhados e desempilhados.
+        // The stack is back to 16-byte alignment before the call,
+        // since every argument was pushed and popped.
         try self.print("    call kyn_{s}\n", .{call.callee});
     }
 };
 
 // ---------------------------------------------------------------------------
-// Testes estruturais do assembly emitido
+// Structural tests of the emitted assembly
 // ---------------------------------------------------------------------------
 
 const testing = std.testing;
@@ -780,7 +780,7 @@ fn emitFixture(f: *support.Fixture) ![]const u8 {
     return emit(f.allocator(), f.program, &f.checked);
 }
 
-test "x86_64: entrypoint chama kyn_main e usa syscall exit" {
+test "x86_64: entrypoint calls kyn_main and uses the exit syscall" {
     var f = try support.Fixture.build("fn main() -> i32 { return 42; }");
     defer f.deinit();
     const asm_text = try emitFixture(&f);
@@ -792,14 +792,14 @@ test "x86_64: entrypoint chama kyn_main e usa syscall exit" {
     try support.expectContains(asm_text, "syscall");
 }
 
-test "x86_64: main void encerra com código zero" {
+test "x86_64: void main exits with code zero" {
     var f = try support.Fixture.build("fn main() -> void { return; }");
     defer f.deinit();
     const asm_text = try emitFixture(&f);
     try support.expectContains(asm_text, "xorl %edi, %edi");
 }
 
-test "x86_64: prólogo, frame e epílogo" {
+test "x86_64: prologue, frame and epilogue" {
     var f = try support.Fixture.build(
         \\fn main() -> i32 {
         \\    var a: i32 = 1;
@@ -818,7 +818,7 @@ test "x86_64: prólogo, frame e epílogo" {
     try support.expectContains(asm_text, "ret");
 }
 
-test "x86_64: divisão e módulo usam idivl" {
+test "x86_64: division and modulo use idivl" {
     var f = try support.Fixture.build(
         \\fn main() -> i32 {
         \\    let q: i32 = 7 / 2;
@@ -832,7 +832,7 @@ test "x86_64: divisão e módulo usam idivl" {
     try support.expectContains(asm_text, "movl %edx, %eax");
 }
 
-test "x86_64: comparações usam setcc" {
+test "x86_64: comparisons use setcc" {
     var f = try support.Fixture.build(
         \\fn main() -> i32 {
         \\    if 1 < 2 { return 1; }
@@ -846,7 +846,7 @@ test "x86_64: comparações usam setcc" {
     try support.expectContains(asm_text, "movzbl %al, %eax");
 }
 
-test "x86_64: if/else e while usam rótulos" {
+test "x86_64: if/else and while use labels" {
     var f = try support.Fixture.build(
         \\fn main() -> i32 {
         \\    var i: i32 = 0;
@@ -864,29 +864,29 @@ test "x86_64: if/else e while usam rótulos" {
     try support.expectContains(asm_text, ".Lmain_endif_");
 }
 
-test "x86_64: chamada passa argumentos em registradores SysV" {
+test "x86_64: call passes arguments in SysV registers" {
     var f = try support.Fixture.build(
         \\fn sub(a: i32, b: i32) -> i32 { return a - b; }
         \\fn main() -> i32 { return sub(10, 4); }
     );
     defer f.deinit();
     const asm_text = try emitFixture(&f);
-    // Com dois argumentos os valores passam pela pilha para preservar a ordem
-    // de avaliação; a volta é na ordem inversa (%rsi antes de %rdi).
+    // With two arguments the values go through the stack to preserve
+    // evaluation order; the pop is in reverse order (%rsi before %rdi).
     try support.expectContains(asm_text, "movl $10, %eax\n    pushq %rax");
     try support.expectContains(asm_text, "movl $4, %eax\n    pushq %rax");
     try support.expectContains(asm_text, "popq %rax\n    movq %rax, %rsi\n    popq %rax\n    movq %rax, %rdi");
     try support.expectContains(asm_text, "call kyn_sub");
 }
 
-test "x86_64: limite de argumentos da semântica coincide com a tabela SysV" {
-    // A semântica valida `str` como duas palavras; a tabela precisa ter o mesmo
-    // tamanho, senão o diagnóstico e o backend divergem silenciosamente.
+test "x86_64: semantics argument limit matches the SysV table" {
+    // Semantics validate `str` as two words; the table must have the same
+    // size, otherwise the diagnostic and the backend diverge silently.
     try testing.expectEqual(sema.max_arg_registers, arg_registers.len);
     try testing.expectEqual(sema.max_arg_registers, arg_registers_64.len);
 }
 
-test "x86_64: struct por valor chega um campo por registrador" {
+test "x86_64: struct by value arrives one field per register" {
     var f = try support.Fixture.build(
         \\struct P { x: i32, y: i32 }
         \\fn eco(p: P) -> P { return p; }
@@ -895,15 +895,15 @@ test "x86_64: struct por valor chega um campo por registrador" {
     defer f.deinit();
     const asm_text = try emitFixture(&f);
 
-    // Slots 1 e 2 do struct (slot 0 é a base interna) recebem %edi e %esi.
+    // Struct slots 1 and 2 (slot 0 is the internal base) receive %edi and %esi.
     try support.expectContains(asm_text, "movl %edi, -16(%rbp)");
     try support.expectContains(asm_text, "movl %esi, -24(%rbp)");
-    // `return p` devolve campo a campo em %eax e %edx.
+    // `return p` returns field by field in %eax and %edx.
     try support.expectContains(asm_text, "movl -16(%rbp), %eax");
     try support.expectContains(asm_text, "movl -24(%rbp), %edx");
 }
 
-test "x86_64: chamada com struct empilha um campo por vez" {
+test "x86_64: call with struct pushes one field at a time" {
     var f = try support.Fixture.build(
         \\struct P { x: i32, y: i32 }
         \\fn soma(p: P) -> i32 { return p.x + p.y; }
@@ -919,7 +919,7 @@ test "x86_64: chamada com struct empilha um campo por vez" {
     try support.expectContains(asm_text, "popq %rax\n    movq %rax, %rsi\n    popq %rax\n    movq %rax, %rdi\n    call kyn_soma");
 }
 
-test "x86_64: let de chamada que devolve struct grava os campos" {
+test "x86_64: let of a call returning struct stores the fields" {
     var f = try support.Fixture.build(
         \\struct P { x: i32, y: i32 }
         \\fn eco(p: P) -> P { return p; }
@@ -936,7 +936,7 @@ test "x86_64: let de chamada que devolve struct grava os campos" {
     try support.expectContains(asm_text, "movl %edx, -24(%rbp)");
 }
 
-test "x86_64: struct aninhado em expressão usa a pilha na ordem certa" {
+test "x86_64: nested struct in an expression uses the stack in order" {
     var f = try support.Fixture.build(
         \\struct P { x: i32, y: i32 }
         \\fn eco(p: P) -> P { return p; }
@@ -946,13 +946,13 @@ test "x86_64: struct aninhado em expressão usa a pilha na ordem certa" {
     defer f.deinit();
     const asm_text = try emitFixture(&f);
 
-    // O struct devolvido por `eco` é empilhado campo a campo (%rax/%rdx).
+    // The struct returned by `echo` is pushed field by field (%rax/%rdx).
     try support.expectContains(asm_text, "call kyn_eco");
     try support.expectContains(asm_text, "pushq %rax\n    pushq %rdx");
     try support.expectContains(asm_text, "call kyn_soma");
 }
 
-test "x86_64: parâmetro 'str' chega em %rdi/%rsi e é salvo em dois slots" {
+test "x86_64: 'str' parameter arrives in %rdi/%rsi and is kept in two slots" {
     var f = try support.Fixture.build(
         \\fn eco(s: str) -> str { return s; }
         \\fn main() -> i32 { return 0; }
@@ -962,13 +962,13 @@ test "x86_64: parâmetro 'str' chega em %rdi/%rsi e é salvo em dois slots" {
 
     try support.expectContains(asm_text, "movq %rdi, -8(%rbp)");
     try support.expectContains(asm_text, "movq %rsi, -16(%rbp)");
-    // `return s` devolve ponteiro em %rax e tamanho em %rdx.
+    // `return s` returns the pointer in %rax and the length in %rdx.
     try support.expectContains(asm_text, "movq -8(%rbp), %rax");
     try support.expectContains(asm_text, "movq -16(%rbp), %rdx");
     try support.expectContains(asm_text, "subq $16, %rsp");
 }
 
-test "x86_64: chamada com 'str' empilha duas palavras por argumento" {
+test "x86_64: call with 'str' pushes two words per argument" {
     var f = try support.Fixture.build(
         \\fn par(a: str, b: str) -> i32 {
         \\    print(a);
@@ -980,7 +980,7 @@ test "x86_64: chamada com 'str' empilha duas palavras por argumento" {
     const asm_text = try emitFixture(&f);
 
     try support.expectContains(asm_text, "pushq %rax\n    pushq %rdx");
-    // Ponteiro/tamanho chegam em %rdi/%rsi e %rdx/%rcx; desempilhamento é inverso.
+    // Pointer/length arrive in %rdi/%rsi and %rdx/%rcx; the pop order is reversed.
     try support.expectContains(asm_text, "movq %rax, %rcx");
     try support.expectContains(asm_text, "movq %rax, %rdx");
     try support.expectContains(asm_text, "movq %rax, %rsi");
@@ -988,7 +988,7 @@ test "x86_64: chamada com 'str' empilha duas palavras por argumento" {
     try support.expectContains(asm_text, "call kyn_par");
 }
 
-test "x86_64: chamada de um argumento não passa pela pilha" {
+test "x86_64: single-argument call does not go through the stack" {
     var f = try support.Fixture.build(
         \\fn eco(s: str) -> str { return s; }
         \\fn dobro(n: i32) -> i32 { return n + n; }
@@ -1001,7 +1001,7 @@ test "x86_64: chamada de um argumento não passa pela pilha" {
     try support.expectContains(asm_text, "movl %eax, %edi\n    call kyn_dobro");
 }
 
-test "x86_64: and/or têm curto-circuito" {
+test "x86_64: and/or short-circuit" {
     var f = try support.Fixture.build(
         \\fn main() -> i32 {
         \\    let b: bool = 1 < 2 && 2 < 3;
@@ -1015,7 +1015,7 @@ test "x86_64: and/or têm curto-circuito" {
     try support.expectContains(asm_text, ".Lmain_and_end_");
 }
 
-test "x86_64: struct grava campos em slots consecutivos" {
+test "x86_64: struct stores fields in consecutive slots" {
     var f = try support.Fixture.build(
         \\struct Ponto { x: i32, y: i32 }
         \\fn main() -> i32 {
@@ -1027,16 +1027,16 @@ test "x86_64: struct grava campos em slots consecutivos" {
     defer f.deinit();
     const asm_text = try emitFixture(&f);
 
-    // p ocupa o slot 0 (base) e os campos os slots 1 e 2 => offsets -16 e -24.
+    // p takes slot 0 (base) and the fields slots 1 and 2 => offsets -16 and -24.
     try support.expectContains(asm_text, "movl %eax, -16(%rbp)");
     try support.expectContains(asm_text, "movl %eax, -24(%rbp)");
     try support.expectContains(asm_text, "movl -16(%rbp), %eax");
     try support.expectContains(asm_text, "movl -24(%rbp), %eax");
-    // frame: 3 slots de 8 bytes arredondados para 16 => 32 bytes.
+    // frame: 3 slots of 8 bytes rounded up to 16 => 32 bytes.
     try support.expectContains(asm_text, "subq $32, %rsp");
 }
 
-test "x86_64: atribuição de struct copia campo a campo" {
+test "x86_64: struct assignment copies field by field" {
     var f = try support.Fixture.build(
         \\struct P { v: i32, w: bool }
         \\fn main() -> i32 {
@@ -1049,12 +1049,12 @@ test "x86_64: atribuição de struct copia campo a campo" {
     );
     defer f.deinit();
     const asm_text = try emitFixture(&f);
-    // a: slots 1,2 ; b: slots 4,5 ; cópia lê de a e grava em b.
+    // a: slots 1,2 ; b: slots 4,5 ; the copy reads from a and writes to b.
     try support.expectContains(asm_text, "movl -16(%rbp), %eax");
     try support.expectContains(asm_text, "movl %eax, -40(%rbp)");
 }
 
-/// Valor inicial de um campo dentro de um literal de struct, por nome.
+/// Initial value of a field inside a struct literal, by name.
 fn findFieldInit(inits: []ast.Expr.FieldInit, name: []const u8) ?*ast.Expr {
     for (inits) |init| {
         if (std.mem.eql(u8, init.name, name)) return init.value;
@@ -1062,7 +1062,7 @@ fn findFieldInit(inits: []ast.Expr.FieldInit, name: []const u8) ?*ast.Expr {
     return null;
 }
 
-test "x86_64: print emite write do texto e da quebra de linha" {
+test "x86_64: print emits write for the text and the line break" {
     var f = try support.Fixture.build(
         \\fn main() -> i32 {
         \\    print("ok");
@@ -1078,13 +1078,13 @@ test "x86_64: print emite write do texto e da quebra de linha" {
     try support.expectContains(asm_text, "movl $1, %eax");
     try support.expectContains(asm_text, "movl $1, %edi");
     try support.expectContains(asm_text, "syscall");
-    // Texto e quebra de linha em .rodata, como listas de bytes.
+    // Text and line break in .rodata, as byte lists.
     try support.expectContains(asm_text, ".section .rodata");
     try support.expectContains(asm_text, ".Lstr0:\n    .byte 111, 107");
     try support.expectContains(asm_text, ".Lnl:\n    .byte 10");
 }
 
-test "x86_64: variável str ocupa dois slots (ponteiro e tamanho)" {
+test "x86_64: str variable occupies two slots (pointer and length)" {
     var f = try support.Fixture.build(
         \\fn main() -> i32 {
         \\    var s: str = "abc";
@@ -1095,7 +1095,7 @@ test "x86_64: variável str ocupa dois slots (ponteiro e tamanho)" {
     defer f.deinit();
     const asm_text = try emitFixture(&f);
 
-    // slot 0 guarda o ponteiro (-8) e o slot 1 o tamanho (-16).
+    // slot 0 holds the pointer (-8) and slot 1 the length (-16).
     try support.expectContains(asm_text, "movq %rax, -8(%rbp)");
     try support.expectContains(asm_text, "movq $3, %rdx");
     try support.expectContains(asm_text, "movq %rdx, -16(%rbp)");
@@ -1105,7 +1105,7 @@ test "x86_64: variável str ocupa dois slots (ponteiro e tamanho)" {
     try support.expectContains(asm_text, "subq $16, %rsp");
 }
 
-test "x86_64: literais de string repetidos compartilham o rótulo" {
+test "x86_64: repeated string literals share the label" {
     var f = try support.Fixture.build(
         \\fn main() -> i32 {
         \\    print("ok");
@@ -1121,7 +1121,7 @@ test "x86_64: literais de string repetidos compartilham o rótulo" {
     try testing.expect(std.mem.indexOf(u8, asm_text, ".Lstr1:") == null);
 }
 
-test "x86_64: string vazia mantém o rótulo válido e escreve zero bytes" {
+test "x86_64: empty string keeps the label valid and writes zero bytes" {
     var f = try support.Fixture.build(
         \\fn main() -> i32 {
         \\    print("");
@@ -1135,7 +1135,7 @@ test "x86_64: string vazia mantém o rótulo válido e escreve zero bytes" {
     try support.expectContains(asm_text, "movq $0, %rdx");
 }
 
-test "x86_64: print_i32 chama a rotina decimal em .text" {
+test "x86_64: print_i32 calls the decimal routine in .text" {
     var f = try support.Fixture.build(
         \\fn main() -> i32 {
         \\    print_i32(42);
@@ -1148,17 +1148,17 @@ test "x86_64: print_i32 chama a rotina decimal em .text" {
     try support.expectContains(asm_text, "movl %eax, %edi");
     try support.expectContains(asm_text, "call kyn_print_i32");
     try support.expectContains(asm_text, ".type kyn_print_i32, @function");
-    // Conversão: divisão unsigned por 10 e sinal com '-'.
+    // Conversion: unsigned division by 10 and the sign with '-'.
     try support.expectContains(asm_text, "divl %r9d");
     try support.expectContains(asm_text, "movb $45, (%rsi)");
     try support.expectContains(asm_text, ".Lnl:\n    .byte 10");
-    // O código fica em .text, antes dos dados: nunca dentro de .rodata.
+    // The code lives in .text, before the data: never inside .rodata.
     const helper_at = std.mem.indexOf(u8, asm_text, ".type kyn_print_i32").?;
     const rodata_at = std.mem.indexOf(u8, asm_text, ".section .rodata").?;
     try testing.expect(helper_at < rodata_at);
 }
 
-test "x86_64: rotina decimal é emitida uma única vez" {
+test "x86_64: decimal routine is emitted once" {
     var f = try support.Fixture.build(
         \\fn main() -> i32 {
         \\    print_i32(1);
@@ -1174,7 +1174,7 @@ test "x86_64: rotina decimal é emitida uma única vez" {
     try testing.expectEqual(@as(usize, 3), std.mem.count(u8, asm_text, "call kyn_print_i32"));
 }
 
-test "x86_64: programa sem print_i32 não emite a rotina decimal" {
+test "x86_64: program without print_i32 does not emit the decimal routine" {
     var f = try support.Fixture.build(
         \\fn main() -> i32 {
         \\    print("ok");

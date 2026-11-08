@@ -1,4 +1,4 @@
-// Erro esperado: comparação de 'str' ainda não é suportada.
+// Expected error: comparing 'str' is not supported yet.
 fn main() -> i32 {
     let a = "x";
     let b = "x";

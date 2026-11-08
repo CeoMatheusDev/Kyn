@@ -1,22 +1,22 @@
-//! Backend LLVM IR (texto).
+//! LLVM IR backend (text).
 //!
-//! Emite IR textual para o subconjunto atual: funções `i32`/`void`, variáveis
-//! (`i32`/`bool`), aritmética, comparações, `&&`/`||` com curto-circuito,
-//! `if`/`else`, `while` e chamadas diretas de função.
+//! Emits textual IR for the current subset: `i32`/`void` functions, `i32`/`bool`
+//! variables, arithmetic, comparisons, `&&`/`||` with short-circuit,
+//! `if`/`else`, `while` and direct function calls.
 //!
-//! Structs: como valores de struct só existem em variáveis locais (sem
-//! parâmetros, retorno, ponteiros ou campos de struct), cada campo ganha seu
-//! próprio `alloca` — substituição escalar de um struct que nunca escapa. Isso
-//! dispensa tipos agregados e `getelementptr` sem mudar a semântica observável.
+//! Structs: struct values only exist in local variables (no parameters,
+//! returns, pointers or struct fields), so each field gets its own
+//! `alloca` — scalar replacement of a struct that never escapes. That
+//! removes aggregate types and `getelementptr` without changing observable
 //!
-//! `str` é uma fatia (ponteiro + tamanho): em variáveis ocupa dois `alloca`
-//! (`ptr` e `i64`); em chamadas vira dois parâmetros (`ptr` + `i64`) e o
-//! retorno usa o agregado `{ ptr, i64 }` com `insertvalue`/`extractvalue`.
+//! `str` is a slice (pointer + length): in variables it takes two `alloca`s
+//! (`ptr` and `i64`); in calls it becomes two parameters (`ptr` + `i64`) and
+//! the return uses the aggregate `{ ptr, i64 }` with `insertvalue`/`extractvalue`.
 //!
-//! Este emissor não é validado por um montador LLVM no ambiente de
-//! desenvolvimento (não há `llc`/`clang` disponíveis); os testes verificam a
-//! estrutura do texto emitido. Para validação executável de ponta a ponta, veja
-//! o backend `x86_64_asm`, que é montado e ligado com `as`/`ld`.
+//! This emitter is not validated by an LLVM assembler in the development
+//! environment (no `llc`/`clang` available); the tests check the structure of
+//! the emitted text. For end-to-end executable validation see the
+//! `x86_64_asm` backend, which is assembled and linked with `as`/`ld`.
 
 const std = @import("std");
 const ast = @import("../ast/ast.zig");
@@ -42,14 +42,14 @@ pub fn emit(
         try out.append(arena, '\n');
     }
 
-    // `print`/`print_i32` usam `write` da libc: o IR declara o símbolo e cada
-    // string vira uma constante privada em lista de bytes (sem escapes).
+    // `print`/`print_i32` use the libc `write`: the IR declares the symbol and each
+    // string becomes a private byte-list constant (no escapes).
     const needs_write = state.strs.texts.items.len > 0 or state.used_print or state.used_print_i32;
     if (needs_write) {
         try out.print(arena, "declare i64 @write(i32, ptr, i64)\n\n", .{});
     }
 
-    // Formatação decimal: função interna emitida uma única vez por módulo.
+    // Decimal formatting: internal function emitted once per module.
     if (state.used_print_i32) {
         try out.appendSlice(arena, kyn_print_i32_ir);
     }
@@ -80,15 +80,15 @@ fn llvmType(typ: sema.Type) codegen.Error![]const u8 {
         .i32 => "i32",
         .bool => "i1",
         .void => "void",
-        // Struct em LLVM é representado campo a campo (substituição escalar).
+        // A struct in LLVM is represented field by field (scalar replacement).
         .aggregate => error.UnsupportedType,
-        // `str` é ponteiro + tamanho: representado por dois slots.
+        // `str` is pointer + length: represented by two slots.
         .str => error.UnsupportedType,
         .unknown => error.UnsupportedType,
     };
 }
 
-/// Tipo de retorno de uma função: `str` volta como par `{ ptr, i64 }`.
+/// Return type of a function: `str` comes back as a `{ ptr, i64 }` pair.
 fn llvmReturnType(typ: sema.Type) codegen.Error![]const u8 {
     return if (typ == .str) "{ ptr, i64 }" else llvmType(typ);
 }
@@ -120,7 +120,7 @@ const FnEmitter = struct {
     func: *const ast.Function,
     checked: *const sema.Checked,
     info: sema.FunctionInfo,
-    /// Estado compartilhado do programa (pool de strings e uso de `print`).
+    /// Shared program state (string pool and `print` usage).
     state: *codegen.ProgramState,
 
     blocks: std.ArrayList(Block) = .empty,
@@ -196,9 +196,9 @@ const FnEmitter = struct {
         return self.checked.structs[struct_id].fields;
     }
 
-    /// Tipo agregado do IR para um struct: `{ i32, i1, ... }`, na ordem de
-    /// declaração. Usado só no retorno — parâmetros são achatados em valores
-    /// escalares, como no backend nativo.
+    /// IR aggregate type for a struct: `{ i32, i1, ... }`, in declaration
+    /// order. Used only in returns — parameters are flattened into scalar
+    /// values, as in the native backend.
     fn structType(self: *FnEmitter, struct_id: u32) Error![]const u8 {
         const fields = try self.structFields(struct_id);
         var text: std.ArrayList(u8) = .empty;
@@ -216,9 +216,9 @@ const FnEmitter = struct {
         return llvmReturnType(typ);
     }
 
-    /// Valores campo a campo de uma expressão de struct, já em SSA:
-    /// literal (cada campo avaliado), variável (`load` por campo) ou chamada
-    /// que devolve struct (`extractvalue` por campo).
+    /// Field-by-field values of a struct expression, already in SSA:
+    /// literal (each field evaluated), variable (`load` per field) or call
+    /// returning a struct (`extractvalue` per field).
     fn structFieldValues(self: *FnEmitter, expr: *ast.Expr, struct_id: u32) Error![][]const u8 {
         const fields = try self.structFields(struct_id);
         const values = try self.arena.alloc([]const u8, fields.len);
@@ -259,7 +259,7 @@ const FnEmitter = struct {
         return values;
     }
 
-    /// Chamada cujo retorno é struct: devolve o temporário com o agregado.
+    /// Call whose return is a struct: returns the temporary holding the aggregate.
     fn emitStructCall(self: *FnEmitter, call: ast.Expr.Call) Error![]const u8 {
         const fn_index = call.callee_fn orelse return error.MiscompiledAst;
         const callee = self.checked.functions[fn_index];
@@ -274,12 +274,12 @@ const FnEmitter = struct {
     fn emitFunction(self: *FnEmitter) !void {
         try self.startBlock("entry");
 
-        // Alocação de todos os slots de uma vez, no bloco de entrada.
+        // All slots allocated at once, in the entry block.
         const sym_start: usize = self.info.symbol_start;
         const sym_end: usize = sym_start + self.info.symbol_count;
         for (self.checked.symbols[sym_start..sym_end]) |sym| {
             if (sym.typ == .str) {
-                // Ponteiro no slot base e tamanho no slot seguinte.
+                // Pointer in the base slot and length in the following slot.
                 try self.emit("  {s} = alloca ptr, align 8\n", .{try self.varName(sym.slot)});
                 try self.emit("  {s} = alloca i64, align 8\n", .{try self.varName(sym.slot + 1)});
                 continue;
@@ -300,7 +300,7 @@ const FnEmitter = struct {
             try self.emit("  {s} = alloca {s}, align {d}\n", .{ name, ty, align_value });
         }
 
-        // Parâmetros são copiados para os seus slots (str: dois argumentos).
+        // Parameters are copied into their slots (str: two arguments).
         var arg_index: usize = 0;
         for (self.func.params, 0..) |_, i| {
             const sym = &self.checked.symbols[sym_start + i];
@@ -333,16 +333,16 @@ const FnEmitter = struct {
             if (self.info.return_type == .void) {
                 try self.retVoid();
             } else {
-                // A semântica garante `return` em todos os caminhos; este
-                // terminador é apenas uma salvaguarda estrutural do IR.
+                // Semantics guarantees `return` on every path; this
+                // terminator is only a structural safeguard for the IR.
                 try self.emit("  unreachable\n", .{});
                 self.block().terminated = true;
             }
         }
 
-        // Todo bloco básico precisa terminar com `ret`, `br` ou `unreachable`.
-        // Blocos que só são alcançados por desvios condicionais (por exemplo o
-        // `if_end` quando ambos os ramos retornam) são fechados aqui.
+        // Every basic block must end with `ret`, `br` or `unreachable`.
+        // Blocks only reached by conditional branches (for instance
+        // `if_end` when both branches return) are closed here.
         for (self.blocks.items) |*b| {
             if (b.terminated) continue;
             try b.body.appendSlice(self.arena, "  unreachable\n");
@@ -357,7 +357,7 @@ const FnEmitter = struct {
             const param_type = self.info.params[i];
             const struct_id = if (i < self.info.param_struct_ids.len) self.info.param_struct_ids[i] else 0;
             if (param_type == .aggregate) {
-                // Struct: um argumento por campo, na ordem de declaração.
+                // Struct: one argument per field, in declaration order.
                 const fields = try self.structFields(struct_id);
                 for (fields) |field| {
                     if (arg_index != 0) try signature.appendSlice(self.arena, ", ");
@@ -368,7 +368,7 @@ const FnEmitter = struct {
             }
             if (arg_index != 0) try signature.appendSlice(self.arena, ", ");
             if (param_type == .str) {
-                // Fatia: ponteiro e tamanho ocupam dois argumentos.
+                // Slice: pointer and length take two arguments.
                 try signature.print(self.arena, "ptr %arg{d}, i64 %arg{d}", .{ arg_index, arg_index + 1 });
                 arg_index += 2;
             } else {
@@ -462,7 +462,7 @@ const FnEmitter = struct {
                 } else if (self.info.return_type == .aggregate) {
                     const expr = maybe_expr orelse return error.MiscompiledAst;
                     const aggregate_type = try self.structType(self.info.return_struct_id);
-                    // Chamada que devolve struct já é o agregado: devolve direto.
+                    // A call returning a struct already is the aggregate: return it directly.
                     if (expr.kind == .call) {
                         const direct = try self.emitStructCall(expr.kind.call);
                         try self.emit("  ret {s} {s}\n", .{ aggregate_type, direct });
@@ -552,8 +552,8 @@ const FnEmitter = struct {
 
             .identifier => {
                 const symbol = self.symbolAt(expr.resolved orelse return error.MiscompiledAst);
-                // `str` são dois slots: só é copiado/impresso por rotinas
-                // dedicadas, e a semântica recusa usá-lo como escalar.
+                // `str` is two slots: it is only copied/printed by dedicated
+                // routines, and semantics refuses to use it as a scalar.
                 if (symbol.typ == .str) return error.MiscompiledAst;
                 const ty = try llvmType(symbol.typ);
                 const align_value = try typeAlign(symbol.typ);
@@ -584,19 +584,19 @@ const FnEmitter = struct {
                 return .{ .text = result, .typ = field_type };
             },
 
-            // Struct completo não é um operando: `let`/atribuição o tratam
-            // campo a campo em `emitStructStore`.
+            // A whole struct is not an operand: `let`/assignment handle it
+            // field by field in `emitStructStore`.
             .struct_literal => return error.UnsupportedNode,
-            // `str` são dois slots (ponteiro + tamanho), tratados por
-            // `emitStrStore` e `emitPrint`.
+            // `str` is two slots (pointer + length), handled by
+            // `emitStrStore` and `emitPrint`.
             .str_literal => return error.UnsupportedNode,
         }
     }
 
-    /// Grava um valor `str` (ponteiro e tamanho) nos dois slots de `dst`:
-    /// literal direto ou cópia de outra variável `str`.
-    /// Operandos textuais de um valor `str`: ponteiro e tamanho. Cobre literal,
-    /// variável e chamada que devolve `str` (via `extractvalue`).
+    /// Writes a `str` value (pointer and length) into the two slots of `dst`:
+    /// a direct literal or a copy of another `str` variable.
+    /// Textual operands of a `str` value: pointer and length. Covers literal,
+    /// variable and call returning `str` (through `extractvalue`).
     const StrOperand = struct { ptr: []const u8, len: []const u8 };
 
     fn strOperand(self: *FnEmitter, expr: *ast.Expr) Error!StrOperand {
@@ -637,9 +637,9 @@ const FnEmitter = struct {
         try self.emit("  store i64 {s}, ptr {s}, align 8\n", .{ src.len, try self.varName(dst.slot + 1) });
     }
 
-    /// `print(s)`: duas chamadas a `write` da libc — o texto e a quebra de
-    /// linha. O resultado de `write` é descartado (a linguagem não expõe I/O
-    /// de baixo nível ainda).
+    /// `print(s)`: two libc `write` calls — the text and the line
+    /// break. The `write` result is discarded (the language exposes no I/O
+    /// primitives yet).
     fn emitPrint(self: *FnEmitter, call: ast.Expr.Call) Error!Operand {
         if (call.args.len != 1) return error.MiscompiledAst;
         const arg = call.args[0];
@@ -651,8 +651,8 @@ const FnEmitter = struct {
         return .{ .text = "", .typ = .void };
     }
 
-    /// Copia um struct para os slots de `dst`: literal, outra variável ou
-    /// chamada que devolve struct (campo a campo, via `structFieldValues`).
+    /// Copies a struct into the slots of `dst`: literal, another variable or
+    /// call returning a struct (field by field, through `structFieldValues`).
     fn emitStructStore(self: *FnEmitter, dst: *const sema.Symbol, value: *ast.Expr) Error!void {
         const fields = try self.structFields(dst.struct_id);
         const values = try self.structFieldValues(value, dst.struct_id);
@@ -711,7 +711,7 @@ const FnEmitter = struct {
         };
     }
 
-    /// `&&` e `||` com curto-circuito, usando blocos e `phi`.
+    /// `&&` and `||` with short-circuit, using blocks and `phi`.
     fn emitLogical(self: *FnEmitter, binary: ast.Expr.Binary) Error!Operand {
         const lhs = try self.emitExpr(binary.lhs);
         const is_and = binary.op == .and_op;
@@ -740,7 +740,7 @@ const FnEmitter = struct {
         return .{ .text = result, .typ = .bool };
     }
 
-    /// `print_i32(n)`: chama a rotina interna de formatação decimal.
+    /// `print_i32(n)`: calls the internal decimal formatting routine.
     fn emitPrintI32(self: *FnEmitter, call: ast.Expr.Call) Error!Operand {
         if (call.args.len != 1) return error.MiscompiledAst;
         const value = try self.emitExpr(call.args[0]);
@@ -750,8 +750,8 @@ const FnEmitter = struct {
         return .{ .text = "", .typ = .void };
     }
 
-    /// Lista de argumentos no formato do IR. `str` contribui com dois
-    /// (`ptr` + `i64`), na ordem em que a assinatura os declara.
+    /// Argument list in IR form. `str` contributes two
+    /// (`ptr` + `i64`), in the order the signature declares them.
     fn emitArgs(
         self: *FnEmitter,
         call: ast.Expr.Call,
@@ -763,7 +763,7 @@ const FnEmitter = struct {
             const ptype = if (i < params.len) params[i] else return error.MiscompiledAst;
             const struct_id = if (i < param_struct_ids.len) param_struct_ids[i] else 0;
             if (ptype == .aggregate) {
-                // Struct vira um argumento por campo, na ordem de declaração.
+                // A struct becomes one argument per field, in declaration order.
                 const fields = try self.structFields(struct_id);
                 const values = try self.structFieldValues(arg, struct_id);
                 for (fields, 0..) |field, field_index| {
@@ -785,7 +785,7 @@ const FnEmitter = struct {
         return args.items;
     }
 
-    /// Chamada cujo retorno é `str`: devolve o temporário com o par `{ptr, i64}`.
+    /// Call whose return is `str`: returns the temporary holding the `{ptr, i64}` pair.
     fn emitStrCall(self: *FnEmitter, call: ast.Expr.Call) Error![]const u8 {
         const fn_index = call.callee_fn orelse return error.MiscompiledAst;
         const callee = self.checked.functions[fn_index];
@@ -803,7 +803,7 @@ const FnEmitter = struct {
 
         const fn_index = call.callee_fn orelse return error.MiscompiledAst;
         const callee = self.checked.functions[fn_index];
-        // `str` e struct não cabem em um `Operand`: quem os consome usa
+        // `str` and struct do not fit in an `Operand`: consumers use
         // `strOperand`/`emitStructCall`.
         if (callee.return_type == .str) return error.UnsupportedNode;
         if (callee.return_type == .aggregate) return error.UnsupportedNode;
@@ -822,12 +822,12 @@ const FnEmitter = struct {
     }
 };
 
-/// Corpo de `@kyn_print_i32`, emitido quando `print_i32` é usado.
+/// Body of `@kyn_print_i32`, emitted when `print_i32` is used.
 ///
-/// Buffer de 12 bytes escrito de trás para frente: no máximo 10 dígitos mais o
-/// sinal. `sub i32 0, %arg0` é aritmética modular (sem `nsw`), então INT_MIN
-/// vira 0x80000000 e `udiv` produz 2147483648 — o texto sai como
-/// `-2147483648`, correto.
+/// 12-byte buffer written back to front: at most 10 digits plus the
+/// sign. `sub i32 0, %arg0` is modular arithmetic (no `nsw`), so INT_MIN
+/// becomes 0x80000000 and `udiv` produces 2147483648 — the text comes out as
+/// `-2147483648`, which is correct.
 const kyn_print_i32_ir =
     \\define internal void @kyn_print_i32(i32 %arg0) {
     \\entry:
@@ -877,7 +877,7 @@ fn appendIndented(out: *std.ArrayList(u8), arena: std.mem.Allocator, text: []con
 }
 
 // ---------------------------------------------------------------------------
-// Testes estruturais do IR emitido
+// Structural tests of the emitted IR
 // ---------------------------------------------------------------------------
 
 const testing = std.testing;
@@ -887,7 +887,7 @@ fn emitFixture(f: *support.Fixture) ![]const u8 {
     return emit(f.allocator(), f.program, &f.checked);
 }
 
-test "llvm: função main trivial" {
+test "llvm: trivial main function" {
     var f = try support.Fixture.build("fn main() -> i32 { return 7; }");
     defer f.deinit();
     const ir = try emitFixture(&f);
@@ -897,7 +897,7 @@ test "llvm: função main trivial" {
     try support.expectAllBlocksTerminated(ir);
 }
 
-test "llvm: aritmética é emitida com a instrução correta" {
+test "llvm: arithmetic is emitted with the right instruction" {
     var f = try support.Fixture.build(
         \\fn main() -> i32 {
         \\    let a: i32 = 2 + 3;
@@ -917,7 +917,7 @@ test "llvm: aritmética é emitida com a instrução correta" {
     try support.expectAllBlocksTerminated(ir);
 }
 
-test "llvm: comparação produz i1 e bool usa alinhamento 1" {
+test "llvm: comparison produces i1 and bool uses alignment 1" {
     var f = try support.Fixture.build(
         \\fn main() -> i32 {
         \\    let ok: bool = 1 < 2;
@@ -948,7 +948,7 @@ test "llvm: and/or usam blocos e phi" {
     try support.expectAllBlocksTerminated(ir);
 }
 
-test "llvm: while gera laço com rótulos próprios" {
+test "llvm: while generates a loop with its own labels" {
     var f = try support.Fixture.build(
         \\fn main() -> i32 {
         \\    var i: i32 = 0;
@@ -964,7 +964,7 @@ test "llvm: while gera laço com rótulos próprios" {
     try support.expectAllBlocksTerminated(ir);
 }
 
-test "llvm: chamada de função usa a assinatura resolvida" {
+test "llvm: function call uses the resolved signature" {
     var f = try support.Fixture.build(
         \\fn add(a: i32, b: i32) -> i32 { return a + b; }
         \\fn main() -> i32 { return add(1, 2); }
@@ -977,7 +977,7 @@ test "llvm: chamada de função usa a assinatura resolvida" {
     try support.expectAllBlocksTerminated(ir);
 }
 
-test "llvm: função void retorna com ret void" {
+test "llvm: void function returns with ret void" {
     var f = try support.Fixture.build("fn main() -> void { return; }");
     defer f.deinit();
     const ir = try emitFixture(&f);
@@ -986,7 +986,7 @@ test "llvm: função void retorna com ret void" {
     try support.expectAllBlocksTerminated(ir);
 }
 
-test "llvm: código após return não é emitido" {
+test "llvm: code after return is not emitted" {
     var f = try support.Fixture.build(
         \\fn main() -> i32 {
         \\    return 1;
@@ -999,7 +999,7 @@ test "llvm: código após return não é emitido" {
     try support.expectAllBlocksTerminated(ir);
 }
 
-test "llvm: struct vira um alloca por campo (substituição escalar)" {
+test "llvm: struct becomes one alloca per field (scalar replacement)" {
     var f = try support.Fixture.build(
         \\struct Ponto { x: i32, y: bool }
         \\fn main() -> i32 {
@@ -1018,11 +1018,11 @@ test "llvm: struct vira um alloca por campo (substituição escalar)" {
     try support.expectContains(ir, "store i1 true, ptr %v2, align 1");
     try support.expectContains(ir, "load i32, ptr %v1, align 4");
     try support.expectContains(ir, "ret i32");
-    // Sem tipos agregados: struct nunca aparece como tipo LLVM.
+    // No aggregate types: a struct never appears as an LLVM type.
     try std.testing.expect(std.mem.indexOf(u8, ir, "alloca %") == null);
 }
 
-test "llvm: cópia de struct carrega e grava cada campo" {
+test "llvm: struct copy loads and stores each field" {
     var f = try support.Fixture.build(
         \\struct P { a: i32, b: i32 }
         \\fn main() -> i32 {
@@ -1039,7 +1039,7 @@ test "llvm: cópia de struct carrega e grava cada campo" {
     try support.expectContains(ir, "ptr %v4, align 4");
 }
 
-/// Valor inicial de um campo dentro de um literal de struct, por nome.
+/// Initial value of a field inside a struct literal, by name.
 fn findFieldInit(inits: []ast.Expr.FieldInit, name: []const u8) ?*ast.Expr {
     for (inits) |init| {
         if (std.mem.eql(u8, init.name, name)) return init.value;
@@ -1047,7 +1047,7 @@ fn findFieldInit(inits: []ast.Expr.FieldInit, name: []const u8) ?*ast.Expr {
     return null;
 }
 
-test "llvm: print declara e chama write com a constante da string" {
+test "llvm: print declares and calls write with the string constant" {
     var f = try support.Fixture.build(
         \\fn main() -> i32 {
         \\    print("ok");
@@ -1087,7 +1087,7 @@ test "llvm: str vira dois allocas (ponteiro e tamanho)" {
     try support.expectAllBlocksTerminated(ir);
 }
 
-test "llvm: 'str' por valor vira par de parâmetros e retorno agregado" {
+test "llvm: 'str' by value becomes a parameter pair and an aggregate return" {
     var f = try support.Fixture.build(
         \\fn eco(s: str) -> str { return s; }
         \\fn main() -> i32 { print(eco("kyn")); return 0; }
@@ -1095,18 +1095,18 @@ test "llvm: 'str' por valor vira par de parâmetros e retorno agregado" {
     defer f.deinit();
     const ir = try emitFixture(&f);
 
-    // O parâmetro `str` é expandido em ponteiro + tamanho, nesta ordem.
+    // The `str` parameter is expanded into pointer + length, in that order.
     try support.expectContains(ir, "define { ptr, i64 } @eco(ptr %arg0, i64 %arg1)");
     try support.expectContains(ir, "store ptr %arg0, ptr %v0, align 8");
     try support.expectContains(ir, "store i64 %arg1, ptr %v1, align 8");
-    // O retorno agregado é montado campo a campo.
+    // The aggregate return is built field by field.
     try support.expectContains(ir, "insertvalue { ptr, i64 } undef, ptr %t0, 0");
     try support.expectContains(ir, "insertvalue { ptr, i64 } %t2, i64 %t1, 1");
     try support.expectContains(ir, "ret { ptr, i64 } %t3");
     try support.expectAllBlocksTerminated(ir);
 }
 
-test "llvm: chamada com 'str' extrai ponteiro e tamanho do agregado" {
+test "llvm: call with 'str' extracts pointer and length from the aggregate" {
     var f = try support.Fixture.build(
         \\fn eco(s: str) -> str { return s; }
         \\fn main() -> i32 { print(eco("kyn")); return 0; }
@@ -1120,7 +1120,7 @@ test "llvm: chamada com 'str' extrai ponteiro e tamanho do agregado" {
     try support.expectContains(ir, "call i64 @write(i32 1, ptr %t1, i64 %t2)");
 }
 
-test "llvm: assinatura mista expande só os parâmetros 'str'" {
+test "llvm: mixed signature expands only the 'str' parameters" {
     var f = try support.Fixture.build(
         \\fn marca(prefixo: str, n: i32) -> i32 {
         \\    print(prefixo);
@@ -1146,18 +1146,18 @@ test "llvm: struct por valor vira argumentos escalares e retorno agregado" {
     defer f.deinit();
     const ir = try emitFixture(&f);
 
-    // Parâmetro achatado em um argumento por campo.
+    // Parameter flattened into one argument per field.
     try support.expectContains(ir, "define { i32, i32 } @eco(i32 %arg0, i32 %arg1)");
     try support.expectContains(ir, "store i32 %arg0, ptr %v1, align 4");
     try support.expectContains(ir, "store i32 %arg1, ptr %v2, align 4");
-    // Retorno montado com insertvalue e devolvido como agregado.
+    // Return built with insertvalue and handed back as an aggregate.
     try support.expectContains(ir, "insertvalue { i32, i32 } undef, i32 %t0, 0");
     try support.expectContains(ir, "insertvalue { i32, i32 } %t2, i32 %t1, 1");
     try support.expectContains(ir, "ret { i32, i32 } %t3");
     try support.expectAllBlocksTerminated(ir);
 }
 
-test "llvm: chamada com struct achata argumentos e extrai o retorno" {
+test "llvm: call with struct flattens arguments and extracts the return" {
     var f = try support.Fixture.build(
         \\struct P { x: i32, y: i32 }
         \\fn eco(p: P) -> P { return p; }
@@ -1175,7 +1175,7 @@ test "llvm: chamada com struct achata argumentos e extrai o retorno" {
     try support.expectAllBlocksTerminated(ir);
 }
 
-test "llvm: struct com 'bool' mantém i1 nos argumentos e no agregado" {
+test "llvm: struct with 'bool' keeps i1 in arguments and in the aggregate" {
     var f = try support.Fixture.build(
         \\struct Par { a: bool, b: i32 }
         \\fn par(p: Par) -> i32 { return p.b; }
@@ -1222,7 +1222,7 @@ test "llvm: string vazia usa zeroinitializer" {
     try support.expectContains(ir, "call i64 @write(i32 1, ptr @.str0, i64 0)");
 }
 
-test "llvm: print_i32 emite a rotina decimal interna uma única vez" {
+test "llvm: print_i32 emits the internal decimal routine once" {
     var f = try support.Fixture.build(
         \\fn main() -> i32 {
         \\    let x = 6 * 7;
@@ -1236,7 +1236,7 @@ test "llvm: print_i32 emite a rotina decimal interna uma única vez" {
 
     try testing.expectEqual(@as(usize, 1), std.mem.count(u8, ir, "define internal void @kyn_print_i32(i32 %arg0) {"));
     try testing.expectEqual(@as(usize, 2), std.mem.count(u8, ir, "call void @kyn_print_i32(i32 "));
-    // Conversão: resto/divisão unsigned, sinal, buffer e escrita.
+    // Conversion: unsigned remainder/division, sign, buffer and write.
     try support.expectContains(ir, "urem i32 %n, 10");
     try support.expectContains(ir, "udiv i32 %n, 10");
     try support.expectContains(ir, "store i8 45, ptr %negptr, align 1");
@@ -1247,7 +1247,7 @@ test "llvm: print_i32 emite a rotina decimal interna uma única vez" {
     try support.expectAllBlocksTerminated(ir);
 }
 
-test "llvm: programa sem print_i32 não emite a rotina decimal" {
+test "llvm: program without print_i32 does not emit the decimal routine" {
     var f = try support.Fixture.build(
         \\fn main() -> i32 {
         \\    print("ok");

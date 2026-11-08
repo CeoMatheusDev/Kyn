@@ -1,15 +1,15 @@
-//! Análise semântica do bootstrap.
+//! Bootstrap semantic analysis.
 //!
-//! Responsabilidades:
-//! - resolver nomes (variáveis, parâmetros e funções) e anotar a AST com
-//!   índices de símbolo (`Expr.resolved`, `Stmt.decl_symbol`, `Call.callee_fn`);
-//! - verificar tipos (`i32`, `bool`, `void`), mutabilidade e condições;
-//! - atribuir um slot de pilha por variável de cada função, consumido pelos
+//! Responsibilities:
+//! - resolve names (variables, parameters and functions) and annotates the AST
+//!   with symbol indices (`Expr.resolved`, `Stmt.decl_symbol`, `Call.callee_fn`);
+//! - check types (`i32`, `bool`, `void`), mutability and conditions;
+//! - assign one stack slot per variable of each function, consumed by the
 //!   backends;
-//! - validar o ponto de entrada `main`.
+//! - validate the `main` entry point.
 //!
-//! A AST não é modificada estruturalmente: apenas recebe índices resolvidos.
-//! Todos os símbolos e assinaturas são alocados na arena recebida.
+//! The AST is not modified structurally: it only receives resolved indices.
+//! Every symbol and signature is allocated in the received arena.
 
 const std = @import("std");
 const ast = @import("../ast/ast.zig");
@@ -20,13 +20,13 @@ pub const Type = enum {
     i32,
     bool,
     void,
-    /// Valor de struct (identidade nominal em `Symbol.struct_id`). Não é
-    /// escalar: não participa de operadores, condições nem chamadas por valor.
+    /// Struct value (nominal identity in `Symbol.struct_id`). Not a scalar:
+    /// it takes part in no operators, conditions or value calls.
     aggregate,
-    /// Fatia de string estática (ponteiro + tamanho), representada em dois
-    /// slots. Não é escalar: só inicializa, é copiada e é argumento de `print`.
+    /// Static string slice (pointer + length), represented in two
+    /// slots. Not a scalar: it only initializes, is copied and is a `print`
     str,
-    /// Tipo desconhecido: evita cascata de diagnósticos após um erro.
+    /// Unknown type: avoids a cascade of diagnostics after an error.
     unknown,
 
     pub fn name(self: Type) []const u8 {
@@ -36,7 +36,7 @@ pub const Type = enum {
             .void => "void",
             .aggregate => "struct",
             .str => "str",
-            .unknown => "desconhecido",
+            .unknown => "unknown",
         };
     }
 
@@ -48,15 +48,15 @@ pub const Type = enum {
         return null;
     }
 
-    /// Tipos que podem existir como valor de expressão/variável. `str` é
-    /// fatia (dois slots), não escalar, mas tem valor: pode ser inicializar,
-    /// copiar, retornar e ser argumento.
+    /// Types that can exist as an expression/variable value. `str` is a
+    /// slice (two slots), not a scalar, but it has a value: it can initialize,
+    /// be copied, returned and passed as an argument.
     pub fn isValue(self: Type) bool {
         return self == .i32 or self == .bool or self == .str;
     }
 
-    /// Palavras de registrador consumidas pela convenção de chamada: `str`
-    /// ocupa dois registradores consecutivos (ponteiro e tamanho).
+    /// Register words consumed by the calling convention: `str` takes two
+    /// consecutive registers (pointer and length).
     pub fn registerWords(self: Type) usize {
         return if (self == .str) 2 else 1;
     }
@@ -68,16 +68,16 @@ pub const Symbol = struct {
     name: []const u8,
     typ: Type,
     mutable: bool,
-    /// Slot de pilha relativo à função (parâmetros primeiro). Em variáveis de
-    /// struct, os campos ocupam `slot + 1 .. slot + 1 + n`.
+    /// Stack slot relative to the function (parameters first). For struct
+    /// variables the fields occupy `slot + 1 .. slot + 1 + n`.
     slot: u32,
     kind: SymbolKind,
     decl_span: Span,
-    /// Índice em `Checked.structs` quando `typ == .aggregate`.
+    /// Index into `Checked.structs` when `typ == .aggregate`.
     struct_id: u32 = 0,
 };
 
-/// Campo de um struct já validado: tipo escalar e índice na declaração.
+/// Field of an already validated struct: scalar type and declaration index.
 pub const FieldInfo = struct {
     name: []const u8,
     typ: Type,
@@ -92,24 +92,24 @@ pub const StructInfo = struct {
 pub const FunctionInfo = struct {
     decl: *const ast.Function,
     return_type: Type,
-    /// Struct associado ao retorno quando `return_type == .aggregate`.
+    /// Struct tied to the return when `return_type == .aggregate`.
     return_struct_id: u32 = 0,
     params: []Type,
-    /// Struct associado a cada parâmetro (0 quando o parâmetro não é struct).
+    /// Struct tied to each parameter (0 when the parameter is not a struct).
     param_struct_ids: []u32 = &.{},
-    /// Quantidade de slots de pilha usados pela função (parâmetros + locais).
+    /// Number of stack slots used by the function (parameters + locals).
     slot_count: u32,
-    /// Intervalo de símbolos desta função em `Checked.symbols`
-    /// (parâmetros primeiro, depois variáveis locais).
+    /// Symbol range of this function in `Checked.symbols`
+    /// (parameters first, then local variables).
     symbol_start: u32 = 0,
     symbol_count: u32 = 0,
 };
 
 pub const Checked = struct {
     functions: []FunctionInfo,
-    /// Tabela plana; `Expr.resolved` e `Stmt.decl_symbol` indexam este slice.
+    /// Flat table; `Expr.resolved` and `Stmt.decl_symbol` index this slice.
     symbols: []Symbol,
-    /// Structs declarados, na ordem da fonte (achatados entre módulos).
+    /// Declared structs, in source order (flattened across modules).
     structs: []StructInfo,
 
     pub fn findStruct(self: *const Checked, name: []const u8) ?u32 {
@@ -127,25 +127,25 @@ pub const Checked = struct {
     }
 };
 
-/// Palavras de registrador que um tipo ocupa na convenção de chamada: cada
-/// campo escalar de struct conta um, `str` conta dois (ponteiro e tamanho) e os
-/// demais escalares um. Fonte única para o limite da semântica e para os
-/// backends — assim declaração, chamada e emissão de código não divergem.
+/// Register words a type occupies in the calling convention: each scalar
+/// struct field counts one, `str` counts two (pointer and length) and the
+/// remaining scalars one. Single source for the semantics limit and for the
+/// backends — so declaration, call and code emission never diverge.
 pub fn registerWordsOf(structs: []const StructInfo, typ: Type, struct_id: u32) usize {
     if (typ == .aggregate and struct_id < structs.len) return structs[struct_id].fields.len;
     return typ.registerWords();
 }
 
-/// Limite de **registradores** de argumento por chamada no backend x86-64
-/// (SysV). Não é um limite de parâmetros: cada `str` consome dois
-/// (`Type.registerWords`), então três `str` preenchem a tabela.
+/// Limit of argument **registers** per call in the x86-64 backend
+/// (SysV). It is not a parameter limit: each `str` consumes two
+/// (`Type.registerWords`), so three `str` fill the table.
 pub const max_arg_registers: usize = 6;
 
 pub const Options = struct {
-    /// Exige que o programa defina `fn main() -> i32` ou `fn main() -> void`.
+    /// Requires the program to define `fn main() -> i32` or `fn main() -> void`.
     require_main: bool = true,
-    /// Caminho de cada arquivo, indexado por `ast.Function.file_id`. Usado nas
-    /// mensagens para desambiguar declarações vindas de módulos importados.
+    /// Path of each file, indexed by `ast.Function.file_id`. Used in
+    /// messages to disambiguate declarations coming from imported modules.
     file_names: []const []const u8 = &.{},
 };
 
@@ -157,7 +157,7 @@ pub const Checker = struct {
     symbols: std.ArrayList(Symbol) = .empty,
     functions: std.ArrayList(FunctionInfo) = .empty,
     structs: std.ArrayList(StructInfo) = .empty,
-    /// Início (índice em `symbols`) do escopo atual.
+    /// Start (index into `symbols`) of the current scope.
     scopes: std.ArrayList(usize) = .empty,
 
     fn_index: u32 = 0,
@@ -170,7 +170,7 @@ pub const Checker = struct {
     }
 
     pub fn checkProgram(self: *Checker, program: *const ast.Program) std.mem.Allocator.Error!Checked {
-        // Passo 0: nomes de struct antes de qualquer tipo ser resolvido.
+        // Step 0: struct names before any type is resolved.
         for (program.structs) |decl| {
             self.diags.current_file = decl.file_id;
             try self.registerStructName(decl);
@@ -180,8 +180,8 @@ pub const Checker = struct {
             try self.registerStructFields(decl);
         }
 
-        // Passo 1: registrar assinaturas (permite chamadas antes da declaração
-        // e recursão).
+        // Step 1: register signatures (allows calls before the declaration
+        // and recursion).
         for (program.functions) |func| {
             self.diags.current_file = func.file_id;
             try self.registerFunction(func);
@@ -191,7 +191,7 @@ pub const Checker = struct {
             try self.checkMain(program);
         }
 
-        // Passo 2: verificar corpos.
+        // Step 2: check bodies.
         for (program.functions, 0..) |func, i| {
             self.diags.current_file = func.file_id;
             try self.checkFunctionBody(func, @intCast(i));
@@ -212,8 +212,8 @@ pub const Checker = struct {
         return null;
     }
 
-    /// Primeiro passo dos structs: garante nomes únicos para que qualquer
-    /// declaração possa ser referenciada por tipos resolvidos depois.
+    /// First struct pass: guarantees unique names so that any
+    /// declaration can be referenced by types resolved later.
     fn registerStructName(self: *Checker, decl: *const ast.StructDecl) std.mem.Allocator.Error!void {
         for (self.structs.items) |existing| {
             if (std.mem.eql(u8, existing.decl.name, decl.name)) {
@@ -221,14 +221,14 @@ pub const Checker = struct {
                     try self.diags.add(
                         .duplicate_declaration,
                         decl.name_span,
-                        "struct '{s}' já declarado em '{s}' (linha {d})",
+                        "struct '{s}' already declared in '{s}' (line {d})",
                         .{ decl.name, path, existing.decl.name_span.line },
                     );
                 } else {
                     try self.diags.add(
                         .duplicate_declaration,
                         decl.name_span,
-                        "struct '{s}' já declarado (primeira declaração na linha {d})",
+                        "struct '{s}' already declared (first declaration on line {d})",
                         .{ decl.name, existing.decl.name_span.line },
                     );
                 }
@@ -239,19 +239,19 @@ pub const Checker = struct {
         try self.structs.append(self.arena, .{ .decl = decl, .fields = &.{} });
     }
 
-    /// Segundo passo: resolve os tipos dos campos (somente escalares nesta
-    /// etapa) e valida duplicidade.
+    /// Second pass: resolves field types (scalars only at this
+    /// stage) and validates duplicates.
     fn registerStructFields(self: *Checker, decl: *const ast.StructDecl) std.mem.Allocator.Error!void {
         const index = self.findStructIndex(decl.name) orelse return;
-        // Declaração duplicada (já diagnosticada) compartilha o nome com a
-        // primeira; não sobrescreve os campos dela.
+        // A duplicated declaration (already diagnosed) shares its name with the
+        // first one; it does not overwrite its fields.
         if (self.structs.items[index].decl != decl) return;
 
         if (decl.fields.len == 0) {
             try self.diags.add(
                 .unsupported,
                 decl.name_span,
-                "struct '{s}' sem campos não é suportado nesta etapa",
+                "struct '{s}' with no fields is not supported at this stage",
                 .{decl.name},
             );
         }
@@ -263,7 +263,7 @@ pub const Checker = struct {
                     try self.diags.add(
                         .duplicate_declaration,
                         field.name_span,
-                        "campo '{s}' já declarado no struct '{s}' (linha {d})",
+                        "field '{s}' already declared in struct '{s}' (line {d})",
                         .{ field.name, decl.name, previous.name_span.line },
                     );
                     break;
@@ -275,21 +275,21 @@ pub const Checker = struct {
                 try self.diags.add(
                     .unsupported,
                     field.type_name.span,
-                    "campo '{s}' de '{s}': struct com campo struct ainda não é suportado",
+                    "field '{s}' of '{s}': a struct with a struct field is not supported yet",
                     .{ field.name, decl.name },
                 );
             } else if (typ == .str) {
                 try self.diags.add(
                     .unsupported,
                     field.type_name.span,
-                    "campo '{s}' de '{s}' de tipo 'str' ainda não é suportado",
+                    "field '{s}' of '{s}' of type 'str' is not supported yet",
                     .{ field.name, decl.name },
                 );
             } else if (typ == .void) {
                 try self.diags.add(
                     .type_mismatch,
                     field.type_name.span,
-                    "campo '{s}' de '{s}' não pode ser 'void'",
+                    "field '{s}' of '{s}' cannot be 'void'",
                     .{ field.name, decl.name },
                 );
             }
@@ -300,8 +300,8 @@ pub const Checker = struct {
         self.structs.items[index].fields = fields;
     }
 
-    /// Caminho do arquivo de um símbolo, quando conhecido e diferente do
-    /// arquivo atual (evita ruído em programas de um só arquivo).
+    /// File path of a symbol, when known and different from the
+    /// current file (avoids noise in single-file programs).
     fn fileName(self: *const Checker, file_id: u32) ?[]const u8 {
         if (file_id == self.diags.current_file) return null;
         if (file_id >= self.options.file_names.len) return null;
@@ -309,13 +309,13 @@ pub const Checker = struct {
     }
 
     fn registerFunction(self: *Checker, func: *const ast.Function) std.mem.Allocator.Error!void {
-        // Nomes de funções embutidas são reservados: declarar outra com o
-        // mesmo nome criaria duas regras de resolução para a mesma chamada.
+        // Builtin names are reserved: declaring another function with the
+        // same name would create two resolution rules for the same call.
         if (builtinByName(func.name) != null) {
             try self.diags.add(
                 .unsupported,
                 func.name_span,
-                "nome '{s}' é reservado para a função embutida",
+                "name '{s}' is reserved for the builtin function",
                 .{func.name},
             );
         }
@@ -326,14 +326,14 @@ pub const Checker = struct {
                     try self.diags.add(
                         .duplicate_declaration,
                         func.name_span,
-                        "função '{s}' já declarada em '{s}' (linha {d})",
+                        "function '{s}' already declared in '{s}' (line {d})",
                         .{ func.name, path, existing.decl.name_span.line },
                     );
                 } else {
                     try self.diags.add(
                         .duplicate_declaration,
                         func.name_span,
-                        "função '{s}' já declarada (primeira declaração na linha {d})",
+                        "function '{s}' already declared (first declaration on line {d})",
                         .{ func.name, existing.decl.name_span.line },
                     );
                 }
@@ -343,7 +343,7 @@ pub const Checker = struct {
 
         const params = try self.arena.alloc(Type, func.params.len);
         const param_struct_ids = try self.arena.alloc(u32, func.params.len);
-        // Índice provisório: as assinaturas são anexadas na ordem da fonte.
+        // Provisional index: signatures are appended in source order.
         var register_words: usize = 0;
         for (func.params, 0..) |param, i| {
             params[i] = try self.resolveTypeName(param.type_name);
@@ -351,13 +351,13 @@ pub const Checker = struct {
             register_words += self.wordsOf(params[i], param_struct_ids[i]);
         }
 
-        // O limite do backend nativo é em registradores, não em parâmetros:
-        // cada `str` consome dois e cada campo de struct um.
+        // The native backend limit is in registers, not in parameters:
+        // each `str` consumes two and each struct field one.
         if (register_words > max_arg_registers) {
             try self.diags.add(
                 .unsupported,
                 func.name_span,
-                "função '{s}' ocupa {d} registradores em parâmetros; o backend atual suporta no máximo {d} ('str' ocupa dois e cada campo de struct um)",
+                "function '{s}' uses {d} parameter registers; the current backend supports at most {d} ('str' takes two and each struct field one)",
                 .{ func.name, register_words, max_arg_registers },
             );
         }
@@ -371,14 +371,14 @@ pub const Checker = struct {
         else
             0;
 
-        // Struct volta em um registrador por campo, na ordem de declaração.
+        // A struct returns in one register per field, in declaration order.
         if (return_type == .aggregate and return_struct_id < self.structs.items.len) {
             const field_count = self.structs.items[return_struct_id].fields.len;
             if (field_count > max_arg_registers) {
                 try self.diags.add(
                     .unsupported,
                     func.return_type.?.span,
-                    "função '{s}' retorna struct com {d} campos; o backend atual suporta no máximo {d}",
+                    "function '{s}' returns a struct with {d} fields; the current backend supports at most {d}",
                     .{ func.name, field_count, max_arg_registers },
                 );
             }
@@ -408,7 +408,7 @@ pub const Checker = struct {
             try self.diags.add(
                 .missing_main,
                 program.span,
-                "programa não define 'fn main()'",
+                "program does not define 'fn main()'",
                 .{},
             );
             return;
@@ -418,7 +418,7 @@ pub const Checker = struct {
             try self.diags.add(
                 .invalid_main,
                 main.name_span,
-                "'main' não pode receber parâmetros neste estágio",
+                "'main' cannot take parameters at this stage",
                 .{},
             );
         }
@@ -428,7 +428,7 @@ pub const Checker = struct {
             try self.diags.add(
                 .invalid_main,
                 main.return_type.?.span,
-                "'main' deve retornar 'i32' ou 'void', encontrado '{s}'",
+                "'main' must return 'i32' or 'void', found '{s}'",
                 .{main.return_type.?.name},
             );
         }
@@ -440,24 +440,24 @@ pub const Checker = struct {
         try self.diags.add(
             .unknown_type,
             tn.span,
-            "tipo '{s}' não suportado (disponíveis: i32, bool, str, void e structs declarados)",
+            "unsupported type '{s}' (available: i32, bool, str, void and declared structs)",
             .{tn.name},
         );
         return .unknown;
     }
 
-    /// Palavras de registrador de um valor cujo tipo depende do struct
-    /// concreto (ver `registerWordsOf`, usado também pelos backends).
+    /// Register words of a value whose type depends on the concrete
+    /// struct (see `registerWordsOf`, also used by the backends).
     fn wordsOf(self: *const Checker, typ: Type, struct_id: u32) usize {
         return registerWordsOf(self.structs.items, typ, struct_id);
     }
 
-    /// Struct associado ao tipo anotado, quando houver.
+    /// Struct tied to the annotated type, when present.
     fn structIdOfTypeName(self: *const Checker, tn: ast.TypeName) ?u32 {
         return self.findStructIndex(tn.name);
     }
 
-    /// Struct associado a uma expressão que produz valor de struct.
+    /// Struct tied to an expression producing a struct value.
     fn structIdOfExpr(self: *const Checker, expr: *const ast.Expr) ?u32 {
         return switch (expr.kind) {
             .struct_literal => |lit| lit.resolved_struct,
@@ -496,7 +496,7 @@ pub const Checker = struct {
             try self.diags.add(
                 .invalid_return,
                 func.name_span,
-                "função '{s}' pode terminar sem executar 'return' com valor '{s}'",
+                "function '{s}' may finish without running 'return' with value '{s}'",
                 .{ func.name, info.return_type.name() },
             );
         }
@@ -536,7 +536,7 @@ pub const Checker = struct {
                     try self.diags.add(
                         .duplicate_declaration,
                         span,
-                        "'{s}' já foi declarado neste escopo (linha {d})",
+                        "'{s}' is already declared in this scope (line {d})",
                         .{ name, sym.decl_span.line },
                     );
                     return null;
@@ -544,9 +544,9 @@ pub const Checker = struct {
             }
         }
 
-        // Valor de struct ocupa um slot de base (não usado) e um slot por
-        // campo, na ordem da declaração — o mesmo mapeamento nos dois backends.
-        // `str` ocupa dois slots consecutivos: ponteiro e tamanho.
+        // A struct value occupies one base slot (unused) and one slot per
+        // field, in declaration order — the same mapping in both backends.
+        // `str` occupies two consecutive slots: pointer and length.
         const extra_slots: u32 = if (typ == .aggregate and struct_id < self.structs.items.len)
             @intCast(self.structs.items[struct_id].fields.len)
         else if (typ == .str)
@@ -568,7 +568,7 @@ pub const Checker = struct {
         return @intCast(self.symbols.items.len - 1);
     }
 
-    /// Resolve a base de um acesso a campo (hoje só um identificador simples).
+    /// Resolves the base of a field access (today only a plain identifier).
     fn resolveFieldBase(self: *Checker, base: *ast.Expr) std.mem.Allocator.Error!?u32 {
         switch (base.kind) {
             .identifier => |name| {
@@ -576,7 +576,7 @@ pub const Checker = struct {
                     try self.diags.add(
                         .undefined_variable,
                         base.span,
-                        "variável '{s}' não declarada",
+                        "variable '{s}' is not declared",
                         .{name},
                     );
                     return null;
@@ -588,7 +588,7 @@ pub const Checker = struct {
                 try self.diags.add(
                     .unsupported,
                     base.span,
-                    "acesso a campo encadeado (struct com campo struct) ainda não é suportado",
+                    "chained field access (struct with a struct field) is not supported yet",
                     .{},
                 );
                 return null;
@@ -596,7 +596,7 @@ pub const Checker = struct {
         }
     }
 
-    /// Rótulo de tipo para mensagens: nome do struct quando aplicável.
+    /// Type label for messages: the struct name when applicable.
     fn typeLabel(self: *const Checker, typ: Type, struct_id: u32) []const u8 {
         if (typ == .aggregate and struct_id < self.structs.items.len) {
             return self.structs.items[struct_id].decl.name;
@@ -604,12 +604,12 @@ pub const Checker = struct {
         return typ.name();
     }
 
-    /// Texto curto da expressão usado em mensagens (bases de campo são nomes).
+    /// Short expression text used in messages (field bases are names).
     fn exprText(self: *const Checker, expr: *const ast.Expr) []const u8 {
         _ = self;
         return switch (expr.kind) {
             .identifier => |name| name,
-            else => "<expressão>",
+            else => "<expression>",
         };
     }
 
@@ -644,33 +644,33 @@ pub const Checker = struct {
                 }
                 const init_struct = self.structIdOfExpr(decl.init) orelse 0;
 
-                // `void` não é armazenável — nem anotado (`let x: void = ...`)
-                // nem inferido de uma chamada sem retorno (`let x = f();`).
-                // Uma única mensagem cobre os dois casos; a variável não chega
-                // aos backends com um tipo sem representação.
+                // `void` is not storable — neither annotated (`let x: void = ...`)
+                // nor inferred from a call without a return (`let x = f();`).
+                // A single message covers both cases; the variable never reaches
+                // the backends with a type that has no representation.
                 if (declared_type == .void or init_type == .void) {
                     try self.diags.add(
                         .type_mismatch,
                         decl.name_span,
-                        "variável '{s}' precisa de um valor: 'void' não pode ser armazenado",
+                        "variable '{s}' needs a value: 'void' cannot be stored",
                         .{decl.name},
                     );
                 } else if (declared_type != .unknown and init_type != .unknown and declared_type != init_type) {
                     try self.diags.add(
                         .type_mismatch,
                         decl.init.span,
-                        "inicializador de '{s}' tem tipo '{s}', mas a anotação é '{s}'",
+                        "initializer of '{s}' has type '{s}', but the annotation is '{s}'",
                         .{ decl.name, self.typeLabel(init_type, init_struct), self.typeLabel(declared_type, declared_struct) },
                     );
                 }
 
-                // Mesmo tipo `struct`, structs diferentes.
+                // Same `struct` type, different structs.
                 if (decl.type_name != null and declared_type == .aggregate and init_type == .aggregate) {
                     if (init_struct != declared_struct) {
                         try self.diags.add(
                             .type_mismatch,
                             decl.init.span,
-                            "inicializador de '{s}' é do struct '{s}', mas a anotação é '{s}'",
+                            "initializer of '{s}' is struct '{s}', but the annotation is '{s}'",
                             .{
                                 decl.name,
                                 self.structs.items[init_struct].decl.name,
@@ -680,7 +680,7 @@ pub const Checker = struct {
                     }
                 }
 
-                // Variável de struct sem anotação: o struct vem do inicializador.
+                // Struct variable without annotation: the struct comes from the initializer.
                 const struct_id: u32 = if (declared_type != .aggregate)
                     0
                 else if (decl.type_name != null)
@@ -704,7 +704,7 @@ pub const Checker = struct {
                     try self.diags.add(
                         .undefined_variable,
                         assign.name_span,
-                        "variável '{s}' não declarada",
+                        "variable '{s}' is not declared",
                         .{assign.name},
                     );
                     return;
@@ -715,7 +715,7 @@ pub const Checker = struct {
                     try self.diags.add(
                         .immutable_assignment,
                         assign.name_span,
-                        "'{s}' é imutável; declare com 'var' para permitir atribuição",
+                        "'{s}' is immutable; declare it with 'var' to allow assignment",
                         .{assign.name},
                     );
                 }
@@ -723,7 +723,7 @@ pub const Checker = struct {
                     try self.diags.add(
                         .type_mismatch,
                         assign.value.span,
-                        "'{s}' é do tipo '{s}', mas o valor atribuído é '{s}'",
+                        "'{s}' has type '{s}', but the assigned value is '{s}'",
                         .{
                             assign.name,
                             self.typeLabel(sym.typ, sym.struct_id),
@@ -737,7 +737,7 @@ pub const Checker = struct {
                         try self.diags.add(
                             .type_mismatch,
                             assign.value.span,
-                            "'{s}' é do struct '{s}', mas o valor atribuído é do struct '{s}'",
+                            "'{s}' is struct '{s}', but the assigned value is struct '{s}'",
                             .{
                                 assign.name,
                                 self.structs.items[sym.struct_id].decl.name,
@@ -758,7 +758,7 @@ pub const Checker = struct {
                     try self.diags.add(
                         .type_mismatch,
                         fa.name_span,
-                        "acesso a campo '{s}' exige um struct, mas '{s}' é do tipo '{s}'",
+                        "field access '{s}' requires a struct, but '{s}' has type '{s}'",
                         .{ fa.name, self.exprText(fa.base), self.typeLabel(sym.typ, sym.struct_id) },
                     );
                     return;
@@ -769,7 +769,7 @@ pub const Checker = struct {
                     try self.diags.add(
                         .undefined_field,
                         fa.name_span,
-                        "struct '{s}' não tem o campo '{s}'",
+                        "struct '{s}' has no field '{s}'",
                         .{ info.decl.name, fa.name },
                     );
                     return;
@@ -780,7 +780,7 @@ pub const Checker = struct {
                     try self.diags.add(
                         .immutable_assignment,
                         fa.name_span,
-                        "'{s}.{s}' não pode ser atribuído: '{s}' foi declarado com 'let'",
+                        "'{s}.{s}' cannot be assigned: '{s}' was declared with 'let'",
                         .{ self.exprText(fa.base), fa.name, self.exprText(fa.base) },
                     );
                     return;
@@ -791,7 +791,7 @@ pub const Checker = struct {
                     try self.diags.add(
                         .type_mismatch,
                         fa.value.span,
-                        "campo '{s}.{s}' é do tipo '{s}', mas o valor atribuído é '{s}'",
+                        "field '{s}.{s}' has type '{s}', but the assigned value is '{s}'",
                         .{ self.exprText(fa.base), fa.name, field_type.name(), value_type.name() },
                     );
                 }
@@ -805,25 +805,25 @@ pub const Checker = struct {
                         try self.diags.add(
                             .invalid_return,
                             expr.span,
-                            "função atual não retorna valor ('void'), mas 'return' tem expressão",
+                            "the current function returns no value ('void'), but 'return' has an expression",
                             .{},
                         );
                     } else if (expected != .unknown and actual != .unknown and expected != actual) {
                         try self.diags.add(
                             .invalid_return,
                             expr.span,
-                            "tipo de retorno esperado '{s}', encontrado '{s}'",
+                            "expected return type '{s}', found '{s}'",
                             .{ expected.name(), actual.name() },
                         );
                     } else if (expected == .aggregate and actual == .aggregate) {
-                        // Structs são nominais: mesma forma não basta.
+                        // Structs are nominal: the same shape is not enough.
                         const got = self.structIdOfExpr(expr) orelse 0;
                         const want = self.functions.items[self.fn_index].return_struct_id;
                         if (got != want) {
                             try self.diags.add(
                                 .invalid_return,
                                 expr.span,
-                                "retorno esperado do struct '{s}', encontrado '{s}'",
+                                "expected struct '{s}' in return, found '{s}'",
                                 .{ self.structs.items[want].decl.name, self.structs.items[got].decl.name },
                             );
                         }
@@ -832,7 +832,7 @@ pub const Checker = struct {
                     try self.diags.add(
                         .invalid_return,
                         stmt.span,
-                        "função atual deve retornar '{s}'; 'return' sem valor não é permitido",
+                        "the current function must return '{s}'; a 'return' without a value is not allowed",
                         .{expected.name()},
                     );
                 }
@@ -844,14 +844,14 @@ pub const Checker = struct {
                     try self.diags.add(
                         .unsupported,
                         expr.span,
-                        "expressão do tipo 'str' sem uso; use 'print(...)' ou atribua a uma variável",
+                        "unused 'str' expression; use 'print(...)' or assign it to a variable",
                         .{},
                     );
                 } else if (typ == .aggregate) {
                     try self.diags.add(
                         .unsupported,
                         expr.span,
-                        "valor de struct só pode inicializar ou ser atribuído a uma variável",
+                        "a struct value can only initialize or be assigned to a variable",
                         .{},
                     );
                 }
@@ -863,7 +863,7 @@ pub const Checker = struct {
                     try self.diags.add(
                         .invalid_condition,
                         if_stmt.cond.span,
-                        "condição de 'if' deve ser 'bool', encontrado '{s}'",
+                        "'if' condition must be 'bool', found '{s}'",
                         .{cond_type.name()},
                     );
                 }
@@ -882,7 +882,7 @@ pub const Checker = struct {
                     try self.diags.add(
                         .invalid_condition,
                         while_stmt.cond.span,
-                        "condição de 'while' deve ser 'bool', encontrado '{s}'",
+                        "'while' condition must be 'bool', found '{s}'",
                         .{cond_type.name()},
                     );
                 }
@@ -900,7 +900,7 @@ pub const Checker = struct {
                     try self.diags.add(
                         .integer_overflow,
                         expr.span,
-                        "literal {s} não cabe em 'i32'",
+                        "literal {s} does not fit in 'i32'",
                         .{lit.text},
                     );
                 }
@@ -916,7 +916,7 @@ pub const Checker = struct {
                     try self.diags.add(
                         .undefined_variable,
                         expr.span,
-                        "variável '{s}' não declarada",
+                        "variable '{s}' is not declared",
                         .{name},
                     );
                     return .unknown;
@@ -940,7 +940,7 @@ pub const Checker = struct {
                             try self.diags.add(
                                 .type_mismatch,
                                 expr.span,
-                                "operador '-' espera 'i32', encontrado '{s}'",
+                                "operator '-' expects 'i32', found '{s}'",
                                 .{operand.name()},
                             );
                             return .unknown;
@@ -952,7 +952,7 @@ pub const Checker = struct {
                             try self.diags.add(
                                 .type_mismatch,
                                 expr.span,
-                                "operador '!' espera 'bool', encontrado '{s}'",
+                                "operator '!' expects 'bool', found '{s}'",
                                 .{operand.name()},
                             );
                             return .unknown;
@@ -973,7 +973,7 @@ pub const Checker = struct {
                     try self.diags.add(
                         .type_mismatch,
                         access.name_span,
-                        "acesso a campo '{s}' exige um struct, mas '{s}' é do tipo '{s}'",
+                        "field access '{s}' requires a struct, but '{s}' has type '{s}'",
                         .{ access.name, self.exprText(access.base), self.typeLabel(sym.typ, sym.struct_id) },
                     );
                     return .unknown;
@@ -984,7 +984,7 @@ pub const Checker = struct {
                     try self.diags.add(
                         .undefined_field,
                         access.name_span,
-                        "struct '{s}' não tem o campo '{s}'",
+                        "struct '{s}' has no field '{s}'",
                         .{ info.decl.name, access.name },
                     );
                     return .unknown;
@@ -998,7 +998,7 @@ pub const Checker = struct {
                     try self.diags.add(
                         .unknown_type,
                         lit.type_name.span,
-                        "struct '{s}' não declarado",
+                        "struct '{s}' is not declared",
                         .{lit.type_name.name},
                     );
                     return .unknown;
@@ -1014,7 +1014,7 @@ pub const Checker = struct {
                         try self.diags.add(
                             .undefined_field,
                             field_init.name_span,
-                            "struct '{s}' não tem o campo '{s}'",
+                            "struct '{s}' has no field '{s}'",
                             .{ info.decl.name, field_init.name },
                         );
                         _ = try self.checkExpr(field_init.value);
@@ -1024,7 +1024,7 @@ pub const Checker = struct {
                         try self.diags.add(
                             .invalid_struct_literal,
                             field_init.name_span,
-                            "campo '{s}' repetido no literal de '{s}'",
+                            "field '{s}' repeated in the literal of '{s}'",
                             .{ field_init.name, info.decl.name },
                         );
                         _ = try self.checkExpr(field_init.value);
@@ -1038,7 +1038,7 @@ pub const Checker = struct {
                         try self.diags.add(
                             .type_mismatch,
                             field_init.value.span,
-                            "campo '{s}.{s}' é do tipo '{s}', mas o valor é '{s}'",
+                            "field '{s}.{s}' has type '{s}', but the value is '{s}'",
                             .{ info.decl.name, field_init.name, field_type.name(), value_type.name() },
                         );
                     }
@@ -1049,7 +1049,7 @@ pub const Checker = struct {
                         try self.diags.add(
                             .invalid_struct_literal,
                             lit.type_name.span,
-                            "literal de '{s}' não inicializa o campo '{s}'",
+                            "literal of '{s}' does not initialize field '{s}'",
                             .{ info.decl.name, field.name },
                         );
                     }
@@ -1069,22 +1069,22 @@ pub const Checker = struct {
     ) !Type {
         if (lhs == .unknown or rhs == .unknown) return .unknown;
 
-        // `str` é fatia (ponteiro + tamanho): comparar exigiria comparar
-        // bytes, o que ainda não existe; diagnosticar em vez de comparar
-        // ponteiros silenciosamente.
+        // `str` is a slice (pointer + length): comparing would require comparing
+        // bytes, which does not exist yet; diagnose instead of silently
+        // comparing pointers.
         if (lhs == .str or rhs == .str) {
             if (op == .eq or op == .ne) {
                 try self.diags.add(
                     .unsupported,
                     span,
-                    "comparação de 'str' com '{s}' ainda não é suportada",
+                    "comparison of 'str' with '{s}' is not supported yet",
                     .{op.spelling()},
                 );
             } else {
                 try self.diags.add(
                     .type_mismatch,
                     span,
-                    "operador '{s}' espera dois 'i32', encontrado '{s}' e '{s}'",
+                    "operator '{s}' expects two 'i32', found '{s}' and '{s}'",
                     .{ op.spelling(), lhs.name(), rhs.name() },
                 );
             }
@@ -1099,7 +1099,7 @@ pub const Checker = struct {
                 try self.diags.add(
                     .type_mismatch,
                     span,
-                    "operador '{s}' espera dois 'i32', encontrado '{s}' e '{s}'",
+                    "operator '{s}' expects two 'i32', found '{s}' and '{s}'",
                     .{ op.spelling(), lhs.name(), rhs.name() },
                 );
                 return .unknown;
@@ -1112,7 +1112,7 @@ pub const Checker = struct {
                 try self.diags.add(
                     .type_mismatch,
                     span,
-                    "operador '{s}' espera dois 'i32', encontrado '{s}' e '{s}'",
+                    "operator '{s}' expects two 'i32', found '{s}' and '{s}'",
                     .{ op.spelling(), lhs.name(), rhs.name() },
                 );
                 return .unknown;
@@ -1125,7 +1125,7 @@ pub const Checker = struct {
                 try self.diags.add(
                     .type_mismatch,
                     span,
-                    "operador '{s}' espera dois 'bool', encontrado '{s}' e '{s}'",
+                    "operator '{s}' expects two 'bool', found '{s}' and '{s}'",
                     .{ op.spelling(), lhs.name(), rhs.name() },
                 );
                 return .unknown;
@@ -1133,12 +1133,12 @@ pub const Checker = struct {
             return .bool;
         }
 
-        // == e !=
+        // == and !=
         if (lhs != rhs or !lhs.isValue()) {
             try self.diags.add(
                 .type_mismatch,
                 span,
-                "operador '{s}' exige operandos do mesmo tipo e não-void, encontrado '{s}' e '{s}'",
+                "operator '{s}' requires operands of the same type and non-void, found '{s}' and '{s}'",
                 .{ op.spelling(), lhs.name(), rhs.name() },
             );
             return .unknown;
@@ -1161,7 +1161,7 @@ pub const Checker = struct {
                 try self.diags.add(
                     .invalid_call,
                     span,
-                    "'{s}' espera 1 argumento do tipo '{s}', recebeu {d}",
+                    "'{s}' expects 1 argument of type '{s}', received {d}",
                     .{ @tagName(builtin), expected.name(), arg_types.items.len },
                 );
                 return .void;
@@ -1171,7 +1171,7 @@ pub const Checker = struct {
                 try self.diags.add(
                     .type_mismatch,
                     call.args[0].span,
-                    "'{s}' espera '{s}', encontrado '{s}'",
+                    "'{s}' expects '{s}', found '{s}'",
                     .{ @tagName(builtin), expected.name(), arg_type.name() },
                 );
             }
@@ -1183,7 +1183,7 @@ pub const Checker = struct {
             try self.diags.add(
                 .invalid_call,
                 call.callee_span,
-                "função '{s}' não declarada",
+                "function '{s}' is not declared",
                 .{call.callee},
             );
             return .unknown;
@@ -1200,7 +1200,7 @@ pub const Checker = struct {
             try self.diags.add(
                 .unsupported,
                 span,
-                "chamada de '{s}' ocupa {d} registradores; o backend atual suporta no máximo {d} ('str' ocupa dois e cada campo de struct um)",
+                "call to '{s}' uses {d} registers; the current backend supports at most {d} ('str' takes two and each struct field one)",
                 .{ call.callee, arg_words, max_arg_registers },
             );
         }
@@ -1224,7 +1224,7 @@ pub const Checker = struct {
                     try self.diags.add(
                         .type_mismatch,
                         call.args[i].span,
-                        "argumento {d} de '{s}' é do struct '{s}', esperado '{s}'",
+                        "argument {d} of '{s}' is struct '{s}', expected '{s}'",
                         .{ i + 1, call.callee, self.structs.items[got].decl.name, self.structs.items[want].decl.name },
                     );
                 }
@@ -1234,7 +1234,7 @@ pub const Checker = struct {
                 try self.diags.add(
                     .type_mismatch,
                     call.args[i].span,
-                    "argumento {d} de '{s}' deve ser '{s}', encontrado '{s}'",
+                    "argument {d} of '{s}' must be '{s}', found '{s}'",
                     .{ i + 1, call.callee, expected.name(), actual.name() },
                 );
             }
@@ -1251,15 +1251,15 @@ pub const Checker = struct {
     }
 };
 
-/// Função embutida com esse identificador, quando houver. O nome do campo do
-/// enum é o próprio identificador aceito na fonte.
+/// Builtin function for that identifier, when present. The enum field name
+/// is the identifier accepted in the source.
 fn builtinByName(name: []const u8) ?ast.Expr.Builtin {
     if (std.mem.eql(u8, name, "print")) return .print;
     if (std.mem.eql(u8, name, "print_i32")) return .print_i32;
     return null;
 }
 
-/// Tipo do único parâmetro exigido por cada função embutida.
+/// Type of the single parameter required by each builtin function.
 fn builtinParamType(builtin: ast.Expr.Builtin) Type {
     return switch (builtin) {
         .print => .str,
@@ -1267,7 +1267,7 @@ fn builtinParamType(builtin: ast.Expr.Builtin) Type {
     };
 }
 
-/// Índice do campo `name` na declaração do struct.
+/// Index of the `name` field in the struct declaration.
 fn findField(info: *const StructInfo, name: []const u8) ?u32 {
     for (info.fields, 0..) |field, i| {
         if (std.mem.eql(u8, field.name, name)) return @intCast(i);
@@ -1275,9 +1275,9 @@ fn findField(info: *const StructInfo, name: []const u8) ?u32 {
     return null;
 }
 
-/// Verificação estrutural simples: o bloco sempre termina executando `return`?
-/// Cobre `return` direto, blocos aninhados e `if` com ambos os ramos
-/// terminantes. Laços não são considerados (não há como provar término).
+/// Simple structural check: does the block always end by running `return`?
+/// Covers a direct `return`, nested blocks and an `if` whose branches both
+/// terminate. Loops are not considered (termination cannot be proven).
 pub fn alwaysReturns(stmts: []*ast.Stmt) bool {
     if (stmts.len == 0) return false;
     return stmtAlwaysReturns(stmts[stmts.len - 1]);
@@ -1300,7 +1300,7 @@ fn stmtAlwaysReturns(stmt: *const ast.Stmt) bool {
 }
 
 // ---------------------------------------------------------------------------
-// Testes
+// Tests
 // ---------------------------------------------------------------------------
 
 const testing = std.testing;
@@ -1353,7 +1353,7 @@ fn expectOnly(f: *const Fixture, kind: diagnostics.Kind) !void {
     try testing.expectEqual(kind, f.diags.items.items[0].kind);
 }
 
-test "sema: programa válido não gera diagnósticos" {
+test "sema: valid program produces no diagnostics" {
     var f = try Fixture.check(
         \\fn add(a: i32, b: i32) -> i32 { return a + b; }
         \\fn main() -> i32 {
@@ -1372,13 +1372,13 @@ test "sema: programa válido não gera diagnósticos" {
     try testing.expectEqual(@as(u32, 2), checked.functions[1].slot_count); // x, y
 }
 
-test "sema: variável não declarada" {
+test "sema: undeclared variable" {
     var f = try Fixture.check("fn main() -> i32 { return z; }", .{});
     defer f.deinit();
     try expectOnly(&f, .undefined_variable);
 }
 
-test "sema: atribuição a variável imutável" {
+test "sema: assignment to immutable variable" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    let x = 1;
@@ -1390,7 +1390,7 @@ test "sema: atribuição a variável imutável" {
     try expectOnly(&f, .immutable_assignment);
 }
 
-test "sema: atribuição a var é permitida" {
+test "sema: assignment to var is allowed" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    var x = 1;
@@ -1402,7 +1402,7 @@ test "sema: atribuição a var é permitida" {
     try testing.expectEqual(@as(usize, 0), f.diags.count());
 }
 
-test "sema: declaração duplicada no mesmo escopo" {
+test "sema: duplicate declaration in the same scope" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    let x = 1;
@@ -1414,7 +1414,7 @@ test "sema: declaração duplicada no mesmo escopo" {
     try expectOnly(&f, .duplicate_declaration);
 }
 
-test "sema: shadowing em escopo interno é permitido" {
+test "sema: shadowing in an inner scope is allowed" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    let x = 1;
@@ -1426,19 +1426,19 @@ test "sema: shadowing em escopo interno é permitido" {
     try testing.expectEqual(@as(usize, 0), f.diags.count());
 }
 
-test "sema: anotação diverge do inicializador" {
+test "sema: annotation differs from the initializer" {
     var f = try Fixture.check("fn main() -> i32 { let x: bool = 1; return 0; }", .{});
     defer f.deinit();
     try expectOnly(&f, .type_mismatch);
 }
 
-test "sema: aritmética com bool é rejeitada" {
+test "sema: arithmetic with bool is rejected" {
     var f = try Fixture.check("fn main() -> i32 { let x = true + 1; return 0; }", .{});
     defer f.deinit();
     try expectOnly(&f, .type_mismatch);
 }
 
-test "sema: comparação de i32 produz bool" {
+test "sema: i32 comparison produces bool" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    let b: bool = 1 < 2;
@@ -1449,37 +1449,37 @@ test "sema: comparação de i32 produz bool" {
     try testing.expectEqual(@as(usize, 0), f.diags.count());
 }
 
-test "sema: condição de if deve ser bool" {
+test "sema: if condition must be bool" {
     var f = try Fixture.check("fn main() -> i32 { if 1 { return 1; } return 0; }", .{});
     defer f.deinit();
     try expectOnly(&f, .invalid_condition);
 }
 
-test "sema: condição de while deve ser bool" {
+test "sema: while condition must be bool" {
     var f = try Fixture.check("fn main() -> i32 { while 0 { } return 0; }", .{});
     defer f.deinit();
     try expectOnly(&f, .invalid_condition);
 }
 
-test "sema: return com tipo divergente" {
+test "sema: return with a mismatched type" {
     var f = try Fixture.check("fn main() -> i32 { return true; }", .{});
     defer f.deinit();
     try expectOnly(&f, .invalid_return);
 }
 
-test "sema: return com valor em função void" {
+test "sema: return with a value in a void function" {
     var f = try Fixture.check("fn main() -> void { return 1; }", .{});
     defer f.deinit();
     try expectOnly(&f, .invalid_return);
 }
 
-test "sema: função não-void pode terminar sem return" {
+test "sema: non-void function may finish without return" {
     var f = try Fixture.check("fn main() -> i32 { let x = 1; }", .{});
     defer f.deinit();
     try expectOnly(&f, .invalid_return);
 }
 
-test "sema: caminho com if sem else não garante retorno" {
+test "sema: path with if without else does not guarantee return" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    if 1 > 0 { return 1; }
@@ -1489,7 +1489,7 @@ test "sema: caminho com if sem else não garante retorno" {
     try expectOnly(&f, .invalid_return);
 }
 
-test "sema: if/else com ambos returns é aceito" {
+test "sema: if/else with both returns is accepted" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    if 1 > 0 { return 1; } else { return 2; }
@@ -1499,7 +1499,7 @@ test "sema: if/else com ambos returns é aceito" {
     try testing.expectEqual(@as(usize, 0), f.diags.count());
 }
 
-test "sema: chamada de função resolve assinatura" {
+test "sema: function call resolves the signature" {
     var f = try Fixture.check(
         \\fn twice(x: i32) -> i32 { return x + x; }
         \\fn main() -> i32 { return twice(21); }
@@ -1508,7 +1508,7 @@ test "sema: chamada de função resolve assinatura" {
     try testing.expectEqual(@as(usize, 0), f.diags.count());
 }
 
-test "sema: chamada com aridade errada" {
+test "sema: call with the wrong arity" {
     var f = try Fixture.check(
         \\fn twice(x: i32) -> i32 { return x + x; }
         \\fn main() -> i32 { return twice(1, 2); }
@@ -1517,13 +1517,13 @@ test "sema: chamada com aridade errada" {
     try expectOnly(&f, .invalid_call);
 }
 
-test "sema: chamada de função inexistente" {
+test "sema: call to a nonexistent function" {
     var f = try Fixture.check("fn main() -> i32 { return nada(); }", .{});
     defer f.deinit();
     try expectOnly(&f, .invalid_call);
 }
 
-test "sema: argumento com tipo errado" {
+test "sema: argument with the wrong type" {
     var f = try Fixture.check(
         \\fn id(x: i32) -> i32 { return x; }
         \\fn main() -> i32 { return id(true); }
@@ -1532,31 +1532,31 @@ test "sema: argumento com tipo errado" {
     try expectOnly(&f, .type_mismatch);
 }
 
-test "sema: tipo desconhecido" {
+test "sema: unknown type" {
     var f = try Fixture.check("fn main() -> i32 { let x: u8 = 1; return 0; }", .{});
     defer f.deinit();
     try expectOnly(&f, .unknown_type);
 }
 
-test "sema: literal não cabe em i32" {
+test "sema: literal does not fit in i32" {
     var f = try Fixture.check("fn main() -> i32 { let x = 2147483648; return 0; }", .{});
     defer f.deinit();
     try expectOnly(&f, .integer_overflow);
 }
 
-test "sema: main ausente" {
+test "sema: missing main" {
     var f = try Fixture.check("fn other() -> i32 { return 1; }", .{});
     defer f.deinit();
     try expectOnly(&f, .missing_main);
 }
 
-test "sema: main com parâmetros é inválido" {
+test "sema: main with parameters is invalid" {
     var f = try Fixture.check("fn main(argc: i32) -> i32 { return 0; }", .{});
     defer f.deinit();
     try expectOnly(&f, .invalid_main);
 }
 
-test "sema: função duplicada" {
+test "sema: duplicated function" {
     var f = try Fixture.check(
         \\fn main() -> i32 { return 1; }
         \\fn main() -> i32 { return 2; }
@@ -1565,7 +1565,7 @@ test "sema: função duplicada" {
     try expectOnly(&f, .duplicate_declaration);
 }
 
-test "sema: resolução é anotada na AST" {
+test "sema: resolution is annotated in the AST" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    let x = 5;
@@ -1580,7 +1580,7 @@ test "sema: resolução é anotada na AST" {
     try testing.expectEqualStrings("x", checked.symbols[0].name);
 }
 
-test "sema: alwaysReturns reconhece if/else completo" {
+test "sema: alwaysReturns recognizes a complete if/else" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    if 1 > 0 { return 1; } else if 2 > 1 { return 2; } else { return 3; }
@@ -1590,7 +1590,7 @@ test "sema: alwaysReturns reconhece if/else completo" {
     try testing.expectEqual(@as(usize, 0), f.diags.count());
 }
 
-test "sema: limite de parâmetros do backend é diagnosticado" {
+test "sema: backend parameter limit is diagnosed" {
     var f = try Fixture.check(
         \\fn many(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32, g: i32) -> i32 { return a; }
         \\fn main() -> i32 { return 0; }
@@ -1599,7 +1599,7 @@ test "sema: limite de parâmetros do backend é diagnosticado" {
     try expectOnly(&f, .unsupported);
 }
 
-test "sema: limite de argumentos do backend é diagnosticado" {
+test "sema: backend argument limit is diagnosed" {
     var f = try Fixture.check(
         \\fn many(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32, g: i32) -> i32 { return a; }
         \\fn main() -> i32 { return many(1, 2, 3, 4, 5, 6, 7); }
@@ -1612,13 +1612,13 @@ test "sema: limite de argumentos do backend é diagnosticado" {
     try testing.expect(found_unsupported);
 }
 
-test "sema: struct com literal, acesso e layout de slots" {
+test "sema: struct with literal, access and slot layout" {
     var f = try Fixture.check(
-        \\struct Ponto { x: i32, y: bool }
+        \\struct Point { x: i32, y: bool }
         \\fn main() -> i32 {
-        \\    var p: Ponto = Ponto { x: 1, y: true };
+        \\    var p: Point = Point { x: 1, y: true };
         \\    p.x = p.x + 2;
-        \\    let q: Ponto = p;
+        \\    let q: Point = p;
         \\    if q.y { return q.x; }
         \\    return 0;
         \\}
@@ -1628,12 +1628,12 @@ test "sema: struct com literal, acesso e layout de slots" {
     const checked = f.checked.?;
 
     try testing.expectEqual(@as(usize, 1), checked.structs.len);
-    try testing.expectEqualStrings("Ponto", checked.structs[0].decl.name);
+    try testing.expectEqualStrings("Point", checked.structs[0].decl.name);
     try testing.expectEqual(@as(usize, 2), checked.structs[0].fields.len);
     try testing.expectEqual(Type.i32, checked.structs[0].fields[0].typ);
     try testing.expectEqual(Type.bool, checked.structs[0].fields[1].typ);
 
-    // Struct ocupa um slot de base + um slot por campo: p, q = 2 * 3 slots.
+    // A struct occupies one base slot + one slot per field: p, q = 2 * 3 slots.
     try testing.expectEqual(@as(u32, 6), checked.functions[0].slot_count);
     try testing.expectEqual(Type.aggregate, checked.symbols[0].typ);
     try testing.expectEqual(@as(u32, 0), checked.symbols[0].struct_id);
@@ -1641,7 +1641,7 @@ test "sema: struct com literal, acesso e layout de slots" {
     try testing.expectEqual(@as(u32, 3), checked.symbols[1].slot);
 }
 
-test "sema: campo inexistente na leitura e na escrita" {
+test "sema: missing field on read and on write" {
     var f = try Fixture.check(
         \\struct P { x: i32 }
         \\fn main() -> i32 {
@@ -1656,7 +1656,7 @@ test "sema: campo inexistente na leitura e na escrita" {
     try testing.expectEqual(diagnostics.Kind.undefined_field, f.diags.items.items[1].kind);
 }
 
-test "sema: literal de struct incompleto e com campo repetido" {
+test "sema: incomplete struct literal with a repeated field" {
     var f = try Fixture.check(
         \\struct P { x: i32, y: i32 }
         \\fn main() -> i32 {
@@ -1668,12 +1668,12 @@ test "sema: literal de struct incompleto e com campo repetido" {
     defer f.deinit();
     try testing.expectEqual(@as(usize, 2), f.diags.count());
     try testing.expectEqual(diagnostics.Kind.invalid_struct_literal, f.diags.items.items[0].kind);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "não inicializa o campo 'y'") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "does not initialize field 'y'") != null);
     try testing.expectEqual(diagnostics.Kind.invalid_struct_literal, f.diags.items.items[1].kind);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[1].message, "repetido") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[1].message, "repeated") != null);
 }
 
-test "sema: atribuição a campo de variável imutável" {
+test "sema: assignment to a field of an immutable variable" {
     var f = try Fixture.check(
         \\struct P { x: i32 }
         \\fn main() -> i32 {
@@ -1684,35 +1684,35 @@ test "sema: atribuição a campo de variável imutável" {
     , .{});
     defer f.deinit();
     try expectOnly(&f, .immutable_assignment);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "declarado com 'let'") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "declared with 'let'") != null);
 }
 
-test "sema: struct por valor em parâmetro, retorno e argumento é aceito" {
+test "sema: struct by value in parameter, return and argument is accepted" {
     var f = try Fixture.check(
         \\struct P { x: i32, y: i32 }
         \\fn id(p: P) -> P { return p; }
-        \\fn soma(p: P) -> i32 { return p.x + p.y; }
+        \\fn sum(p: P) -> i32 { return p.x + p.y; }
         \\fn main() -> i32 {
         \\    let a: P = P { x: 1, y: 2 };
         \\    let b = id(a);
         \\    let c: P = id(P { x: 3, y: 4 });
-        \\    return soma(b) + soma(c);
+        \\    return sum(b) + sum(c);
         \\}
     , .{});
     defer f.deinit();
     try testing.expectEqual(@as(usize, 0), f.diags.count());
 
     const checked = f.checked.?;
-    // Identidades nominais preservadas na assinatura e no retorno.
+    // Nominal identities preserved in the signature and the return.
     try testing.expectEqual(Type.aggregate, checked.functions[0].return_type);
     try testing.expectEqual(@as(u32, 0), checked.functions[0].return_struct_id);
     try testing.expectEqual(@as(u32, 0), checked.functions[0].param_struct_ids[0]);
-    // Variável inferida de chamada que devolve struct fica com o struct certo.
+    // A variable inferred from a call returning a struct keeps the right struct.
     try testing.expectEqual(Type.aggregate, checked.symbols[4].typ);
     try testing.expectEqual(@as(u32, 0), checked.symbols[4].struct_id);
 }
 
-test "sema: struct de retorno com 7 campos excede o backend" {
+test "sema: returned struct with 7 fields exceeds the backend" {
     var f = try Fixture.check(
         \\struct Grande { a: i32, b: i32, c: i32, d: i32, e: i32, f: i32, g: i32 }
         \\fn grande() -> Grande { return Grande { a: 1, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7 }; }
@@ -1720,10 +1720,10 @@ test "sema: struct de retorno com 7 campos excede o backend" {
     , .{});
     defer f.deinit();
     try expectOnly(&f, .unsupported);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "retorna struct com 7 campos") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "returns a struct with 7 fields") != null);
 }
 
-test "sema: structs diferentes não são intercambiáveis como argumento" {
+test "sema: different structs are not interchangeable as arguments" {
     var f = try Fixture.check(
         \\struct A { x: i32 }
         \\struct B { x: i32 }
@@ -1735,41 +1735,41 @@ test "sema: structs diferentes não são intercambiáveis como argumento" {
     , .{});
     defer f.deinit();
     try expectOnly(&f, .type_mismatch);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "é do struct 'B', esperado 'A'") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "is struct 'B', expected 'A'") != null);
 }
 
-test "sema: retorno de struct com identidade trocada é diagnosticado" {
+test "sema: struct return with swapped identity is diagnosed" {
     var f = try Fixture.check(
         \\struct A { x: i32 }
         \\struct B { x: i32 }
-        \\fn faz() -> A { return B { x: 1 }; }
+        \\fn make() -> A { return B { x: 1 }; }
         \\fn main() -> i32 { return 0; }
     , .{});
     defer f.deinit();
     try expectOnly(&f, .invalid_return);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "esperado do struct 'A', encontrado 'B'") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "expected struct 'A' in return, found 'B'") != null);
 }
 
-test "sema: struct conta um registrador por campo na assinatura e na chamada" {
+test "sema: struct counts one register per field in signature and call" {
     var f = try Fixture.check(
-        \\struct Tres { a: i32, b: i32, c: i32 }
-        \\struct Quatro { a: i32, b: i32, c: i32, d: i32 }
-        \\fn cabe(p: Tres, x: i32, s: str) -> i32 { return x; }
-        \\fn nao_cabe(p: Quatro, x: i32, y: i32, z: i32) -> i32 { return x + y + z; }
+        \\struct Three { a: i32, b: i32, c: i32 }
+        \\struct Four { a: i32, b: i32, c: i32, d: i32 }
+        \\fn fits(p: Three, x: i32, s: str) -> i32 { return x; }
+        \\fn does_not_fit(p: Four, x: i32, y: i32, z: i32) -> i32 { return x + y + z; }
         \\fn main() -> i32 { return 0; }
     , .{});
     defer f.deinit();
     try expectOnly(&f, .unsupported);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "função 'nao_cabe' ocupa 7 registradores") != null);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "cada campo de struct um") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "function 'does_not_fit' uses 7 parameter registers") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "each struct field one") != null);
 }
 
-test "sema: struct aninhado, vazio e duplicado são diagnosticados" {
+test "sema: nested, empty and duplicated structs are diagnosed" {
     var f = try Fixture.check(
-        \\struct Vazio {}
-        \\struct Interno { v: i32 }
-        \\struct Externo { i: Interno }
-        \\struct Interno { v: i32 }
+        \\struct Empty {}
+        \\struct Inner { v: i32 }
+        \\struct Outer { i: Inner }
+        \\struct Inner { v: i32 }
         \\fn main() -> i32 { return 0; }
     , .{});
     defer f.deinit();
@@ -1779,9 +1779,9 @@ test "sema: struct aninhado, vazio e duplicado são diagnosticados" {
     var saw_dup = false;
     for (f.diags.items.items) |d| {
         switch (d.kind) {
-            .unsupported => if (std.mem.indexOf(u8, d.message, "sem campos") != null) {
+            .unsupported => if (std.mem.indexOf(u8, d.message, "with no fields") != null) {
                 saw_empty = true;
-            } else if (std.mem.indexOf(u8, d.message, "campo struct") != null) {
+            } else if (std.mem.indexOf(u8, d.message, "struct field") != null) {
                 saw_nested = true;
             },
             .duplicate_declaration => saw_dup = true,
@@ -1793,7 +1793,7 @@ test "sema: struct aninhado, vazio e duplicado são diagnosticados" {
     try testing.expect(saw_dup);
 }
 
-test "sema: struct desconhecido e campo com tipo errado" {
+test "sema: unknown struct and field with the wrong type" {
     var f = try Fixture.check(
         \\struct P { x: i32 }
         \\fn main() -> i32 {
@@ -1804,12 +1804,12 @@ test "sema: struct desconhecido e campo com tipo errado" {
     , .{});
     defer f.deinit();
     try testing.expect(f.diags.count() >= 3);
-    try testing.expectEqual(diagnostics.Kind.unknown_type, f.diags.items.items[0].kind); // anotação 'Q'
+    try testing.expectEqual(diagnostics.Kind.unknown_type, f.diags.items.items[0].kind); // annotation 'Q'
     var saw_unknown_struct = false;
     var saw_mismatch = false;
     for (f.diags.items.items) |d| {
         switch (d.kind) {
-            .unknown_type => if (std.mem.indexOf(u8, d.message, "struct 'Q' não declarado") != null) {
+            .unknown_type => if (std.mem.indexOf(u8, d.message, "struct 'Q' is not declared") != null) {
                 saw_unknown_struct = true;
             },
             .type_mismatch => saw_mismatch = true,
@@ -1820,7 +1820,7 @@ test "sema: struct desconhecido e campo com tipo errado" {
     try testing.expect(saw_mismatch);
 }
 
-test "sema: struct usado como condição ou em comparação" {
+test "sema: struct used as a condition or in a comparison" {
     var f = try Fixture.check(
         \\struct P { x: i32 }
         \\fn main() -> i32 {
@@ -1837,7 +1837,7 @@ test "sema: struct usado como condição ou em comparação" {
     try testing.expectEqual(diagnostics.Kind.invalid_condition, f.diags.items.items[1].kind);
 }
 
-test "sema: literal de struct como expressão solta é rejeitado" {
+test "sema: struct literal as a loose expression is rejected" {
     var f = try Fixture.check(
         \\struct P { x: i32 }
         \\fn main() -> i32 {
@@ -1849,7 +1849,7 @@ test "sema: literal de struct como expressão solta é rejeitado" {
     try expectOnly(&f, .unsupported);
 }
 
-test "sema: struct diferente na anotação e no inicializador" {
+test "sema: different struct in annotation and initializer" {
     var f = try Fixture.check(
         \\struct A { x: i32 }
         \\struct B { x: i32 }
@@ -1863,7 +1863,7 @@ test "sema: struct diferente na anotação e no inicializador" {
     try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "struct 'B'") != null);
 }
 
-test "sema: literal de string infere 'str' e ocupa dois slots" {
+test "sema: string literal infers 'str' and occupies two slots" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    let s = "abc";
@@ -1881,7 +1881,7 @@ test "sema: literal de string infere 'str' e ocupa dois slots" {
     try testing.expectEqual(@as(u32, 4), checked.functions[0].slot_count);
 }
 
-test "sema: 'print' aceita variável str e é void" {
+test "sema: 'print' accepts a str variable and is void" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    var s: str = "a";
@@ -1895,7 +1895,7 @@ test "sema: 'print' aceita variável str e é void" {
     try testing.expectEqual(@as(usize, 0), f.diags.count());
 }
 
-test "sema: 'print' com tipo errado é diagnosticado" {
+test "sema: 'print' with the wrong type is diagnosed" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    print(1);
@@ -1904,10 +1904,10 @@ test "sema: 'print' com tipo errado é diagnosticado" {
     , .{});
     defer f.deinit();
     try expectOnly(&f, .type_mismatch);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "'print' espera 'str'") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "'print' expects 'str'") != null);
 }
 
-test "sema: 'print' exige exatamente um argumento" {
+test "sema: 'print' requires exactly one argument" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    print("a", "b");
@@ -1916,10 +1916,10 @@ test "sema: 'print' exige exatamente um argumento" {
     , .{});
     defer f.deinit();
     try expectOnly(&f, .invalid_call);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "recebeu 2") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "received 2") != null);
 }
 
-test "sema: 'print' sem argumento é diagnosticado" {
+test "sema: 'print' without an argument is diagnosed" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    print();
@@ -1930,7 +1930,7 @@ test "sema: 'print' sem argumento é diagnosticado" {
     try expectOnly(&f, .invalid_call);
 }
 
-test "sema: 'str' não participa de aritmética" {
+test "sema: 'str' takes part in no arithmetic" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    let n = "a" + 1;
@@ -1942,7 +1942,7 @@ test "sema: 'str' não participa de aritmética" {
     try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "'str'") != null);
 }
 
-test "sema: comparação de 'str' é diagnosticada (sem comparar ponteiros)" {
+test "sema: 'str' comparison is diagnosed (no pointer comparison)" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    let s = "a";
@@ -1952,10 +1952,10 @@ test "sema: comparação de 'str' é diagnosticada (sem comparar ponteiros)" {
     , .{});
     defer f.deinit();
     try expectOnly(&f, .unsupported);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "comparação de 'str'") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "comparison of 'str'") != null);
 }
 
-test "sema: 'str' como condição é rejeitado" {
+test "sema: 'str' as a condition is rejected" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    let s = "a";
@@ -1967,7 +1967,7 @@ test "sema: 'str' como condição é rejeitado" {
     try expectOnly(&f, .invalid_condition);
 }
 
-test "sema: 'str' é aceito como parâmetro e como retorno" {
+test "sema: 'str' is accepted as parameter and as return" {
     var f = try Fixture.check(
         \\fn eco(s: str) -> str { return s; }
         \\fn mostra(s: str) -> i32 { print(s); return 0; }
@@ -1981,23 +1981,23 @@ test "sema: 'str' é aceito como parâmetro e como retorno" {
     try testing.expectEqual(@as(usize, 0), f.diags.count());
 
     const checked = f.checked.?;
-    // Parâmetro `str` ocupa dois slots (ponteiro e tamanho).
+    // A `str` parameter occupies two slots (pointer and length).
     try testing.expectEqual(Type.str, checked.functions[0].params[0]);
     try testing.expectEqual(Type.str, checked.functions[0].return_type);
     try testing.expectEqual(@as(u32, 2), checked.functions[1].slot_count);
 }
 
-test "sema: limite de registradores conta 'str' como dois" {
+test "sema: register limit counts 'str' as two" {
     var f = try Fixture.check(
-        \\fn quatro(a: str, b: str, c: str, d: str) -> i32 { return 0; }
+        \\fn four(a: str, b: str, c: str, d: str) -> i32 { return 0; }
         \\fn main() -> i32 { return 0; }
     , .{});
     defer f.deinit();
     try expectOnly(&f, .unsupported);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "8 registradores") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "uses 8 parameter registers") != null);
 }
 
-test "sema: três parâmetros 'str' cabem nos seis registradores" {
+test "sema: three 'str' parameters fit in the six registers" {
     var f = try Fixture.check(
         \\fn tres(a: str, b: str, c: str) -> i32 {
         \\    print(a);
@@ -2011,7 +2011,7 @@ test "sema: três parâmetros 'str' cabem nos seis registradores" {
     try testing.expectEqual(@as(usize, 0), f.diags.count());
 }
 
-test "sema: 'main' não pode retornar 'str'" {
+test "sema: 'main' cannot return 'str'" {
     var f = try Fixture.check(
         \\fn main() -> str { return "a"; }
     , .{});
@@ -2019,17 +2019,17 @@ test "sema: 'main' não pode retornar 'str'" {
     try expectOnly(&f, .invalid_main);
 }
 
-test "sema: argumento 'str' onde se espera 'i32' é diagnosticado" {
+test "sema: 'str' argument where 'i32' is expected is diagnosed" {
     var f = try Fixture.check(
         \\fn dobro(n: i32) -> i32 { return n + n; }
         \\fn main() -> i32 { return dobro("a"); }
     , .{});
     defer f.deinit();
     try expectOnly(&f, .type_mismatch);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "deve ser 'i32', encontrado 'str'") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "must be 'i32', found 'str'") != null);
 }
 
-test "sema: retorno 'str' sem valor é diagnosticado" {
+test "sema: 'str' return without a value is diagnosed" {
     var f = try Fixture.check(
         \\fn nome() -> str { return; }
         \\fn main() -> i32 { return 0; }
@@ -2038,7 +2038,7 @@ test "sema: retorno 'str' sem valor é diagnosticado" {
     try expectOnly(&f, .invalid_return);
 }
 
-test "sema: função que retorna 'str' precisa terminar com return" {
+test "sema: function returning 'str' must end with return" {
     var f = try Fixture.check(
         \\fn nome(b: bool) -> str {
         \\    if b { return "a"; }
@@ -2047,30 +2047,30 @@ test "sema: função que retorna 'str' precisa terminar com return" {
     , .{});
     defer f.deinit();
     try expectOnly(&f, .invalid_return);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "com valor 'str'") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "with value 'str'") != null);
 }
 
-test "sema: campo de tipo 'str' é diagnosticado" {
+test "sema: field of type 'str' is diagnosed" {
     var f = try Fixture.check(
-        \\struct P { nome: str }
+        \\struct P { name: str }
         \\fn main() -> i32 { return 0; }
     , .{});
     defer f.deinit();
     try expectOnly(&f, .unsupported);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "tipo 'str'") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "type 'str'") != null);
 }
 
-test "sema: nome 'print' é reservado" {
+test "sema: name 'print' is reserved" {
     var f = try Fixture.check(
         \\fn print(v: i32) -> void {}
         \\fn main() -> i32 { return 0; }
     , .{});
     defer f.deinit();
     try expectOnly(&f, .unsupported);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "reservado") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "reserved") != null);
 }
 
-test "sema: literal de string solto é rejeitado" {
+test "sema: loose string literal is rejected" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    "texto";
@@ -2082,7 +2082,7 @@ test "sema: literal de string solto é rejeitado" {
     try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "print") != null);
 }
 
-test "sema: atribuir a 'str' imutável é diagnosticado" {
+test "sema: assigning to an immutable 'str' is diagnosed" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    let s = "a";
@@ -2094,7 +2094,7 @@ test "sema: atribuir a 'str' imutável é diagnosticado" {
     try expectOnly(&f, .immutable_assignment);
 }
 
-test "sema: variável não pode receber valor 'void' inferido de chamada" {
+test "sema: variable cannot take a 'void' value inferred from a call" {
     var f = try Fixture.check(
         \\fn nada() { }
         \\fn main() -> i32 {
@@ -2104,10 +2104,10 @@ test "sema: variável não pode receber valor 'void' inferido de chamada" {
     , .{});
     defer f.deinit();
     try expectOnly(&f, .type_mismatch);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "'void' não pode ser armazenado") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "'void' cannot be stored") != null);
 }
 
-test "sema: anotação de valor com inicializador 'void' gera um único diagnóstico" {
+test "sema: value annotation with a 'void' initializer gives a single diagnostic" {
     var f = try Fixture.check(
         \\fn nada() { }
         \\fn main() -> i32 {
@@ -2119,7 +2119,7 @@ test "sema: anotação de valor com inicializador 'void' gera um único diagnós
     try expectOnly(&f, .type_mismatch);
 }
 
-test "sema: anotação 'void' explícita em variável é rejeitada" {
+test "sema: explicit 'void' annotation on a variable is rejected" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    let x: void = 1;
@@ -2130,7 +2130,7 @@ test "sema: anotação 'void' explícita em variável é rejeitada" {
     try expectOnly(&f, .type_mismatch);
 }
 
-test "sema: 'print' não produz valor para inicializar variável" {
+test "sema: 'print' produces no value for variable initialization" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    let x = print("a");
@@ -2141,7 +2141,7 @@ test "sema: 'print' não produz valor para inicializar variável" {
     try expectOnly(&f, .type_mismatch);
 }
 
-test "sema: 'print_i32' aceita expressão i32" {
+test "sema: 'print_i32' accepts an i32 expression" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    let x = 6 * 7;
@@ -2154,7 +2154,7 @@ test "sema: 'print_i32' aceita expressão i32" {
     try testing.expectEqual(@as(usize, 0), f.diags.count());
 }
 
-test "sema: 'print_i32' com tipo errado é diagnosticado" {
+test "sema: 'print_i32' with the wrong type is diagnosed" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    print_i32("texto");
@@ -2163,10 +2163,10 @@ test "sema: 'print_i32' com tipo errado é diagnosticado" {
     , .{});
     defer f.deinit();
     try expectOnly(&f, .type_mismatch);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "'print_i32' espera 'i32'") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "'print_i32' expects 'i32'") != null);
 }
 
-test "sema: 'print_i32' exige exatamente um argumento" {
+test "sema: 'print_i32' requires exactly one argument" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    print_i32();
@@ -2175,10 +2175,10 @@ test "sema: 'print_i32' exige exatamente um argumento" {
     , .{});
     defer f.deinit();
     try expectOnly(&f, .invalid_call);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "recebeu 0") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "received 0") != null);
 }
 
-test "sema: 'print_i32' com dois argumentos é diagnosticado" {
+test "sema: 'print_i32' with two arguments is diagnosed" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    print_i32(1, 2);
@@ -2187,20 +2187,20 @@ test "sema: 'print_i32' com dois argumentos é diagnosticado" {
     , .{});
     defer f.deinit();
     try expectOnly(&f, .invalid_call);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "recebeu 2") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "received 2") != null);
 }
 
-test "sema: nome 'print_i32' também é reservado" {
+test "sema: name 'print_i32' is reserved as well" {
     var f = try Fixture.check(
         \\fn print_i32(n: i32) -> void { }
         \\fn main() -> i32 { return 0; }
     , .{});
     defer f.deinit();
     try expectOnly(&f, .unsupported);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "reservado") != null);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "reserved") != null);
 }
 
-test "sema: 'print_i32' não produz valor para inicializar variável" {
+test "sema: 'print_i32' produces no value for variable initialization" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    let x = print_i32(1);

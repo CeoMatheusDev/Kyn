@@ -1,0 +1,8 @@
+// Expected error: each 'str' takes two registers; four exceed the backend's six.
+fn four(a: str, b: str, c: str, d: str) -> i32 {
+    return 0;
+}
+
+fn main() -> i32 {
+    return 0;
+}

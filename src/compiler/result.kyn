@@ -1,4 +1,4 @@
-// src/compiler/result.kyn — Result<T, E> nativo com propagação ? (v2.1.0-beta.1)
+// src/compiler/result.kyn — Native Result<T, E> with ? propagation (v2.1.0-beta.1)
 import "core";
 
 pub enum Result<T, E> {
@@ -13,5 +13,5 @@ pub fn propagate<T, E>(r: Result<T, E>) -> T {
     }
 }
 
-// Operador ? implementado via macro/comptime
-// let x = foo()?; // propaga erro automaticamente
+// ? operator implemented through a macro/comptime
+// let x = foo()?; // propagates the error automatically

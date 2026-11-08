@@ -1,16 +1,16 @@
-// std/core/atomics.kyn — Primitivas atômicas de baixo nível (v1.9.0)
+// std/core/atomics.kyn — low-level atomic primitives (v1.9.0)
 import "core";
 
 pub fn atomic_load(ptr: *u32) u32 {
-    // Barreira de memória + load atômico
+    // Memory barrier + atomic load
     return *ptr;
 }
 
 pub fn atomic_store(ptr: *u32, value: u32) {
-    // Barreira de memória + store atômico
+    // Memory barrier + atomic store
     *ptr = value;
 }
 
 pub fn memory_barrier() {
-    // Barreira de memória completa
+    // Full memory barrier
 }

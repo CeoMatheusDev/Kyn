@@ -1,25 +1,25 @@
-//! Lexer do bootstrap em Zig.
+//! Bootstrap lexer, written in Zig.
 //!
-//! Contrato:
-//! - Tokens guardam `text` como slice da entrada original (sem cópia).
-//! - Todos os tokens carregam um `Span` (offset, linha e coluna 1-based).
-//! - Espaços em branco e comentários `// ...` são descartados na tokenização;
-//!   não são entregues ao parser.
-//! - Um caractere não reconhecido produz um token `.invalid`; o parser o
-//!   converte em diagnóstico com a posição exata.
+//! Contract:
+//! - Tokens keep `text` as a slice of the original input (no copy).
+//! - Every token carries a `Span` (offset, 1-based line and column).
+//! - Whitespace and `// ...` comments are discarded while tokenizing;
+//!   they never reach the parser.
+//! - An unrecognized character produces an `.invalid` token; the parser turns
+//!   it into a diagnostic with the exact position.
 //!
-//! Este contrato substitui a classificação genérica anterior
-//! (`identifier`/`symbol`/`whitespace`/`comment`) que não permitia ao parser
-//! distinguir operadores de pontuação.
+//! This contract replaces the previous generic classification
+//! (`identifier`/`symbol`/`whitespace`/`comment`) which did not let the parser
+//! tell operators from punctuation.
 
 const std = @import("std");
 const Span = @import("../span.zig").Span;
 
 pub const Tag = enum {
-    // literais e nome
+    // literals and names
     identifier,
     integer,
-    /// Conteúdo de um literal de string (sem as aspas, sem interpretar escapes).
+    /// Content of a string literal (no quotes, no escape interpretation).
     string,
 
     // palavras-chave
@@ -35,7 +35,7 @@ pub const Tag = enum {
     kw_true,
     kw_false,
 
-    // pontuação
+    // punctuation
     lparen,
     rparen,
     lbrace,
@@ -63,10 +63,10 @@ pub const Tag = enum {
     amp_amp, // &&
     pipe_pipe, // ||
 
-    /// Literal de string sem aspas de fechamento (até o fim da linha/arquivo).
+    /// String literal without a closing quote (up to end of line/file).
     string_unterminated,
 
-    /// Caractere não reconhecido pelo lexer.
+    /// Character the lexer does not recognize.
     invalid,
     eof,
 };
@@ -80,11 +80,11 @@ pub const Token = struct {
         return .{ .tag = tag, .span = span, .text = text };
     }
 
-    /// Descrição legível usada em diagnósticos.
+    /// Human-readable description used in diagnostics.
     pub fn describe(self: Token) []const u8 {
         return switch (self.tag) {
             .identifier => "identificador",
-            .integer => "número inteiro",
+            .integer => "integer",
             .string => "literal de string",
             .kw_fn => "'fn'",
             .kw_import => "'import'",
@@ -121,9 +121,9 @@ pub const Token = struct {
             .bang => "'!'",
             .amp_amp => "'&&'",
             .pipe_pipe => "'||'",
-            .string_unterminated => "literal de string não terminado",
-            .invalid => "caractere inválido",
-            .eof => "fim do arquivo",
+            .string_unterminated => "unterminated string literal",
+            .invalid => "invalid character",
+            .eof => "end of file",
         };
     }
 
@@ -190,8 +190,8 @@ pub const Lexer = struct {
         if (self.pos < self.source.len) self.pos += 1;
     }
 
-    /// Descarta espaços, tabulações, retornos de carro, quebras de linha e
-    /// comentários de linha (`// ...`).
+    /// Skips spaces, tabs, carriage returns, line breaks and
+    /// line comments (`// ...`).
     fn skipTrivia(self: *Lexer) void {
         while (self.pos < self.source.len) {
             const ch = self.source[self.pos];
@@ -211,7 +211,7 @@ pub const Lexer = struct {
         }
     }
 
-    /// Retorna o próximo token significativo (nunca whitespace/comentário).
+    /// Returns the next significant token (never whitespace/comment).
     pub fn next(self: *Lexer) Token {
         self.skipTrivia();
 
@@ -276,9 +276,9 @@ pub const Lexer = struct {
         return Token.init(tag, self.makeSpan(start, start_line, start_column), self.source[start..self.pos]);
     }
 
-    /// Literal de string: `"conteúdo"`. Sem interpretação de escapes e sem
-    /// quebra de linha; aspas não podem ser escapadas nesta etapa.
-    /// `text` contém apenas o conteúdo, sem as aspas; o span cobre as aspas.
+    /// String literal: `"content"`. No escape interpretation and no line
+    /// breaks; quotes cannot be escaped at this stage.
+    /// `text` holds only the content, without quotes; the span covers the quotes.
     fn scanString(self: *Lexer, start: usize, start_line: u32, start_column: u32) Token {
         self.bump(); // aspa de abertura
         const content_start = self.pos;
@@ -289,7 +289,7 @@ pub const Lexer = struct {
                 self.bump(); // aspa de fechamento
                 return Token.init(.string, self.makeSpan(start, start_line, start_column), content);
             }
-            if (c == '\n') break; // strings não atravessam linhas
+            if (c == '\n') break; // strings do not span lines
             self.bump();
         }
 
@@ -310,8 +310,8 @@ pub const Lexer = struct {
         return false;
     }
 
-    /// Tokeniza a entrada inteira, alocando em `gpa`. O token final é `.eof`.
-    /// O chamador é dono do slice retornado.
+    /// Tokenizes the whole input, allocating from `gpa`. The last token is `.eof`.
+    /// The caller owns the returned slice.
     pub fn tokenize(self: *Lexer, gpa: std.mem.Allocator) ![]Token {
         var list: std.ArrayList(Token) = .empty;
         errdefer list.deinit(gpa);
@@ -370,15 +370,15 @@ test "lexer: operadores de dois caracteres" {
     });
 }
 
-test "lexer: pontuação" {
+test "lexer: punctuation" {
     try expectTags("( ) { } : ; ,", &.{ .lparen, .rparen, .lbrace, .rbrace, .colon, .semicolon, .comma, .eof });
 }
 
-test "lexer: descarta comentários e espaços" {
-    try expectTags("// comentário\n  let   x = 1; // fim\n", &.{ .kw_let, .identifier, .assign, .integer, .semicolon, .eof });
+test "lexer: discards comments and whitespace" {
+    try expectTags("// comment\n  let   x = 1; // end\n", &.{ .kw_let, .identifier, .assign, .integer, .semicolon, .eof });
 }
 
-test "lexer: spans com linha e coluna" {
+test "lexer: spans carry line and column" {
     var lex = Lexer.init("let x = 10;\n  return x;");
     const let_tok = lex.next();
     try std.testing.expectEqual(@as(u32, 1), let_tok.span.line);
@@ -404,18 +404,18 @@ test "lexer: inteiros" {
     try std.testing.expectEqual(Tag.eof, lex.next().tag);
 }
 
-test "lexer: caractere inválido não causa panic" {
+test "lexer: invalid character does not panic" {
     var lex = Lexer.init("@");
     const tok = lex.next();
     try std.testing.expectEqual(Tag.invalid, tok.tag);
     try std.testing.expectEqual(Tag.eof, lex.next().tag);
 }
 
-test "lexer: and e or isolados são inválidos" {
+test "lexer: isolated and/or are invalid" {
     try expectTags("& |", &.{ .invalid, .invalid, .eof });
 }
 
-test "lexer: tokenize aloca e encerra com eof" {
+test "lexer: tokenize allocates and ends with eof" {
     const gpa = std.testing.allocator;
     var lex = Lexer.init("let x = 1;");
     const toks = try lex.tokenize(gpa);
@@ -424,7 +424,7 @@ test "lexer: tokenize aloca e encerra com eof" {
     try std.testing.expectEqual(Tag.eof, toks[toks.len - 1].tag);
 }
 
-test "lexer: literal de string guarda o conteúdo sem as aspas" {
+test "lexer: string literal keeps the content without quotes" {
     var lex = Lexer.init("import \"lib/math.kyn\";");
     const import_tok = lex.next();
     try std.testing.expectEqual(Tag.kw_import, import_tok.tag);
@@ -432,7 +432,7 @@ test "lexer: literal de string guarda o conteúdo sem as aspas" {
     const str = lex.next();
     try std.testing.expectEqual(Tag.string, str.tag);
     try std.testing.expectEqualStrings("lib/math.kyn", str.text);
-    // O span cobre as aspas, para o marcador apontar o literal inteiro.
+    // The span covers the quotes so the marker points at the whole literal.
     try std.testing.expectEqual(@as(u32, 7), str.span.start);
     try std.testing.expectEqual(@as(u32, 21), str.span.end);
 
@@ -440,14 +440,14 @@ test "lexer: literal de string guarda o conteúdo sem as aspas" {
     try std.testing.expectEqual(Tag.eof, lex.next().tag);
 }
 
-test "lexer: string vazia é válida" {
+test "lexer: empty string is valid" {
     var lex = Lexer.init("\"\"");
     const tok = lex.next();
     try std.testing.expectEqual(Tag.string, tok.tag);
     try std.testing.expectEqualStrings("", tok.text);
 }
 
-test "lexer: string não terminada é tokenizada sem panic" {
+test "lexer: unterminated string is tokenized without panic" {
     var lex = Lexer.init("import \"lib/math;");
     _ = lex.next();
     const tok = lex.next();
@@ -455,14 +455,14 @@ test "lexer: string não terminada é tokenizada sem panic" {
     try std.testing.expectEqual(Tag.eof, lex.next().tag);
 }
 
-test "lexer: string não atravessa linha" {
+test "lexer: string does not span lines" {
     var lex = Lexer.init("\"ab\ncd\"");
     const tok = lex.next();
     try std.testing.expectEqual(Tag.string_unterminated, tok.tag);
     try std.testing.expectEqual(@as(u32, 1), tok.span.line);
 }
 
-test "lexer: 'struct' é palavra-chave e '.' é pontuação" {
+test "lexer: 'struct' is a keyword and '.' is punctuation" {
     var lex = Lexer.init("struct Ponto { x: i32 }");
     try std.testing.expectEqual(Tag.kw_struct, lex.next().tag);
     try std.testing.expectEqual(Tag.identifier, lex.next().tag);

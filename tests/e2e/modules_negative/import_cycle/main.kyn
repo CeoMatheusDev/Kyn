@@ -1,4 +1,4 @@
-// Erro esperado: ciclo de importação.
+// Expected error: import cycle.
 import "b.kyn";
 
 fn main() -> i32 {

@@ -1,6 +1,6 @@
-// Erro esperado: campo de struct de tipo 'str' ainda não é suportado.
-struct Rotulo {
-    texto: str,
+// Expected error: a struct field of type 'str' is not supported yet.
+struct Label {
+    text: str,
 }
 
 fn main() -> i32 {

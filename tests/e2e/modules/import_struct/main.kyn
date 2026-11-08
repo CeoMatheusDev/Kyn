@@ -1,9 +1,9 @@
-// Struct declarado no módulo importado.
+// Struct declared in the imported module.
 // expect-exit: 42
-import "ponto.kyn";
+import "point.kyn";
 
 fn main() -> i32 {
-    var p: Ponto = Ponto { x: 6, y: 7 };
+    var p: Point = Point { x: 6, y: 7 };
     p.x = p.x * 7;
     return p.x;
 }

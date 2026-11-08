@@ -1,4 +1,4 @@
-// Erro semântico esperado: atribuição a `let`.
+// Expected semantic error: assignment to a `let`.
 fn main() -> i32 {
     let x: i32 = 1;
     x = 2;

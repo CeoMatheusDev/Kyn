@@ -1,4 +1,4 @@
-// Erro esperado: 'print_i32' aceita apenas um argumento.
+// Expected error: 'print_i32' takes exactly one argument.
 fn main() -> i32 {
     print_i32(1, 2);
     return 0;

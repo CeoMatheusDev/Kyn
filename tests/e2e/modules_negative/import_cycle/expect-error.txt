@@ -1,1 +1,1 @@
-ciclo de importação
+import cycle

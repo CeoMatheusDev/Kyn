@@ -1,4 +1,4 @@
-// Erro esperado: literal não inicializa todos os campos.
+// Expected error: the literal does not initialize every field.
 struct P {
     x: i32,
     y: i32,

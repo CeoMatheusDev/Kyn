@@ -1,378 +1,405 @@
 # Changelog — Kyn
 
-Regras: Semantic Versioning 2.0.0. Pré-1.0.0 = Pre-release.
+Rules: Semantic Versioning 2.0.0. Pre-1.0.0 = pre-release.
 
-> **Aviso de rastreabilidade:** as entradas abaixo de `v0.3.0-alpha.1`
-> registram marcos pretendidos em ciclos anteriores do projeto e **não**
-> constituem evidência de implementação. Várias descrevem recursos que o código
-> não possui (por exemplo self-hosting, release "industrial estável",
-> `Result<T, E>` e organização de módulos). O estado real, verificado por build
-> e testes, está em [docs/status.md](docs/status.md). O versionamento será
-> reconciliado antes de qualquer release pública.
+> **Traceability warning:** the entries below `v0.3.0-alpha.1` record milestones
+> intended in earlier cycles of the project and do **not** constitute evidence of
+> implementation. Several of them describe features the code does not have (for
+> example self-hosting, a "stable industrial release", `Result<T, E>` and module
+> organization). The real state, verified by build and tests, is in
+> [docs/status.md](docs/status.md). Versioning will be reconciled before any
+> public release.
+
+## [v0.3.8-alpha.1] — 2026-11-07
+
+Project-wide English conversion: documentation, comments, compiler/CLI messages,
+test names and fixtures.
+
+- **Compiler messages:** all diagnostics, CLI help/errors and render prefixes are
+  now English (`error:`/`warning:`, `file:line:column: error: message`). The
+  affected assertions in `src/diagnostics.zig`, `src/driver.zig`, `src/sema/`,
+  `src/parser/` and `src/codegen/` were updated together, so no test compares a
+  string that no longer exists.
+- **Identifiers in fixtures:** the `.kyn` fixtures and the inline test programs
+  use English identifiers (`sum`, `greeting`, `point`, `counter`, `value`,
+  `code`, …) and English printed text (`hello,`, `sum`, `end`, `module`), with
+  the `// expect-stdout:` directives updated to match.
+- **Fixture names:** `struct_passagem` → `struct_passing`, `struct_retorno` →
+  `struct_return`, `struct_campos_tipos` → `struct_field_types`, `str_passagem` →
+  `str_passing`, `str_retorno` → `str_return`, `str_retorno_ramo` →
+  `str_return_branch`, `str_registradores` → `str_registers`,
+  `struct_registradores` → `struct_registers`, `print_misto` → `print_mixed`,
+  `print_int_extremos` → `print_int_extremes`; imported modules also use English
+  file names (`point.kyn`, `text.kyn`, `output.kyn`, `one.kyn`, `two.kyn`,
+  `three.kyn`, `missing.kyn`).
+- **Docs:** `README.md`, `ROADMAP.md`, `CHANGELOG.md`, `CONTRIBUTING.md`,
+  `CODE_OF_CONDUCT.md`, `DEVELOPMENT_STATE.md` and every file in `docs/`
+  (`architecture`, `status`, `development`, `spec`, `language_design`,
+  `language_reference`, `memory_model`, `tutorial`, `grammar.ebnf`,
+  `syntax.ebnf`) are written in English; the project no longer mixes languages.
+- **Evidence:** `zig build test` (204 tests), `zig build e2e` (102/102) and
+  `zig fmt --check build.zig src std` green before and after the conversion; the
+  suite was not weakened (no test removed, no assertion loosened).
+- **Version:** `0.3.8-alpha.1` (derived from `build.zig.zon`).
 
 ## [v0.3.7-alpha.1] — 2026-11-07
 
-Struct por valor: structs atravessam chamadas em parâmetros, argumentos e
-retornos, com identidade nominal verificada.
+Struct by value: structs cross calls in parameters, arguments and returns, with
+nominal identity verified.
 
-- **Semântica:** os diagnósticos de "struct por valor não suportado" (parâmetro,
-  retorno e argumento) saíram; `FunctionInfo` passou a carregar
-  `param_struct_ids` e `return_struct_id`, e `structIdOfExpr` reconhece chamadas
-  que devolvem struct — inclusive para `let b = origem();` (inferência preserva o
-  struct). Structs diferentes com a mesma forma são recusados em argumento,
-  retorno e anotação (`é do struct 'B', esperado 'A'`). O limite de registradores
-  virou `sema.registerWordsOf` (campo de struct = 1, `str` = 2, escalar = 1),
-  fonte única para declaração, chamada e retorno; retorno de struct acima de 6
-  campos é diagnosticado.
-- **x86-64:** um registrador por campo na entrada (`%rdi`, `%rsi`, …), chamadas
-  empilham uma palavra por campo e desempilham na ordem inversa, e o retorno usa
-  `%eax`/`%edx`/`%ecx`/`%r8d`/`%r9d`/`%r10d`. Campos de literal são avaliados na
-  pilha antes de irem para os registradores de retorno, então um campo nunca
-  clobbera o resultado do outro; struct devolvido por chamada pode ser passado
-  direto como argumento de outra.
-- **LLVM IR:** parâmetros achatados em argumentos escalares (`define i32
-  @soma(i32 %arg0, i32 %arg1)`), armazenamento por substituição escalar (um
-  `alloca` por campo) e retorno agregado `{ i32, i1, … }` com
-  `insertvalue`/`extractvalue`; `return f()` devolve o agregado da chamada
-  direto, sem reconstruí-lo.
-- **Testes:** 197 testes do compilador (+11) e 7 da std — **204 no total**; o
-  negativo antigo que exigia "struct por valor não suportado" virou positivo do
-  novo contrato. 3 fixtures e2e novas (`struct_passagem`, `struct_retorno`,
-  `struct_campos_tipos`), 1 módulo com struct por valor (`import_struct_abi`) e
-  2 negativas novas (`struct_nominal`, `struct_registradores`) — **102/102
-  casos**; `validate-ir` cobre **83 módulos**.
-- **Docs:** novo [docs/tutorial.md](docs/tutorial.md) (guia completo da
-  linguagem, com exemplos verificados pelo compilador), além de
-  `docs/architecture.md` (contrato de chamada de struct),
-  `docs/language_reference.md`, `docs/syntax.ebnf`, `docs/status.md`,
-  `docs/development.md`, `README.md`, `ROADMAP.md` e `DEVELOPMENT_STATE.md`.
-- **Versão:** `0.3.7-alpha.1` (derivada de `build.zig.zon`), publicada como tag
-  anotada `v0.3.7-alpha.1` com release no GitHub — primeira tag do projeto e
-  marco da política SemVer: todo ciclo validado (testes + e2e + IR estrito
-  verdes no CI de `main`) recebe tag `vX.Y.Z-alpha.N`.
-- **Integração:** PR #23 mesclado em `main` como `1c80a7b`; CI verde nos runs
-  `42427966554` (PR) e `42428126584` (`main`), com `zig fmt --check`, 204
-  testes, 102 casos e2e e `validate-ir-strict` sobre 83 módulos.
+- **Semantics:** the "struct by value not supported" diagnostics (parameter,
+  return and argument) are gone; `FunctionInfo` now carries `param_struct_ids`
+  and `return_struct_id`, and `structIdOfExpr` recognizes calls that return a
+  struct — including `let b = origin();` (inference preserves the struct).
+  Different structs with the same shape are rejected in arguments, returns and
+  annotations (`is struct 'B', expected 'A'`). The register limit became
+  `sema.registerWordsOf` (struct field = 1, `str` = 2, scalar = 1), the single
+  source for declaration, call and return; a struct return above 6 fields is
+  diagnosed.
+- **x86-64:** one register per field on entry (`%rdi`, `%rsi`, …), calls push one
+  word per field and pop in reverse order, and the return uses
+  `%eax`/`%edx`/`%ecx`/`%r8d`/`%r9d`/`%r10d`. Literal fields are evaluated on
+  the stack before moving to the return registers, so one field never clobbers
+  another's result; a struct returned by a call can be passed straight as an
+  argument to another.
+- **LLVM IR:** parameters flattened into scalar arguments (`define i32
+  @sum(i32 %arg0, i32 %arg1)`), storage through scalar replacement (one `alloca`
+  per field) and aggregate return `{ i32, i1, … }` with
+  `insertvalue`/`extractvalue`; `return f()` returns the call's aggregate
+  directly, without rebuilding it.
+- **Tests:** 197 compiler tests (+11) and 7 std tests — **204 in total**; the old
+  negative that required "struct by value not supported" became a positive of the
+  new contract. 3 new e2e fixtures (`struct_passing`, `struct_return`,
+  `struct_field_types`), 1 module with struct by value (`import_struct_abi`) and
+  2 new negatives (`struct_nominal`, `struct_registers`) — **102/102 cases**;
+  `validate-ir` covers **83 modules**.
+- **Docs:** new [docs/tutorial.md](docs/tutorial.md) (complete language guide with
+  examples verified by the compiler), plus `docs/architecture.md` (struct call
+  contract), `docs/language_reference.md`, `docs/syntax.ebnf`, `docs/status.md`,
+  `docs/development.md`, `README.md`, `ROADMAP.md` and `DEVELOPMENT_STATE.md`.
+- **Version:** `0.3.7-alpha.1` (derived from `build.zig.zon`), published as the
+  annotated tag `v0.3.7-alpha.1` with a GitHub release — the project's first tag
+  and the milestone of the SemVer policy: every validated cycle (tests + e2e +
+  strict IR green in the `main` CI) gets a `vX.Y.Z-alpha.N` tag.
+- **Integration:** PR #23 merged into `main` as `1c80a7b`; CI green in runs
+  `42427966554` (PR) and `42428126584` (`main`), with `zig fmt --check`, 204
+  tests, 102 e2e cases and `validate-ir-strict` over 83 modules.
 
 ## [v0.3.6-alpha.1] — 2026-11-07
 
-`str` por valor: texto atravessa chamadas de função em parâmetros e retornos.
+`str` by value: text crosses function calls in parameters and returns.
 
-- **Semântica:** `str` deixou de ser restrito a variáveis locais —
-  `Type.isValue()` inclui `.str`, então parâmetros e retornos `str` são aceitos
-  como qualquer escalar. O antigo `max_params` (agora `max_arg_registers`) foi
-  trocado por uma contagem em
-  **palavras de registrador** (`Type.registerWords()`: 1 por escalar, 2 por
-  `str`), aplicada na declaração e em cada chamada, com diagnósticos que citam
-  o total e a regra (`'str' ocupa dois`). Continuam diagnosticados: campo de
-  struct de tipo `str`, `str` em aritmética/condição/`==`/`!=`, `main`
-  retornando `str` e expressão `str` sem uso (mensagem agora genérica, não só
-  para literal).
-- **Backend x86-64:** ABI própria documentada — cada parâmetro/argumento `str`
-  ocupa dois registradores consecutivos (ponteiro, tamanho) na ordem SysV
-  (`(%rdi,%rsi)`, `(%rdx,%rcx)`, `(%r8,%r9)`), e o retorno vem em `%rax`
-  (ponteiro) + `%rdx` (tamanho). O prólogo grava os dois registradores nos dois
-  slots do símbolo; chamadas com mais de um argumento empilham uma palavra por
-  registrador e desempilham na ordem inversa, e o caso de um único argumento
-  vai direto para o registrador (sem tocar na pilha). `emitStrValue` centraliza
-  literal/identificador/chamada que devolve `str`, reutilizado por `print`,
-  atribuição e `return`.
-- **Backend LLVM IR:** assinaturas expandem cada `str` em `ptr %argN` +
-  `i64 %argN+1`; o retorno é o agregado `{ ptr, i64 }` montado com
-  `insertvalue` e lido com `extractvalue` (`StrOperand`/`strOperand` decide
-  entre literal, `load` e `extractvalue`). `emitCall` recusa `str` de retorno em
-  vez de emitir `call` truncado.
-- **Testes:** 186 testes do compilador (12 novos) + 7 da std — **193 no total**;
-  os 2 negativos antigos que exigiam "`str` em parâmetro/retorno não suportado"
-  foram substituídos por testes do novo contrato. 3 fixtures e2e novas com
-  stdout conferido (`str_passagem`, `str_retorno`, `str_retorno_ramo`), 1 módulo
-  importado com `str` (`import_str`) e 2 negativas novas
-  (`str_registradores`, `str_retorno_main`, substituindo `str_param_unsupported`)
-  — **97/97 casos**; `validate-ir` passa a cobrir **79 módulos**.
-- **Docs:** `docs/architecture.md` (convenção de chamada e restrições
-  remanescentes), `docs/syntax.ebnf`, `docs/language_reference.md`,
-  `docs/status.md`, `README.md` e `DEVELOPMENT_STATE.md`.
-- **Versão:** `0.3.6-alpha.1` (derivada de `build.zig.zon`).
+- **Semantics:** `str` is no longer restricted to local variables —
+  `Type.isValue()` includes `.str`, so `str` parameters and returns are accepted
+  like any scalar. The old `max_params` (now `max_arg_registers`) was replaced by
+  a count in **register words** (`Type.registerWords()`: 1 per scalar, 2 per
+  `str`), applied at declaration and on every call, with diagnostics that quote
+  the total and the rule (`'str' takes two`). Still diagnosed: struct field of
+  type `str`, `str` in arithmetic/condition/`==`/`!=`, `main` returning `str` and
+  an unused `str` expression (message now generic, not only for literals).
+- **x86-64 backend:** documented own ABI — every `str` parameter/argument takes
+  two consecutive registers (pointer, length) in SysV order (`(%rdi,%rsi)`,
+  `(%rdx,%rcx)`, `(%r8,%r9)`), and the return comes in `%rax` (pointer) + `%rdx`
+  (length). The prologue stores both registers into the symbol's two slots; calls
+  with more than one argument push one word per register and pop in reverse
+  order, and the single-argument case goes straight to the register (no stack
+  traffic). `emitStrValue` centralizes literal/identifier/call returning `str`,
+  reused by `print`, assignment and `return`.
+- **LLVM IR backend:** signatures expand each `str` into `ptr %argN` +
+  `i64 %argN+1`; the return is the `{ ptr, i64 }` aggregate built with
+  `insertvalue` and read with `extractvalue` (`StrOperand`/`strOperand` decides
+  between literal, `load` and `extractvalue`). `emitCall` rejects a `str` return
+  instead of emitting a truncated `call`.
+- **Tests:** 186 compiler tests (12 new) + 7 std — **193 in total**; the 2 old
+  negatives that required "`str` in parameter/return not supported" were replaced
+  by tests of the new contract. 3 new e2e fixtures with checked stdout
+  (`str_passing`, `str_return`, `str_return_branch`), 1 imported module with
+  `str` (`import_str`) and 2 new negatives (`str_registers`, `str_return_main`,
+  replacing `str_param_unsupported`) — **97/97 cases**; `validate-ir` now covers
+  **79 modules**.
+- **Docs:** `docs/architecture.md` (calling convention and remaining
+  restrictions), `docs/syntax.ebnf`, `docs/language_reference.md`,
+  `docs/status.md`, `README.md` and `DEVELOPMENT_STATE.md`.
+- **Version:** `0.3.6-alpha.1` (derived from `build.zig.zon`).
 
 ## [v0.3.5-alpha.1] — 2026-11-07
 
-Saída de valores: builtin `print_i32(n: i32)` com formatação decimal própria.
+Value output: builtin `print_i32(n: i32)` with its own decimal formatting.
 
-- **AST/Semântica:** `ast.Expr.Builtin` ganhou `print_i32` e a checagem de
-  chamadas embutidas passou a ser genérica (aridade 1 + tipo esperado por
-  builtin, nome reservado derivado do enum) — `print` e `print_i32` seguem a
-  mesma regra, e o resultado `void` continua não sendo armazenável em
-  `let`/`var`.
-- **Backend x86-64:** rotina `kyn_print_i32` emitida **uma única vez** por
-  programa, em `.text`, com `divl` unsigned e buffer de 12 bytes na pilha
-  (sem libc e sem estado global); `print_i32` apenas passa o valor em `%edi` e
-  chama a rotina, que escreve os dígitos e a quebra de linha por syscall
-  `write`. `-2147483648` sai correto (após `negl`, INT_MIN vira `0x80000000` e
-  a divisão unsigned produz os 10 dígitos).
-- **Backend LLVM IR:** função interna `@kyn_print_i32` emitida uma única vez por
-  módulo (`alloca [12 x i8]`, laço com `phi`, `urem`/`udiv`, `select` para o
-  módulo, `zext` para `i64`) e duas chamadas a `write` da libc.
-- **Testes:** 174 testes do compilador (12 novos: parser, semântica dos dois
-  builtins, rotina decimal nos dois backends e ausência quando não usada) e
-  7 da std; 4 fixtures e2e novas com `print_i32`/misto e 2 negativas —
-  **92/92 casos**, com stdout conferido linha a linha (inclui INT_MIN).
-- **Docs:** `docs/syntax.ebnf` (produção `builtin_call`), `docs/architecture.md`
-  (rotina decimal nos dois backends), `docs/status.md`, `docs/development.md`,
-  `docs/language_reference.md`, `README.md`, `ROADMAP.md` e
-  `DEVELOPMENT_STATE.md` atualizados.
-- **Versão:** `0.3.5-alpha.1` (derivada de `build.zig.zon`).
-- **Integração:** PR #17 mesclado em `main` como `87903db`; CI verde nos runs
-  `42423945656` (PR) e `42424147963` (`main`), com `zig fmt --check`, testes,
-  e2e (stdout conferido) e `validate-ir-strict` sobre 75 módulos.
+- **AST/Semantics:** `ast.Expr.Builtin` gained `print_i32` and builtin call
+  checking became generic (arity 1 + expected type per builtin, reserved name
+  derived from the enum) — `print` and `print_i32` follow the same rule, and the
+  `void` result remains non-storable in `let`/`var`.
+- **x86-64 backend:** `kyn_print_i32` routine emitted **once** per program, in
+  `.text`, with unsigned `divl` and a 12-byte buffer on the stack (no libc and no
+  global state); `print_i32` just passes the value in `%edi` and calls the
+  routine, which writes the digits and the line break through the `write`
+  syscall. `-2147483648` comes out correct (after `negl`, INT_MIN becomes
+  `0x80000000` and the unsigned division produces the 10 digits).
+- **LLVM IR backend:** internal function `@kyn_print_i32` emitted once per module
+  (`alloca [12 x i8]`, loop with `phi`, `urem`/`udiv`, `select` for the modulo,
+  `zext` to `i64`) and two calls to libc `write`.
+- **Tests:** 174 compiler tests (12 new: parser, semantics of both builtins, the
+  decimal routine in both backends and its absence when unused) and 7 std tests;
+  4 new e2e fixtures with `print_i32`/mixed and 2 negatives — **92/92 cases**,
+  with stdout checked line by line (including INT_MIN).
+- **Docs:** `docs/syntax.ebnf` (`builtin_call` production), `docs/architecture.md`
+  (decimal routine in both backends), `docs/status.md`, `docs/development.md`,
+  `docs/language_reference.md`, `README.md`, `ROADMAP.md` and
+  `DEVELOPMENT_STATE.md` updated.
+- **Version:** `0.3.5-alpha.1` (derived from `build.zig.zon`).
+- **Integration:** PR #17 merged into `main` as `87903db`; CI green in runs
+  `42423945656` (PR) and `42424147963` (`main`), with `zig fmt --check`, tests,
+  e2e (stdout checked) and `validate-ir-strict` over 75 modules.
 
 ## [v0.3.4-alpha.1] — 2026-11-07
 
-Saída de texto: `str` como fatia estática e `print(...)` embutido.
+Text output: `str` as a static slice and the `print(...)` builtin.
 
-- **AST:** `Expr.Kind.str_literal` (bytes sem aspas) e `Expr.Call.builtin`
-  (`print`), permitindo que a semântica marque chamadas embutidas sem
-  confundi-las com funções declaradas na fonte.
-- **Parser:** literal de string passa a ser expressão (inclusive como argumento
-  de chamada); string não terminada vira diagnóstico `.syntax` com a posição.
-- **Semântica:** novo `Type.str` (não escalar) com **dois slots** (ponteiro e
-  tamanho, mesma convenção nos dois backends) e `print` embutido: exatamente um
-  argumento `str`, resultado `void`, nome reservado para funções declaradas.
-  Diagnósticos novos: `str` em aritmética/condição, comparação `==`/`!=` de
-  `str` (sem comparar ponteiros silenciosamente), literal solto como statement,
-  `str` em parâmetro/retorno/argumento e campo de struct de tipo `str`.
-- **Backend x86-64:** literais deduplicados em `.section .rodata` como listas de
-  `.byte` (sem escapes), atribuição/cópia em dois `movq` e `print` via syscall
-  `write` (texto + quebra de linha), sem depender de libc.
-- **Backend LLVM IR:** `@.strN = private unnamed_addr constant [N x i8]`,
-  `declare i64 @write(i32, ptr, i64)` e `print` como duas chamadas a `write`;
-  `str` usa dois `alloca` (`ptr` + `i64`). IR aceito por `llvm-as` no CI.
-- **Pool de strings:** `codegen.StrPool` deduplica por conteúdo, então cada
-  texto distinto vira um único rótulo/constante independentemente das
-  referências.
-- **Semântica (correção de contrato):** `let`/`var` com inicializador `void`
-  (por exemplo `let x = print("a");` ou `let x = f();` com `f` sem retorno)
-  agora é diagnosticado como um **único** erro; antes `let x = f();` passava
-  pela semântica e chegava ao backend com um tipo sem representação.
-- **Testes:** 162 testes do compilador (29 novos: parser, semântica, os dois
-  backends e o pool) e 7 da std; 4 fixtures e2e novas com `print` (stdout
-  conferido), 1 módulo importado com `print` e 4 fixtures negativas —
-  **86/86 casos**, com `tools/e2e.sh` passando a comparar `// expect-stdout:`
-  além de `// expect-exit:`.
+- **AST:** `Expr.Kind.str_literal` (bytes without quotes) and `Expr.Call.builtin`
+  (`print`), letting semantics mark builtin calls without confusing them with
+  functions declared in the source.
+- **Parser:** the string literal becomes an expression (including as a call
+  argument); an unterminated string becomes a `.syntax` diagnostic with the
+  position.
+- **Semantics:** new `Type.str` (not a scalar) with **two slots** (pointer and
+  length, the same convention in both backends) and the `print` builtin: exactly
+  one `str` argument, `void` result, name reserved for declared functions. New
+  diagnostics: `str` in arithmetic/condition, `str` `==`/`!=` comparison (without
+  silently comparing pointers), loose literal as a statement, `str` in
+  parameter/return/argument and a struct field of type `str`.
+- **x86-64 backend:** literals deduplicated in `.section .rodata` as `.byte`
+  lists (no escapes), assignment/copy in two `movq` and `print` through the
+  `write` syscall (text + line break), without libc.
+- **LLVM IR backend:** `@.strN = private unnamed_addr constant [N x i8]`,
+  `declare i64 @write(i32, ptr, i64)` and `print` as two calls to `write`; `str`
+  uses two `alloca`s (`ptr` + `i64`). IR accepted by `llvm-as` in CI.
+- **String pool:** `codegen.StrPool` deduplicates by content, so each distinct
+  text becomes a single label/constant regardless of references.
+- **Semantics (contract fix):** `let`/`var` with a `void` initializer (for
+  example `let x = print("a");` or `let x = f();` with a void `f`) is now
+  diagnosed as a **single** error; before, `let x = f();` passed semantics and
+  reached the backend with a type that had no representation.
+- **Tests:** 162 compiler tests (29 new: parser, semantics, both backends and the
+  pool) and 7 std tests; 4 new e2e fixtures with `print` (stdout checked), 1
+  imported module with `print` and 4 negative fixtures — **86/86 cases**, with
+  `tools/e2e.sh` now comparing `// expect-stdout:` in addition to
+  `// expect-exit:`.
 - **Docs:** `docs/syntax.ebnf`, `docs/grammar.ebnf`, `docs/architecture.md`
-  (representação de `str` e saída de texto), `docs/status.md`,
+  (`str` representation and text output), `docs/status.md`,
   `docs/development.md`, `docs/language_reference.md`, `README.md`,
-  `ROADMAP.md` e `DEVELOPMENT_STATE.md` atualizados.
-- **Versão:** `0.3.4-alpha.1` (derivada de `build.zig.zon`).
-- **Integração:** PR #15 mesclado em `main` como `89ca6ce`; CI verde nos runs
-  `42420648098` (PR) e `42421025867` (`main`), com `zig fmt --check`, testes,
-  e2e (stdout conferido) e `validate-ir-strict` sobre 71 módulos.
+  `ROADMAP.md` and `DEVELOPMENT_STATE.md` updated.
+- **Version:** `0.3.4-alpha.1` (derived from `build.zig.zon`).
+- **Integration:** PR #15 merged into `main` as `89ca6ce`; CI green in runs
+  `42420648098` (PR) and `42421025867` (`main`), with `zig fmt --check`, tests,
+  e2e (stdout checked) and `validate-ir-strict` over 71 modules.
 
 ## [v0.3.3-alpha.1] — 2026-11-07
 
-Structs com valor: declaração, literais, campos e layout nos dois backends.
+Structs with value: declaration, literals, fields and layout in both backends.
 
-- **Lexer:** palavra-chave `struct` e pontuação `.` (ponto, usada em `p.campo`).
-- **Parser:** `struct Nome { campo: tipo, ... }` no nível superior (ordem livre em
-  relação a `fn`, vírgula final opcional, erros com span); literais
-  `Nome { campo: valor }`; acesso `p.campo` encadeável na gramática; nova
-  atribuição `p.campo = valor`. Condições de `if`/`while` desativam o literal de
-  struct, porque `Nome {` ali inicia o bloco.
+- **Lexer:** `struct` keyword and `.` punctuation (dot, used in `p.field`).
+- **Parser:** `struct Name { field: type, ... }` at top level (free order relative
+  to `fn`, optional trailing comma, errors with span); literals
+  `Name { field: value }`; `p.field` access chainable in the grammar; new
+  assignment `p.field = value`. `if`/`while` conditions disable the struct
+  literal, because `Name {` there starts the block.
 - **AST:** `Program.structs`, `ast.StructDecl`/`ast.Field`,
-  `Expr.field_access`, `Expr.struct_literal`/`FieldInit` e
-  `Stmt.field_assign`, com índices resolvidos pela semântica.
-- **Semântica:** `Type.aggregate` + `Checked.structs` (duas passadas: nomes e
-  depois campos), resolução de campo, validação de literais (todos os campos,
-  uma vez cada), atribuição imutável, tipos incompatíveis e structs diferentes
-  na anotação. Restrições diagnosticadas: struct por valor em
-  parâmetro/retorno/argumento, campo de tipo struct, struct vazio, struct em
-  condição/comparação e literal como expressão solta.
-- **Layout:** variável de struct reserva `1 + n` slots (base + um por campo).
-  x86-64 usa `movl` nos offsets dos slots; o backend LLVM aplica substituição
-  escalar (um `alloca` por campo, sem tipos agregados). Struct nunca escapa da
-  função nesta etapa, então não há cópia parcial nem estado não inicializado.
-- **Driver:** structs dos módulos importados entram no programa achatado em
-  pré-ordem, com `file_id` para atribuição correta dos diagnósticos.
-- **Testes:** 132 testes do compilador (16 novos: lexer, parser, semântica,
-  driver multi-arquivo e estrutura de IR/assembly) e 7 da std; 3 fixtures e2e
-  novas com `struct` executadas (saídas 14, 10 e 21), 1 módulo com struct
-  (saída 42) e 3 fixtures negativas de struct — 77/77 casos.
-- **Docs:** `docs/syntax.ebnf` e `docs/grammar.ebnf` descrevem `struct`,
-  literais e acesso a campo; `docs/architecture.md` documenta o layout;
+  `Expr.field_access`, `Expr.struct_literal`/`FieldInit` and `Stmt.field_assign`,
+  with indices resolved by semantics.
+- **Semantics:** `Type.aggregate` + `Checked.structs` (two passes: names, then
+  fields), field resolution, literal validation (every field, once each),
+  immutable assignment, incompatible types and different structs in the
+  annotation. Diagnosed restrictions: struct by value in
+  parameter/return/argument, field of struct type, empty struct, struct in
+  condition/comparison and literal as a loose expression.
+- **Layout:** a struct variable reserves `1 + n` slots (base + one per field).
+  x86-64 uses `movl` at the slot offsets; the LLVM backend applies scalar
+  replacement (one `alloca` per field, no aggregate types). A struct never
+  escapes the function at this stage, so there is no partial copy and no
+  uninitialized state.
+- **Driver:** structs from imported modules enter the flattened program in
+  pre-order, with a `file_id` for correct diagnostic attribution.
+- **Tests:** 132 compiler tests (16 new: lexer, parser, semantics, multi-file
+  driver and IR/assembly structure) and 7 std tests; 3 new e2e fixtures with
+  `struct` executed (exits 14, 10 and 21), 1 module with struct (exit 42) and 3
+  negative struct fixtures — 77/77 cases.
+- **Docs:** `docs/syntax.ebnf` and `docs/grammar.ebnf` describe `struct`,
+  literals and field access; `docs/architecture.md` documents the layout;
   `docs/status.md`, `docs/development.md`, `docs/language_reference.md`,
-  `README.md`, `ROADMAP.md` e `DEVELOPMENT_STATE.md` atualizados.
-- **Versão:** `0.3.3-alpha.1` (derivada de `build.zig.zon`).
-- **Integração:** PR #13 mesclado em `main` como `4234c07`; CI verde nos runs
-  `42417725687` (PR) e `42417878774` (`main`), incluindo
-  `zig build validate-ir-strict` com 66 módulos aceitos por `llvm-as`.
+  `README.md`, `ROADMAP.md` and `DEVELOPMENT_STATE.md` updated.
+- **Version:** `0.3.3-alpha.1` (derived from `build.zig.zon`).
+- **Integration:** PR #13 merged into `main` as `4234c07`; CI green in runs
+  `42417725687` (PR) and `42417878774` (`main`), including
+  `zig build validate-ir-strict` with 66 modules accepted by `llvm-as`.
 
 ## [v0.3.2-alpha.1] — 2026-11-07
 
-Módulos: `import` com caminhos relativos e compilação multi-arquivo.
+Modules: `import` with relative paths and multi-file compilation.
 
-- **Lexer:** literais de string entre aspas duplas (`"..."`, sem escapes e sem
-  quebra de linha), com token `.string` guardando o conteúdo e
-  `.string_unterminated` para literais abertos; nova palavra-chave `import`.
-- **Parser:** `import "caminho";` no nível superior, antes das funções. Caminho
-  precisa ser literal de string; `import` depois de uma função, caminho sem
-  aspas e falta de `;` produzem diagnóstico de sintaxe com span.
-- **Driver:** novo `compilePath(gpa, io, dir, caminho, opções)`, que carrega o
-  arquivo raiz e resolve `import` recursivamente em relação ao diretório do
-  arquivo importador (`std.fs.path.resolveAlloc`, sem syscalls). Cada caminho é
-  normalizado e carregado uma única vez (importações em diamante não duplicam
-  símbolos); ciclos geram `.import_cycle`, arquivos ausentes `.import_not_found`
-  e símbolos repetidos entre arquivos `.duplicate_declaration`. Os módulos são
-  achatados em um único `ast.Program` em pré-ordem (raiz primeiro), antes da
-  semântica, de modo que os backends existentes não mudaram. `compile` continua
-  disponível para um único buffer e diagnostica `import` como não resolvido.
-- **Diagnósticos:** `Diagnostic.file` + `List.addInFile`; a CLI imprime
-  `arquivo:linha:coluna` do arquivo correto, inclusive para erros dentro de
-  módulos importados. `renderDiagnostics` agora recebe a lista de fontes.
-- **CLI:** `kync check/emit <arquivo.kyn>` compila o arquivo e seus imports;
-  erro de leitura do arquivo raiz continua saindo com código 3, enquanto
-  importação ausente é erro de compilação (código 1).
-- **Testes:** 108 testes do compilador (21 novos: lexer de strings, parser de
-  `import` e carregamento multi-arquivo com diamante, ciclo, arquivo ausente,
-  símbolo duplicado e atribuição de arquivo nos diagnósticos); 3 fixtures e2e
-  positivas multi-arquivo executadas de verdade e 3 negativas com mensagem
-  esperada. `tools/e2e.sh` e `tools/validate-ir.sh` ganharam as seções de
-  módulos (70 casos e2e, 62 módulos de IR).
-- **Docs:** `docs/syntax.ebnf` e `docs/grammar.ebnf` descrevem `import` e o
-  literal de string; `docs/status.md`, `docs/development.md`,
-  `docs/architecture.md`, `README.md`, `ROADMAP.md` e `DEVELOPMENT_STATE.md`
-  atualizados com o estado verificado.
-- **Build:** `kyn.version` passa a vir de `build.zig.zon` via opções de build
-  (fim da duplicação da versão em `src/root.zig`).
-- **Integração:** PR #10 mesclado em `main` como `1c149dd`; CI verde nos runs
-  `42415765698` (PR) e `42415945385` (`main`), incluindo
-  `zig build validate-ir-strict` com 62 módulos aceitos por `llvm-as`.
+- **Lexer:** string literals between double quotes (`"..."`, no escapes and no
+  line break), with the `.string` token keeping the contents and
+  `.string_unterminated` for open literals; new `import` keyword.
+- **Parser:** `import "path";` at top level, before the functions. The path must
+  be a string literal; `import` after a function, a path without quotes and a
+  missing `;` produce a syntax diagnostic with a span.
+- **Driver:** new `compilePath(gpa, io, dir, path, options)`, which loads the root
+  file and resolves `import` recursively relative to the importing file's
+  directory (`std.fs.path.resolveAlloc`, no syscalls). Each path is normalized
+  and loaded once (diamond imports do not duplicate symbols); cycles produce
+  `.import_cycle`, missing files `.import_not_found` and repeated symbols across
+  files `.duplicate_declaration`. Modules are flattened into a single
+  `ast.Program` in pre-order (root first), before semantics, so the existing
+  backends did not change. `compile` remains available for a single buffer and
+  diagnoses `import` as unresolved.
+- **Diagnostics:** `Diagnostic.file` + `List.addInFile`; the CLI prints
+  `file:line:column` of the right file, including errors inside imported modules.
+  `renderDiagnostics` now receives the list of sources.
+- **CLI:** `kync check/emit <file.kyn>` compiles the file and its imports; a root
+  file read error still exits with code 3, while a missing import is a
+  compilation error (code 1).
+- **Tests:** 108 compiler tests (21 new: string lexer, `import` parser and
+  multi-file loading with diamond, cycle, missing file, duplicated symbol and
+  file attribution in diagnostics); 3 positive multi-file e2e fixtures actually
+  executed and 3 negatives with the expected message. `tools/e2e.sh` and
+  `tools/validate-ir.sh` gained the module sections (70 e2e cases, 62 IR
+  modules).
+- **Docs:** `docs/syntax.ebnf` and `docs/grammar.ebnf` describe `import` and the
+  string literal; `docs/status.md`, `docs/development.md`,
+  `docs/architecture.md`, `README.md`, `ROADMAP.md` and `DEVELOPMENT_STATE.md`
+  updated with the verified state.
+- **Build:** `kyn.version` now comes from `build.zig.zon` through build options
+  (no more duplicated version in `src/root.zig`).
+- **Integration:** PR #10 merged into `main` as `1c149dd`; CI green in runs
+  `42415765698` (PR) and `42415945385` (`main`), including
+  `zig build validate-ir-strict` with 62 modules accepted by `llvm-as`.
 
 ## [v0.3.1-alpha.1] — 2026-11-07
 
-Integração contínua e validação do backend LLVM IR por ferramenta real.
+Continuous integration and LLVM IR backend validation by a real tool.
 
-- **CI:** adicionado `.github/workflows/ci.yml` (ubuntu-24.04) que instala Zig
-  0.17.0 a partir do wheel oficial do PyPI, instala LLVM e executa
-  `zig fmt --check`, `zig build test`, `zig build e2e` e
-  `zig build validate-ir-strict`. Execuções verdes: `42413779278` (primeira)
-  e `42414049577` (com validação estrita e `actions/checkout@v7`).
-- **Validação de IR:** novo `tools/validate-ir.sh`, que roda `llvm-as`
-  (PATH, sufixo de versão ou `/usr/lib/llvm-*/bin`) ou `clang -x ir` sobre o IR
-  de todas as fixtures suportadas (59 módulos). Sem LLVM, a variante leniente
-  avisa; a variante `--require-tool` (usada no CI) falha, impedindo que a
-  validação seja ignorada em silêncio.
-- **Build:** novos passos `zig build validate-ir` e
-  `zig build validate-ir-strict`.
-- **Documentação:** `docs/development.md` descreve a suíte de validação, o
-  workflow de CI e como reproduzir localmente; `README.md` ganha badge de CI;
-  `docs/status.md` e `ROADMAP.md` atualizados com a evidência obtida.
+- **CI:** added `.github/workflows/ci.yml` (ubuntu-24.04) that installs Zig
+  0.17.0 from the official PyPI wheel, installs LLVM and runs
+  `zig fmt --check`, `zig build test`, `zig build e2e` and
+  `zig build validate-ir-strict`. Green runs: `42413779278` (first) and
+  `42414049577` (with strict validation and `actions/checkout@v7`).
+- **IR validation:** new `tools/validate-ir.sh`, which runs `llvm-as` (PATH,
+  version suffix or `/usr/lib/llvm-*/bin`) or `clang -x ir` over the IR of every
+  supported fixture (59 modules). Without LLVM the lenient variant warns; the
+  `--require-tool` variant (used in CI) fails, preventing validation from being
+  silently skipped.
+- **Build:** new `zig build validate-ir` and `zig build validate-ir-strict`
+  steps.
+- **Documentation:** `docs/development.md` describes the validation suite, the CI
+  workflow and how to reproduce it locally; `README.md` gains a CI badge;
+  `docs/status.md` and `ROADMAP.md` updated with the evidence obtained.
 
 ## [v0.3.0-alpha.1] — 2026-11-07
 
-Ciclo de integração do frontend com validação executável.
+Integration cycle of the frontend with executable validation.
 
-- **Build:** adicionados `build.zig` e `build.zig.zon` (Zig 0.17.0 como versão
-  mínima). `zig build`, `zig build test` e `zig build e2e` funcionam.
-- **Toolchain:** desbloqueio da validação com Zig 0.17.0 real (binário oficial
-  obtido via pacote PyPI `ziglang` 0.17.0.post0).
-- **Lexer:** contrato de tokens reescrito com `Tag` tipada, palavras-chave,
-  operadores de dois caracteres e `Span` (offset, linha, coluna 1-based);
-  comentários e espaços descartados; caractere inválido vira token diagnosticado.
-- **AST:** novo modelo com funções, parâmetros, `let`/`var`, atribuição,
-  `return`, `if`/`else`, `while`, blocos e expressões; anotações de resolução
-  feitas pela semântica.
-- **Parser:** constrói o programa completo, com precedência/associatividade
-  documentadas em `docs/syntax.ebnf`; erros com span e mensagem.
-- **Semântica:** escopos aninhados, resolução de nomes, tipos `i32`/`bool`/
-  `void`, mutabilidade, verificação de chamadas, validação de `main`,
-  verificação estrutural de retorno e atribuição de slots de pilha.
-- **Diagnósticos:** módulo próprio com categoria estável, mensagem, linha e
-  marcador `^`.
-- **Backends:** interface em `src/codegen/codegen.zig` com dois emissores
-  derivados da AST — LLVM IR textual e assembly x86-64 System V sem libc.
-- **CLI `kync`:** `check` e `emit` (`--llvm`, `--asm`, `-o`, `--lib`) com
-  códigos de saída 0/1/2/3 e ajuda/versão.
-- **Testes:** 96 testes unitários (89 do compilador + 7 da std experimental);
-  64 casos de ponta a ponta (9 fixtures
-  comportamentais executadas, 50 fixtures `tests/integration/case_N.kyn`
-  conferidas pelo código de saída e 5 fixtures negativas). Testes antigos em
-  `src/test_*.zig` foram consolidados em `src/tests.zig` e `std/tests.zig`
-  (o antigo `src/test_core.zig` importava um arquivo inexistente).
-- **Documentação:** `README.md`, `docs/status.md`, `docs/architecture.md`,
-  `docs/development.md`, `docs/grammar.ebnf`, `docs/syntax.ebnf` e `ROADMAP.md`
-  reconciliados com o comportamento observado.
+- **Build:** added `build.zig` and `build.zig.zon` (Zig 0.17.0 as the minimum
+  version). `zig build`, `zig build test` and `zig build e2e` work.
+- **Toolchain:** unblocked validation with real Zig 0.17.0 (official binary
+  obtained through the PyPI package `ziglang` 0.17.0.post0).
+- **Lexer:** token contract rewritten with a typed `Tag`, keywords,
+  two-character operators and `Span` (offset, 1-based line and column); comments
+  and whitespace discarded; an invalid character becomes a diagnosed token.
+- **AST:** new model with functions, parameters, `let`/`var`, assignment,
+  `return`, `if`/`else`, `while`, blocks and expressions; resolution annotations
+  filled in by semantics.
+- **Parser:** builds the whole program, with precedence/associativity documented
+  in `docs/syntax.ebnf`; errors with span and message.
+- **Semantics:** nested scopes, name resolution, types `i32`/`bool`/`void`,
+  mutability, call checking, `main` validation, structural return check and stack
+  slot assignment.
+- **Diagnostics:** dedicated module with stable category, message, line and a `^`
+  marker.
+- **Backends:** interface in `src/codegen/codegen.zig` with two emitters derived
+  from the AST — textual LLVM IR and x86-64 System V assembly without libc.
+- **`kync` CLI:** `check` and `emit` (`--llvm`, `--asm`, `-o`, `--lib`) with exit
+  codes 0/1/2/3 plus help/version.
+- **Tests:** 96 unit tests (89 compiler + 7 experimental std); 64 end-to-end
+  cases (9 behavioral fixtures executed, 50 `tests/integration/case_N.kyn`
+  fixtures checked by exit code and 5 negative fixtures). Old tests in
+  `src/test_*.zig` were consolidated into `src/tests.zig` and `std/tests.zig`
+  (the old `src/test_core.zig` imported a file that does not exist).
+- **Documentation:** `README.md`, `docs/status.md`, `docs/architecture.md`,
+  `docs/development.md`, `docs/grammar.ebnf`, `docs/syntax.ebnf` and `ROADMAP.md`
+  reconciled with the observed behavior.
 
 ## [v2.3.0] — 2026-11-01
-- Marco 3.10: Lançamento da Release Industrial Estável. Congelamento final do compilador self-hosted `kync`, documentação completa, empacotamento do binário final.
+- Milestone 3.10: Stable Industrial Release launch. Final freeze of the self-hosted `kync` compiler, complete documentation, packaging of the final binary.
 
 ## [v2.2.0-rc.1] — 2026-11-01
-- Marco 3.9: 50+ arquivos de integração end-to-end (`tests/integration/case_*.kyn`).
+- Milestone 3.9: 50+ end-to-end integration files (`tests/integration/case_*.kyn`).
 
 ## [v2.1.0-beta.1] — 2026-11-01
-- Marco 3.8: Result<T, E> nativo (`src/compiler/result.kyn`, `tests/result_basic.kyn`).
+- Milestone 3.8: native Result<T, E> (`src/compiler/result.kyn`, `tests/result_basic.kyn`).
 
 ## [v2.0.0-beta.1] — 2026-11-01
-- Marco 3.7: RingBuffer lock-free (`std/core/ringbuffer.kyn`, `tests/ringbuffer_basic.kyn`).
+- Milestone 3.7: lock-free RingBuffer (`std/core/ringbuffer.kyn`, `tests/ringbuffer_basic.kyn`).
 
 ## [v1.9.0] — 2026-11-01
-- Marco 3.6: Primitivas atômicas (`std/core/atomics.kyn`, `tests/atomics_basic.kyn`).
+- Milestone 3.6: atomic primitives (`std/core/atomics.kyn`, `tests/atomics_basic.kyn`).
 
 ## [v1.8.0] — 2026-11-01
-- Marco 3.5: Suporte a FFI Nativa com C (`src/compiler/ffi.kyn`, `tests/ffi_basic.kyn`).
+- Milestone 3.5: native C FFI support (`src/compiler/ffi.kyn`, `tests/ffi_basic.kyn`).
 
 ## [v1.7.0] — 2026-11-01
-- Marco 3.4: Otimizações de registradores no CodeGen (`src/compiler/regopt.kyn`, `tests/regopt_basic.kyn`).
+- Milestone 3.4: register optimizations in codegen (`src/compiler/regopt.kyn`, `tests/regopt_basic.kyn`).
 
 ## [v1.6.0] — 2026-11-01
-- Marco 3.3: Verificação de mutabilidade estrita (`src/compiler/mutability.kyn`, `tests/mutability_basic.kyn`).
+- Milestone 3.3: strict mutability checking (`src/compiler/mutability.kyn`, `tests/mutability_basic.kyn`).
 
 ## [v1.5.0] — 2026-11-01
-- Marco 3.2: ArenaAllocator nativo (`std/core/arena.kyn`, `tests/arena_basic.kyn`).
+- Milestone 3.2: native ArenaAllocator (`std/core/arena.kyn`, `tests/arena_basic.kyn`).
 
 ## [v1.4.0] — 2026-11-01
-- Marco 3.1: Sistema de Módulos & Imports (`src/compiler/modules.kyn`, `tests/modules/basic.kyn`).
+- Milestone 3.1: Module & Import system (`src/compiler/modules.kyn`, `tests/modules/basic.kyn`).
 
 ## [v1.2.0] — 2026-11-01
-- Fuzz Testing: `tests/fuzz/fuzzer.kyn`, `tests/fuzz/harness.kyn`, `tests/fuzz/edge_cases.kyn`.
-- Garantia de crash-proof (sem panic/segfault) para entradas malformadas.
+- Fuzz testing: `tests/fuzz/fuzzer.kyn`, `tests/fuzz/harness.kyn`, `tests/fuzz/edge_cases.kyn`.
+- Crash-proof guarantee (no panic/segfault) for malformed input.
 
 ## [v1.1.0] — 2026-11-01
-- Diagnostics: `src/compiler/span.kyn`, `src/compiler/diagnostics.kyn` (mensagens de erro estilo Rust/Zig).
-- Testes: `tests/diagnostics/invalid_type.kyn`, `tests/diagnostics/invalid_syntax.kyn`.
+- Diagnostics: `src/compiler/span.kyn`, `src/compiler/diagnostics.kyn` (Rust/Zig-style error messages).
+- Tests: `tests/diagnostics/invalid_type.kyn`, `tests/diagnostics/invalid_syntax.kyn`.
 
 ## [v1.0.0] — 2026-11-01
-- Marco 3.1/3.2: Self-Hosting — compilador reescrito em Kyn (`src/compiler/`), testes `tests/self_host_test.sh`.
-- Linguagem estável oficial, pronta para produção.
+- Milestone 3.1/3.2: Self-hosting — compiler rewritten in Kyn (`src/compiler/`), tests `tests/self_host_test.sh`.
+- Official stable language, ready for production.
 
 ## [v0.9.0-rc.1] — 2026-11-01
-- Marco 2.4: Release Candidate do compilador Bootstrap. Cobertura de testes > 90%, otimizações de pipeline, especificações congeladas.
-- README profissional com badges, roadmap SemVer e arquitetura.
+- Milestone 2.4: Bootstrap compiler release candidate. Test coverage > 90%, pipeline optimizations, frozen specifications.
+- Professional README with badges, SemVer roadmap and architecture.
 
 ## [v0.8.0-beta.2] — 2026-11-01
-- Marco 2.3: `std/os/` (I/O, Threads, Networking), `src/ffi/ffi.zig` (FFI C), `tests/std_basic.kyn`, `src/test_std.zig`.
-- Expansão da capacidade de interação com SO e ecossistemas externos.
+- Milestone 2.3: `std/os/` (I/O, threads, networking), `src/ffi/ffi.zig` (C FFI), `tests/std_basic.kyn`, `src/test_std.zig`.
+- Expansion of the ability to interact with the OS and external ecosystems.
 
 ## [v0.6.0-beta.1] — 2026-11-01
-- Marco 2.2: `src/sema/unsafe.zig` (verificação de blocos `unsafe` e `#[repr(C)]`), `tests/unsafe_basic.kyn`, `src/test_unsafe.zig`.
-- Transição alpha → beta: enforce de segurança e layout de memória.
+- Milestone 2.2: `src/sema/unsafe.zig` (`unsafe` block and `#[repr(C)]` checking), `tests/unsafe_basic.kyn`, `src/test_unsafe.zig`.
+- Alpha → beta transition: safety enforcement and memory layout.
 
 ## [v0.5.0-alpha.1] — 2026-11-01
-- Marco 2.1: `std/core/core.zig` (unsafe, @align, alocadores explícitos), `tests/core_basic.kyn`, `src/test_core.zig`.
-- Separação `kyn:core` (bare-metal) iniciada.
+- Milestone 2.1: `std/core/core.zig` (unsafe, @align, explicit allocators), `tests/core_basic.kyn`, `src/test_core.zig`.
+- `kyn:core` (bare-metal) separation started.
 
 ## [v0.4.0-alpha.1] — 2026-11-01
-- Marco 1.4: `src/codegen/codegen.zig` (emissão LLVM IR básico), testes `tests/codegen_basic.kyn` + `src/test_codegen.zig`.
-- Ciclo completo do compilador Bootstrap: Lexer → Parser → AST → Sema → CodeGen.
+- Milestone 1.4: `src/codegen/codegen.zig` (basic LLVM IR emission), tests `tests/codegen_basic.kyn` + `src/test_codegen.zig`.
+- Full bootstrap compiler cycle: Lexer → Parser → AST → Sema → CodeGen.
 
 ## [v0.3.0-alpha.1] — 2026-11-01
-- Marco 1.3: `src/sema/sema.zig` (Typechecker básico, escopo `let`, `Result<i32, E>` inicial), testes `tests/sema_basic.kyn`.
-- Integração `lexer` → `parser` → `ast` → `sema`.
+- Milestone 1.3: `src/sema/sema.zig` (basic typechecker, `let` scope, initial `Result<i32, E>`), tests `tests/sema_basic.kyn`.
+- `lexer` → `parser` → `ast` → `sema` integration.
 
 ## [v0.2.0-alpha.1] — 2026-11-01
-- Marco 1.2: Parser (`src/parser/parser.zig`), AST (`src/ast/ast.zig`), testes `.kyn` (`tests/parser_basic.kyn`).
-- Separação `lexer` → `parser` → `ast` respeitada.
-- Erros sintáticos reportados via `!AST.Error`.
+- Milestone 1.2: Parser (`src/parser/parser.zig`), AST (`src/ast/ast.zig`), `.kyn` tests (`tests/parser_basic.kyn`).
+- `lexer` → `parser` → `ast` separation respected.
+- Syntax errors reported through `!AST.Error`.
 
 ## [v0.1.0-alpha.1] — 2026-11-01
-- Marco 1.1: estrutura de repositório, CLI `kync`, Lexer básico, testes Zig + `.kyn`.
-- Dependência estrita: Zig 0.17.0.
-- Target emissão: LLVM IR direto (Fase 1.4).
+- Milestone 1.1: repository structure, `kync` CLI, basic lexer, Zig + `.kyn` tests.
+- Strict dependency: Zig 0.17.0.
+- Target emission: direct LLVM IR (Phase 1.4).

@@ -1,4 +1,4 @@
-// src/compiler/span.kyn — Span de localização (Diagnostics)
+// src/compiler/span.kyn — Source location span (Diagnostics)
 pub struct Span {
     file_path: []u8,
     line: usize,

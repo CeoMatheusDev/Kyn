@@ -1,17 +1,17 @@
-// Struct por valor atravessa módulos: identidade e ordem dos campos preservadas.
+// Struct by value crosses modules: identity and field order preserved.
 // expect-stdout: 13
 // expect-stdout: 13
 // expect-exit: 13
-import "ponto.kyn";
+import "point.kyn";
 
-fn soma(p: Ponto) -> i32 {
+fn sum(p: Point) -> i32 {
     return p.x + p.y;
 }
 
 fn main() -> i32 {
-    let a = origem();
-    print_i32(soma(a));
-    let b = espelha(a);
-    print_i32(soma(b));
-    return soma(b);
+    let a = origin();
+    print_i32(sum(a));
+    let b = mirror(a);
+    print_i32(sum(b));
+    return sum(b);
 }

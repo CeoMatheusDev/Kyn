@@ -1,5 +1,5 @@
 // expect-exit: 55
-// Soma 1..10 em laço com variável mutável e comparação.
+// Sums 1..10 in a loop with a mutable variable and a comparison.
 fn main() -> i32 {
     var total: i32 = 0;
     var i: i32 = 1;

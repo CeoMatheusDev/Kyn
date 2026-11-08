@@ -1,5 +1,5 @@
-//! Agregador de testes da biblioteca padrão experimental (`kyn:core`,
-//! `kyn:std`). Executado por `zig build test`.
+//! Test aggregator of the experimental standard library (`kyn:core`,
+//! `kyn:std`). Run by `zig build test`.
 
 test {
     _ = @import("core/core.zig");

@@ -1,41 +1,41 @@
 //! AST do Kyn (bootstrap).
 //!
-//! Ownership: todos os nós, slices de parâmetros e listas de statements são
-//! alocados pelo allocator passado ao parser (na prática, uma arena por
-//! compilação). Não há liberação individual; o dono é quem criou o allocator.
+//! Ownership: every node, parameter slice and statement list is allocated by
+//! the allocator passed to the parser (in practice, one arena per compilation).
+//! There is no individual free: the owner is whoever created the allocator.
 //!
-//! Os nós referenciam o texto original por slices (`[]const u8`), sem cópia.
+//! Nodes reference the original text through slices (`[]const u8`), no copies.
 //!
-//! A semântica anota os nós com índices (`Expr.resolved`, `Stmt.decl_symbol`,
-//! `Call.callee_fn`); a AST não armazena tipos — o resultado da análise vive em
-//! `sema.Checked`, mantendo a AST independente de decisões semânticas.
+//! Semantic analysis annotates nodes with indices (`Expr.resolved`,
+//! `Stmt.decl_symbol`, `Call.callee_fn`); the AST stores no types — the analysis
+//! result lives in `sema.Checked`, keeping the AST free of semantic decisions.
 
 const std = @import("std");
 const Span = @import("../span.zig").Span;
 
-/// Nome de tipo tal como escrito na fonte.
+/// Type name exactly as written in the source.
 pub const TypeName = struct {
     name: []const u8,
     span: Span,
 };
 
 pub const Program = struct {
-    /// Importações declaradas no arquivo, na ordem da fonte. O loader de
-    /// módulos as resolve; o programa achatado entregue à semântica/backends
+    /// Imports declared in the file, in source order. The module loader
+    /// resolves them; the flattened program handed to semantics/backends
     /// tem `imports` vazio.
     imports: []Import = &.{},
-    /// Declarações `struct` de todos os módulos, em pré-ordem.
+    /// `struct` declarations of every module, in pre-order.
     structs: []*StructDecl = &.{},
     functions: []*Function,
     span: Span,
 };
 
-/// `struct Nome { campo: tipo, ... }` — declaração no nível superior.
+/// `struct Name { field: type, ... }` — top-level declaration.
 pub const StructDecl = struct {
     name: []const u8,
     name_span: Span,
     fields: []Field,
-    /// Arquivo-fonte de origem, atribuído pelo loader de módulos.
+    /// Source file of origin, assigned by the module loader.
     file_id: u32 = 0,
     span: Span,
 };
@@ -47,7 +47,7 @@ pub const Field = struct {
     span: Span,
 };
 
-/// `import "caminho";` — caminho relativo ao arquivo que importa.
+/// `import "path";` — path relative to the importing file.
 pub const Import = struct {
     path: []const u8,
     path_span: Span,
@@ -57,11 +57,11 @@ pub const Import = struct {
 pub const Function = struct {
     name: []const u8,
     name_span: Span,
-    /// Arquivo-fonte de origem (índice em `driver.SourceFile`), atribuído pelo
-    /// loader de módulos; 0 em compilações de buffer único.
+    /// Source file of origin (index into `driver.SourceFile`), assigned by the
+    /// module loader; 0 for single-buffer compilations.
     file_id: u32 = 0,
     params: []Param,
-    /// `null` quando não há anotação de retorno (`fn main() { ... }`).
+    /// `null` when there is no return annotation (`fn main() { ... }`).
     return_type: ?TypeName,
     body: []*Stmt,
     span: Span,
@@ -76,22 +76,22 @@ pub const Param = struct {
 pub const Expr = struct {
     span: Span,
     kind: Kind,
-    /// Índice do símbolo resolvido pela semântica (variáveis).
+    /// Symbol index resolved by semantic analysis (variables).
     resolved: ?u32 = null,
 
     pub const Kind = union(enum) {
         int_literal: IntLiteral,
         bool_literal: bool,
-        /// Literal de string: bytes entre aspas, sem interpretar escapes.
-        /// O valor é uma fatia estática (ponteiro + tamanho), não um escalar.
+        /// String literal: bytes between quotes, with no escape interpretation.
+        /// The value is a static slice (pointer + length), not a scalar.
         str_literal: []const u8,
         identifier: []const u8,
         call: Call,
         binary: Binary,
         unary: Unary,
-        /// `base.campo` — hoje só bases de tipo struct com campos escalares.
+        /// `base.field` — today only struct bases with scalar fields.
         field_access: FieldAccess,
-        /// `Nome { campo: valor, ... }`
+        /// `Name { field: value, ... }`
         struct_literal: StructLiteral,
     };
 
@@ -99,14 +99,14 @@ pub const Expr = struct {
         base: *Expr,
         name: []const u8,
         name_span: Span,
-        /// Índice do campo na declaração do struct, preenchido pela semântica.
+        /// Field index in the struct declaration, filled in by semantic analysis.
         field_index: ?u32 = null,
     };
 
     pub const StructLiteral = struct {
         type_name: TypeName,
         fields: []FieldInit,
-        /// Índice do struct resolvido pela semântica.
+        /// Struct index resolved by semantic analysis.
         resolved_struct: ?u32 = null,
     };
 
@@ -199,8 +199,8 @@ pub const Expr = struct {
         operand: *Expr,
     };
 
-    /// Funções embutidas reconhecidas pela semântica, sem declaração na fonte.
-    /// O nome de cada campo é o próprio identificador aceito na fonte.
+    /// Builtin functions recognized by semantics, with no source declaration.
+    /// Each field name is the identifier accepted in the source.
     pub const Builtin = enum {
         print,
         print_i32,
@@ -210,9 +210,9 @@ pub const Expr = struct {
         callee: []const u8,
         callee_span: Span,
         args: []*Expr,
-        /// Índice da função resolvida pela semântica.
+        /// Index of the function resolved by semantic analysis.
         callee_fn: ?u32 = null,
-        /// Preenchido pela semântica quando a chamada é uma função embutida
+        /// Filled in by semantic analysis when the call is a builtin
         /// (nesse caso `callee_fn` fica nulo).
         builtin: ?Builtin = null,
     };
@@ -227,13 +227,13 @@ pub const Expr = struct {
 pub const Stmt = struct {
     span: Span,
     kind: Kind,
-    /// Índice do símbolo declarado (apenas `let_decl`), preenchido pela semântica.
+    /// Index of the declared symbol (only `let_decl`), filled in by semantics.
     decl_symbol: ?u32 = null,
 
     pub const Kind = union(enum) {
         let_decl: VarDecl,
         assign: Assign,
-        /// `base.campo = valor;` — atribuição a campo de struct.
+        /// `base.field = value;` — assignment to a struct field.
         field_assign: FieldAssign,
         return_stmt: ?*Expr,
         expr_stmt: *Expr,
@@ -245,7 +245,7 @@ pub const Stmt = struct {
     pub const VarDecl = struct {
         name: []const u8,
         name_span: Span,
-        /// Anotação de tipo opcional (`let x: i32 = 1;`).
+        /// Optional type annotation (`let x: i32 = 1;`).
         type_name: ?TypeName,
         init: *Expr,
         mutable: bool,
@@ -255,7 +255,7 @@ pub const Stmt = struct {
         name: []const u8,
         name_span: Span,
         value: *Expr,
-        /// Índice do símbolo resolvido pela semântica.
+        /// Symbol index resolved by semantic analysis.
         resolved: ?u32 = null,
     };
 
@@ -264,7 +264,7 @@ pub const Stmt = struct {
         name: []const u8,
         name_span: Span,
         value: *Expr,
-        /// Índice do campo na declaração do struct, preenchido pela semântica.
+        /// Field index in the struct declaration, filled in by semantic analysis.
         field_index: ?u32 = null,
     };
 
@@ -291,12 +291,12 @@ pub const Stmt = struct {
     }
 };
 
-/// Constrói um slice de AST em memória de arena a partir de uma lista.
+/// Builds an arena-allocated AST slice from a list.
 pub fn toOwned(comptime T: type, arena: std.mem.Allocator, list: *std.ArrayList(T)) ![]T {
     return list.toOwnedSlice(arena);
 }
 
-test "ast: constrói nó de expressão em arena" {
+test "ast: builds an expression node in an arena" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
