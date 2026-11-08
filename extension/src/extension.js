@@ -3,7 +3,7 @@ const vscode = require("vscode");
 const cp = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
-const { validateSnapshot, filePathOf, targetAt, findSymbol, referencesFor } = require("./index");
+const { validateSnapshot, filePathOf, targetAt, findSymbol, referencesFor, remapSnapshotOffsets } = require("./index");
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const SELECTOR = { language: "kyn", scheme: "file" };
 
@@ -198,7 +198,14 @@ class KynClient {
       for (const file of snapshot.files) {
         if (canonical(file.path) === temporaryKey) file.path = canonical(originalPath);
       }
-      return snapshot;
+      const sourceTextByFile = new Map();
+      for (const file of snapshot.files) {
+        const source = canonical(file.path) === canonical(originalPath)
+          ? doc.getText()
+          : await fs.promises.readFile(file.path, "utf8");
+        sourceTextByFile.set(file.id, source);
+      }
+      return remapSnapshotOffsets(snapshot, sourceTextByFile);
     } finally {
       if (temporaryPath) void fs.promises.unlink(temporaryPath).catch(() => {});
     }
