@@ -65,7 +65,7 @@ zig build validate-ir
 
 Use `zig build validate-ir-strict` to require an LLVM verifier. CI runs the strict validation step so a missing verifier cannot silently pass.
 
-The latest recorded baseline in [Implementation status](docs/status.md) is **246 compiler unit tests + 7 standard-library tests** and **130 end-to-end cases**. Test counts are snapshots and must be refreshed from actual command output.
+The last recorded executed baseline in [Implementation status](docs/status.md) is **246 compiler unit tests + 7 standard-library tests** and **130 end-to-end cases**. This maintenance branch adds four regression tests; they have not yet been executed, so the verified count must be refreshed after CI or a local test run.
 
 ## Quick start
 
