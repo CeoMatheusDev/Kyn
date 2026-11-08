@@ -3,7 +3,6 @@ const vscode = require("vscode");
 const cp = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
-const { indexSource, tokenAt } = require("./index");
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const SELECTOR = { language: "kyn", scheme: "file" };
 
@@ -158,6 +157,50 @@ class KynClient {
       child.on("close", code => resolve({ code: overflow ? -1 : code, stdout, stderr }));
     });
   }
+  async semanticIndex(doc) {
+    if (this.dead || doc.isClosed || doc.languageId !== "kyn" || doc.uri.scheme !== "file") return null;
+    const executable = compilerOf(doc), cwd = cwdOf(doc);
+    const originalPath = doc.uri.fsPath;
+    let sourcePath = originalPath, temporaryPath = null;
+    if (doc.isDirty) {
+      temporaryPath = path.join(path.dirname(originalPath),
+        "." + path.basename(originalPath) + "." + process.pid + "." + doc.version + ".symbols.tmp.kyn");
+      try {
+        await fs.promises.writeFile(temporaryPath, doc.getText(), "utf8");
+        sourcePath = temporaryPath;
+      } catch (error) {
+        if (temporaryPath) void fs.promises.unlink(temporaryPath).catch(() => {});
+        this.fail(error, "temporary semantic source");
+        return null;
+      }
+    }
+    try {
+      const result = await this.run(executable, ["symbols", "--json", "--lib", sourcePath], cwd);
+      if (result.error) { this.fail(result.error, executable); return null; }
+      if (result.code !== 0) {
+        this.output.appendLine("[symbols] semantic analysis failed for " + doc.uri.fsPath);
+        return null;
+      }
+      let snapshot;
+      try { snapshot = JSON.parse(result.stdout); }
+      catch {
+        this.output.appendLine("[symbols] kync returned invalid semantic JSON.");
+        return null;
+      }
+      if (snapshot.schema !== 1 || !Array.isArray(snapshot.files) ||
+          !Array.isArray(snapshot.symbols) || !Array.isArray(snapshot.references)) {
+        this.output.appendLine("[symbols] unsupported semantic index schema.");
+        return null;
+      }
+      const temporaryKey = canonical(sourcePath);
+      for (const file of snapshot.files) {
+        if (canonical(file.path) === temporaryKey) file.path = canonical(originalPath);
+      }
+      return snapshot;
+    } finally {
+      if (temporaryPath) void fs.promises.unlink(temporaryPath).catch(() => {});
+    }
+  }
   async emit(doc, backend) {
     if (!doc || doc.languageId !== "kyn" || doc.uri.scheme !== "file") {
       void vscode.window.showInformationMessage("Open a local .kyn file first."); return;
@@ -260,108 +303,111 @@ function symbols(document) {
 
 
 class WorkspaceSymbolIndex {
-  constructor() { this.dirty = true; this.snapshot = null; this.refreshing = null; }
-  invalidate() { this.dirty = true; }
-  async get() {
-    while (this.dirty || !this.snapshot) {
-      if (!this.refreshing) {
-        const pending = this.rebuild();
-        this.refreshing = pending;
-        try { await pending; }
-        finally { if (this.refreshing === pending) this.refreshing = null; }
-      } else {
-        await this.refreshing;
-      }
-    }
-    return this.snapshot;
+  constructor(client) {
+    this.client = client;
+    this.cache = new Map();
+    this.pending = new Map();
   }
-  async rebuild() {
-    const files = await vscode.workspace.findFiles("**/*.kyn", "**/{.git,node_modules,zig-out}/**", 2000);
-    const open = new Map(vscode.workspace.textDocuments
-      .filter(doc => doc.languageId === "kyn" && doc.uri.scheme === "file")
-      .map(doc => [doc.uri.toString(), doc]));
-    const documents = new Map(), declarations = [];
-    for (const uri of files) {
-      const key = uri.toString(), doc = open.get(key);
-      try {
-        const source = doc ? doc.getText() : Buffer.from(await vscode.workspace.fs.readFile(uri)).toString("utf8");
-        if (Buffer.byteLength(source, "utf8") > 1024 * 1024) continue;
-        const indexed = indexSource(source, key);
-        documents.set(key, indexed);
-        declarations.push(...indexed.declarations);
-      } catch { /* File may be unreadable or removed during indexing. */ }
-    }
-    for (const [key, doc] of open) {
-      if (documents.has(key)) continue;
-      const indexed = indexSource(doc.getText(), key);
-      documents.set(key, indexed);
-      declarations.push(...indexed.declarations);
-    }
-    const byName = new Map();
-    for (const declaration of declarations) {
-      if (!byName.has(declaration.name)) byName.set(declaration.name, []);
-      byName.get(declaration.name).push(declaration);
-    }
-    this.snapshot = { documents, declarations, byName };
-    this.dirty = false;
-    return this.snapshot;
+  invalidate() {
+    this.cache.clear();
   }
-  async resolve(document, position) {
-    const snapshot = await this.get();
-    const indexed = snapshot.documents.get(document.uri.toString());
-    if (!indexed) return null;
-    const token = tokenAt(indexed, document.offsetAt(position));
-    if (!token) return null;
-    const matches = snapshot.byName.get(token.text) || [];
-    return matches.length === 1 ? { token, declaration: matches[0], snapshot } : null;
+  async get(document) {
+    const key = document.uri.toString();
+    const cached = this.cache.get(key);
+    if (cached && cached.version === document.version) return cached.snapshot;
+    if (this.pending.has(key)) return this.pending.get(key);
+    const pending = this.client.semanticIndex(document).then(snapshot => {
+      if (snapshot && !document.isClosed) this.cache.set(key, { version: document.version, snapshot });
+      return snapshot;
+    }).finally(() => this.pending.delete(key));
+    this.pending.set(key, pending);
+    return pending;
   }
-  async definition(document, position) {
-    const found = await this.resolve(document, position);
-    if (!found) return null;
-    const uri = vscode.Uri.parse(found.declaration.uri);
-    const target = await vscode.workspace.openTextDocument(uri);
+  filePath(snapshot, fileId) {
+    const file = snapshot.files.find(entry => entry.id === fileId);
+    return file ? file.path : null;
+  }
+  symbolAt(snapshot, document, offset) {
+    const file = canonical(document.uri.fsPath);
+    const declaration = snapshot.symbols.find(symbol =>
+      canonical(this.filePath(snapshot, symbol.file) || "") === file &&
+      symbol.start <= offset && offset < symbol.end);
+    if (declaration) return declaration.id;
+    const reference = snapshot.references.find(item =>
+      canonical(this.filePath(snapshot, item.file) || "") === file &&
+      item.start <= offset && offset < item.end);
+    return reference ? reference.target : null;
+  }
+  async location(snapshot, entry) {
+    const file = this.filePath(snapshot, entry.file);
+    if (!file) return null;
+    const uri = vscode.Uri.file(file);
+    const document = await vscode.workspace.openTextDocument(uri);
     return new vscode.Location(uri, new vscode.Range(
-      target.positionAt(found.declaration.start), target.positionAt(found.declaration.end)
+      document.positionAt(entry.start), document.positionAt(entry.end)
     ));
   }
+  async definition(document, position) {
+    const snapshot = await this.get(document);
+    if (!snapshot) return null;
+    const id = this.symbolAt(snapshot, document, document.offsetAt(position));
+    if (!id) return null;
+    const symbol = snapshot.symbols.find(entry => entry.id === id);
+    return symbol ? this.location(snapshot, symbol) : null;
+  }
   async references(document, position, includeDeclaration) {
-    const found = await this.resolve(document, position);
-    if (!found) return [];
+    const snapshot = await this.get(document);
+    if (!snapshot) return [];
+    const id = this.symbolAt(snapshot, document, document.offsetAt(position));
+    if (!id) return [];
     const locations = [];
-    for (const indexed of found.snapshot.documents.values()) {
-      const uri = vscode.Uri.parse(indexed.uri);
-      const target = await vscode.workspace.openTextDocument(uri);
-      for (const occurrence of indexed.identifiers) {
-        if (occurrence.text !== found.token.text) continue;
-        if (!includeDeclaration && indexed.uri === found.declaration.uri && occurrence.start === found.declaration.start) continue;
-        locations.push(new vscode.Location(uri, new vscode.Range(
-          target.positionAt(occurrence.start), target.positionAt(occurrence.end)
-        )));
+    if (includeDeclaration) {
+      const declaration = snapshot.symbols.find(entry => entry.id === id);
+      if (declaration) {
+        const location = await this.location(snapshot, declaration);
+        if (location) locations.push(location);
       }
+    }
+    for (const reference of snapshot.references) {
+      if (reference.target !== id) continue;
+      const location = await this.location(snapshot, reference);
+      if (location) locations.push(location);
     }
     return locations;
   }
   async workspaceSymbols(query) {
-    const snapshot = await this.get(), needle = query.toLowerCase(), result = [];
-    for (const declaration of snapshot.declarations) {
-      if (needle && !declaration.name.toLowerCase().includes(needle) &&
-          !declaration.qualifiedName.toLowerCase().includes(needle)) continue;
-      const uri = vscode.Uri.parse(declaration.uri);
-      const target = await vscode.workspace.openTextDocument(uri);
-      const kind = declaration.kind === "function" || declaration.kind === "method" ? vscode.SymbolKind.Function :
-        declaration.kind === "struct" ? vscode.SymbolKind.Struct : vscode.SymbolKind.Enum;
-      result.push(new vscode.SymbolInformation(declaration.qualifiedName, kind, "",
-        new vscode.Location(uri, new vscode.Range(
-          target.positionAt(declaration.start), target.positionAt(declaration.end)
-        ))));
+    const needle = query.toLowerCase(), result = [], seen = new Set();
+    const documents = vscode.workspace.textDocuments.filter(doc =>
+      doc.languageId === "kyn" && doc.uri.scheme === "file" && !doc.isClosed);
+    for (const document of documents) {
+      const snapshot = await this.get(document);
+      if (!snapshot) continue;
+      for (const symbol of snapshot.symbols) {
+        if (needle && !symbol.name.toLowerCase().includes(needle) &&
+            !(symbol.container || "").toLowerCase().includes(needle)) continue;
+        const file = this.filePath(snapshot, symbol.file);
+        if (!file) continue;
+        const key = canonical(file) + ":" + symbol.start + ":" + symbol.end;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const kind = symbol.kind === "function" ? vscode.SymbolKind.Function :
+          symbol.kind === "method" ? vscode.SymbolKind.Method :
+          symbol.kind === "struct" ? vscode.SymbolKind.Struct :
+          symbol.kind === "enum" ? vscode.SymbolKind.Enum :
+          symbol.kind === "enum_case" ? vscode.SymbolKind.EnumMember :
+          symbol.kind === "field" ? vscode.SymbolKind.Field : vscode.SymbolKind.Variable;
+        const location = await this.location(snapshot, symbol);
+        if (location) result.push(new vscode.SymbolInformation(
+          symbol.name, kind, symbol.container || "", location
+        ));
+      }
     }
     return result;
   }
 }
-
 function activate(context) {
   const client = new KynClient(context);
-  const symbolIndex = new WorkspaceSymbolIndex();
+  const symbolIndex = new WorkspaceSymbolIndex(client);
   context.subscriptions.push(
     vscode.languages.registerCompletionItemProvider(SELECTOR, { provideCompletionItems: completions }, ".", ":", " "),
     vscode.languages.registerDocumentSymbolProvider(SELECTOR, { provideDocumentSymbols: symbols }),
