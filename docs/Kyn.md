@@ -107,7 +107,7 @@ let a: i32 = 42;
 let b: u64 = 100;
 let c: bool = true;
 let d: str = "texto";
-let e: void = ();   // void não é armazenável, usado apenas como retorno
+// void só pode ser usado como tipo de retorno; não é armazenável.
 ```
 
 O tipo pode ser omitido quando o compilador consegue inferir:
