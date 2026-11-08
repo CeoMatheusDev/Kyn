@@ -136,6 +136,7 @@ The existing directory boundaries are intentional. In particular, `src/compiler/
 | [Development guide](docs/development.md) | Build, CLI, testing and contribution workflow |
 | [Memory model](docs/memory_model.md) | Proposed memory and ownership model |
 | [Embedded analysis](docs/embedded.md) | Freestanding/embedded roadmap analysis |
+| [x86-64 OS plan](docs/x86_64_os.md) | Architecture and staged implementation plan for a freestanding x86-64 kernel |
 | [Roadmap](ROADMAP.md) | Planned milestones; not a release commitment |
 | [Changelog](CHANGELOG.md) | Version history and historical notes |
 | [Contributing](CONTRIBUTING.md) | Engineering and review expectations |
