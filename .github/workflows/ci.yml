@@ -80,7 +80,7 @@ jobs:
         working-directory: extension
         run: npm run check
 
-      - name: Validate extension manifests
+      - name: Run extension unit tests\n        working-directory: extension\n        run: npm test\n\n      - name: Validate extension manifests
         working-directory: extension
         run: |
           node -e "for (const f of ['package.json', 'language-configuration.json', 'syntaxes/kyn.tmLanguage.json', 'snippets/kyn.json', '.vscode/launch.json']) JSON.parse(require('node:fs').readFileSync(f, 'utf8')); console.log('Extension JSON manifests are valid.')"
