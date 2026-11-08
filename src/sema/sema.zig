@@ -112,8 +112,51 @@ pub const EnumInfo = struct {
     cases: []CaseInfo,
 };
 
+/// Owner of a function declaration, resolved from its `impl` block.
+pub const Owner = union(enum) {
+    /// Top-level `fn`.
+    free,
+    /// `impl` whose target type is not declared (already diagnosed).
+    unresolved,
+    struct_id: u32,
+    enum_id: u32,
+
+    pub fn isFree(self: Owner) bool {
+        return switch (self) {
+            .free => true,
+            else => false,
+        };
+    }
+
+    /// Declared inside `impl` and bound to a type.
+    pub fn isMethod(self: Owner) bool {
+        return switch (self) {
+            .struct_id, .enum_id => true,
+            else => false,
+        };
+    }
+};
+
+/// Type a method belongs to, used to resolve `value.method(...)`.
+pub const MethodOwner = union(enum) {
+    struct_id: u32,
+    enum_id: u32,
+};
+
 pub const FunctionInfo = struct {
     decl: *const ast.Function,
+    /// True when the function was declared inside `impl` (whether or not the
+    /// target type resolved). Methods live in a name space per type: they never
+    /// answer a free call and never take part in the `main` check.
+    is_method: bool = false,
+    /// Struct the method belongs to (`null` for a free function and for a method
+    /// of an enum).
+    owner_struct_id: ?u32 = null,
+    /// Enum the method belongs to (`null` otherwise).
+    owner_enum_id: ?u32 = null,
+    /// Symbol name used by both backends: the declared name for a free function,
+    /// `Type_method` for a method (deterministic, unique per type).
+    symbol_name: []const u8 = "",
     return_type: Type,
     /// Struct tied to the return when `return_type == .aggregate`.
     return_struct_id: u32 = 0,
@@ -130,6 +173,10 @@ pub const FunctionInfo = struct {
     /// (parameters first, then local variables).
     symbol_start: u32 = 0,
     symbol_count: u32 = 0,
+
+    pub fn isMethod(self: FunctionInfo) bool {
+        return self.is_method;
+    }
 };
 
 pub const Checked = struct {
@@ -155,9 +202,26 @@ pub const Checked = struct {
         return null;
     }
 
+    /// Free function by name. Methods live in their own name space and are
+    /// reached through `findMethod`/`Expr.MethodCall.resolved_fn`.
     pub fn findFunction(self: *const Checked, name: []const u8) ?u32 {
         for (self.functions, 0..) |f, i| {
+            if (f.is_method) continue;
             if (std.mem.eql(u8, f.decl.name, name)) return @intCast(i);
+        }
+        return null;
+    }
+
+    /// Method of `owner` (a struct or enum index) named `name`.
+    pub fn findMethod(self: *const Checked, owner: MethodOwner, name: []const u8) ?u32 {
+        for (self.functions, 0..) |f, i| {
+            if (!f.is_method) continue;
+            if (!std.mem.eql(u8, f.decl.name, name)) continue;
+            const matches = switch (owner) {
+                .struct_id => |id| f.owner_struct_id == id,
+                .enum_id => |id| f.owner_enum_id == id,
+            };
+            if (matches) return @intCast(i);
         }
         return null;
     }
@@ -224,6 +288,13 @@ pub const Checker = struct {
         for (program.structs) |decl| {
             self.diags.current_file = decl.file_id;
             try self.registerStructFields(decl);
+        }
+
+        // Step 0c: `impl` blocks must target a declared type, so that method
+        // signatures can resolve their receiver.
+        for (program.impls) |block| {
+            self.diags.current_file = block.file_id;
+            try self.checkImplTarget(block);
         }
 
         // Step 1: register signatures (allows calls before the declaration
@@ -448,37 +519,116 @@ pub const Checker = struct {
         return self.options.file_names[file_id];
     }
 
-    fn registerFunction(self: *Checker, func: *const ast.Function) std.mem.Allocator.Error!void {
-        // Builtin names are reserved: declaring another function with the
-        // same name would create two resolution rules for the same call.
-        if (builtinByName(func.name) != null) {
-            try self.diags.add(
-                .unsupported,
-                func.name_span,
-                "name '{s}' is reserved for the builtin function",
-                .{func.name},
-            );
-        }
+    /// `impl` target as a nominal index: a struct, an enum or `null` when the
+    /// name is not declared (already diagnosed).
+    fn implTarget(self: *const Checker, block: *const ast.ImplBlock) Owner {
+        if (self.findStructIndex(block.type_name.name)) |id| return .{ .struct_id = id };
+        if (self.findEnumIndex(block.type_name.name)) |id| return .{ .enum_id = id };
+        return .unresolved;
+    }
 
-        for (self.functions.items) |existing| {
-            if (std.mem.eql(u8, existing.decl.name, func.name)) {
-                if (self.fileName(existing.decl.file_id)) |path| {
-                    try self.diags.add(
-                        .duplicate_declaration,
-                        func.name_span,
-                        "function '{s}' already declared in '{s}' (line {d})",
-                        .{ func.name, path, existing.decl.name_span.line },
-                    );
-                } else {
-                    try self.diags.add(
-                        .duplicate_declaration,
-                        func.name_span,
-                        "function '{s}' already declared (first declaration on line {d})",
-                        .{ func.name, existing.decl.name_span.line },
-                    );
-                }
-                break;
+    fn checkImplTarget(self: *Checker, block: *const ast.ImplBlock) std.mem.Allocator.Error!void {
+        switch (self.implTarget(block)) {
+            .unresolved => try self.diags.add(
+                .unknown_type,
+                block.type_name.span,
+                "impl target '{s}' is not a declared struct or enum",
+                .{block.type_name.name},
+            ),
+            else => {},
+        }
+    }
+
+    /// Owner of a function declaration: `.free` for a top-level `fn`, the
+    /// struct/enum of its `impl` block otherwise (`.unresolved` when that name is
+    /// not declared, already diagnosed at the block).
+    fn ownerOfFunction(self: *const Checker, func: *const ast.Function) Owner {
+        const target = func.owner_type orelse return .free;
+        if (self.findStructIndex(target.name)) |id| return .{ .struct_id = id };
+        if (self.findEnumIndex(target.name)) |id| return .{ .enum_id = id };
+        return .unresolved;
+    }
+
+    /// Name of the owner type, for messages.
+    fn ownerName(self: *const Checker, owner: Owner) []const u8 {
+        return switch (owner) {
+            .struct_id => |id| self.structs.items[id].decl.name,
+            .enum_id => |id| self.enums.items[id].decl.name,
+            .free, .unresolved => "",
+        };
+    }
+
+    /// Nominal label of a value type: the struct/enum name when known, the
+    /// generic type name otherwise.
+    fn nominalLabel(self: *const Checker, typ: Type, struct_id: u32, enum_id: u32) []const u8 {
+        if (typ == .aggregate and struct_id < self.structs.items.len) {
+            return self.structs.items[struct_id].decl.name;
+        }
+        if (typ == .enumeration and enum_id < self.enums.items.len) {
+            return self.enums.items[enum_id].decl.name;
+        }
+        return typ.name();
+    }
+
+    fn registerFunction(self: *Checker, func: *const ast.Function) std.mem.Allocator.Error!void {
+        const owner = self.ownerOfFunction(func);
+        // Methods are mangled `Type_method`: unique per type, never equal to a
+        // free function name unless the source spells it that way.
+        const symbol_name: []const u8 = switch (owner) {
+            .free, .unresolved => func.name,
+            .struct_id, .enum_id => try std.fmt.allocPrint(
+                self.arena,
+                "{s}_{s}",
+                .{ self.ownerName(owner), func.name },
+            ),
+        };
+
+        if (owner.isFree()) {
+            // Builtin names are reserved: declaring another function with the
+            // same name would create two resolution rules for the same call.
+            if (builtinByName(func.name) != null) {
+                try self.diags.add(
+                    .unsupported,
+                    func.name_span,
+                    "name '{s}' is reserved for the builtin function",
+                    .{func.name},
+                );
             }
+
+            for (self.functions.items) |existing| {
+                // A method is mangled `Type_method`, so a free function may carry
+                // the same symbol; report it instead of emitting two labels.
+                if (existing.is_method) {
+                    if (!std.mem.eql(u8, existing.symbol_name, func.name)) continue;
+                    try self.diags.add(
+                        .duplicate_declaration,
+                        func.name_span,
+                        "function '{s}' shares the symbol 'kyn_{s}' with the method '{s}' (line {d}); rename one of them",
+                        .{ func.name, existing.symbol_name, existing.decl.name, existing.decl.name_span.line },
+                    );
+                    break;
+                }
+                if (std.mem.eql(u8, existing.decl.name, func.name)) {
+                    if (self.fileName(existing.decl.file_id)) |path| {
+                        try self.diags.add(
+                            .duplicate_declaration,
+                            func.name_span,
+                            "function '{s}' already declared in '{s}' (line {d})",
+                            .{ func.name, path, existing.decl.name_span.line },
+                        );
+                    } else {
+                        try self.diags.add(
+                            .duplicate_declaration,
+                            func.name_span,
+                            "function '{s}' already declared (first declaration on line {d})",
+                            .{ func.name, existing.decl.name_span.line },
+                        );
+                    }
+                    break;
+                }
+            }
+        } else {
+            try self.checkMethodDeclaration(func, owner, symbol_name);
         }
 
         const params = try self.arena.alloc(Type, func.params.len);
@@ -493,14 +643,35 @@ pub const Checker = struct {
             register_words += self.wordsOf(params[i], param_struct_ids[i]);
         }
 
+        // The receiver is the first parameter: it must be `self` of the owner
+        // type, so `value.method()` always passes a value of the right type.
+        if (owner.isMethod() and !std.mem.eql(u8, func.name, "main")) {
+            if (func.params.len == 0) {
+                try self.checkMethodReceiver(func, owner, .unknown, 0, 0);
+            } else {
+                try self.checkMethodReceiver(
+                    func,
+                    owner,
+                    params[0],
+                    param_struct_ids[0],
+                    param_enum_ids[0],
+                );
+            }
+        }
+
         // The native backend limit is in registers, not in parameters:
         // each `str` consumes two and each struct field one.
+        const kind_label: []const u8 = if (owner.isMethod()) "method" else "function";
+        const display: []const u8 = if (owner.isMethod())
+            try std.fmt.allocPrint(self.arena, "{s}.{s}", .{ self.ownerName(owner), func.name })
+        else
+            func.name;
         if (register_words > max_arg_registers) {
             try self.diags.add(
                 .unsupported,
                 func.name_span,
-                "function '{s}' uses {d} parameter registers; the current backend supports at most {d} ('str' and an enum take two, each struct field one)",
-                .{ func.name, register_words, max_arg_registers },
+                "{s} '{s}' uses {d} parameter registers; the current backend supports at most {d} ('str' and an enum take two, each struct field one)",
+                .{ kind_label, display, register_words, max_arg_registers },
             );
         }
 
@@ -525,14 +696,24 @@ pub const Checker = struct {
                 try self.diags.add(
                     .unsupported,
                     func.return_type.?.span,
-                    "function '{s}' returns a struct with {d} fields; the current backend supports at most {d}",
-                    .{ func.name, field_count, max_arg_registers },
+                    "{s} '{s}' returns a struct with {d} fields; the current backend supports at most {d}",
+                    .{ kind_label, display, field_count, max_arg_registers },
                 );
             }
         }
 
         try self.functions.append(self.arena, .{
             .decl = func,
+            .is_method = func.owner_type != null,
+            .owner_struct_id = switch (owner) {
+                .struct_id => |id| id,
+                else => null,
+            },
+            .owner_enum_id = switch (owner) {
+                .enum_id => |id| id,
+                else => null,
+            },
+            .symbol_name = symbol_name,
             .return_type = return_type,
             .return_struct_id = return_struct_id,
             .params = params,
@@ -543,9 +724,116 @@ pub const Checker = struct {
         });
     }
 
+    /// Declaration rules of a method: reserved entry point, symbol/field
+    /// clashes and a unique name per type. The receiver shape is validated
+    /// later, once the parameter types are resolved.
+    fn checkMethodDeclaration(
+        self: *Checker,
+        func: *const ast.Function,
+        owner: Owner,
+        symbol_name: []const u8,
+    ) std.mem.Allocator.Error!void {
+        const owner_name = self.ownerName(owner);
+
+        if (std.mem.eql(u8, func.name, "main")) {
+            try self.diags.add(
+                .unsupported,
+                func.name_span,
+                "method 'main' is not supported; declare 'fn main()' outside the 'impl'",
+                .{},
+            );
+        }
+
+        for (self.functions.items) |existing| {
+            if (!std.mem.eql(u8, existing.symbol_name, symbol_name)) continue;
+            if (existing.is_method) {
+                try self.diags.add(
+                    .duplicate_declaration,
+                    func.name_span,
+                    "method '{s}' already declared for '{s}' (line {d})",
+                    .{ func.name, owner_name, existing.decl.name_span.line },
+                );
+            } else {
+                try self.diags.add(
+                    .duplicate_declaration,
+                    func.name_span,
+                    "method '{s}.{s}' shares the symbol 'kyn_{s}' with the function '{s}' (line {d}); rename one of them",
+                    .{ owner_name, func.name, symbol_name, existing.decl.name, existing.decl.name_span.line },
+                );
+            }
+            break;
+        }
+
+        // `value.name` and `value.name()` would be ambiguous to read.
+        if (owner == .struct_id) {
+            const id = owner.struct_id;
+            if (id < self.structs.items.len) {
+                for (self.structs.items[id].fields) |field| {
+                    if (!std.mem.eql(u8, field.name, func.name)) continue;
+                    try self.diags.add(
+                        .duplicate_declaration,
+                        func.name_span,
+                        "struct '{s}' already has a field '{s}'; a method cannot reuse the name",
+                        .{ owner_name, field.name },
+                    );
+                    break;
+                }
+            }
+        }
+    }
+
+    /// The first parameter of a method is its receiver: it must be named `self`
+    /// and have exactly the owner type (methods are nominal, like the values).
+    fn checkMethodReceiver(
+        self: *Checker,
+        func: *const ast.Function,
+        owner: Owner,
+        receiver_type: Type,
+        receiver_struct_id: u32,
+        receiver_enum_id: u32,
+    ) std.mem.Allocator.Error!void {
+        const owner_name = self.ownerName(owner);
+        if (func.params.len == 0) {
+            try self.diags.add(
+                .invalid_method,
+                func.name_span,
+                "method '{s}.{s}' must declare its receiver: 'self: {s}' as the first parameter",
+                .{ owner_name, func.name, owner_name },
+            );
+            return;
+        }
+
+        const receiver = func.params[0];
+        if (!std.mem.eql(u8, receiver.name, "self")) {
+            try self.diags.add(
+                .invalid_method,
+                receiver.span,
+                "the first parameter of method '{s}.{s}' must be named 'self', found '{s}'",
+                .{ owner_name, func.name, receiver.name },
+            );
+        }
+
+        const matches = switch (owner) {
+            .struct_id => |id| receiver_type == .aggregate and receiver_struct_id == id,
+            .enum_id => |id| receiver_type == .enumeration and receiver_enum_id == id,
+            .free, .unresolved => true,
+        };
+        if (!matches) {
+            try self.diags.add(
+                .invalid_method,
+                receiver.span,
+                "parameter 'self' of method '{s}.{s}' must have type '{s}', found '{s}'",
+                .{ owner_name, func.name, owner_name, self.nominalLabel(receiver_type, receiver_struct_id, receiver_enum_id) },
+            );
+        }
+    }
+
     fn checkMain(self: *Checker, program: *const ast.Program) std.mem.Allocator.Error!void {
         var main_fn: ?*const ast.Function = null;
         for (program.functions) |func| {
+            // A method named `main` is diagnosed separately and never satisfies
+            // the entry point.
+            if (func.owner_type != null) continue;
             if (std.mem.eql(u8, func.name, "main")) {
                 main_fn = func;
                 break;
@@ -619,6 +907,10 @@ pub const Checker = struct {
                 const func = self.functions.items[index];
                 break :blk if (func.return_type == .aggregate) func.return_struct_id else null;
             } else null,
+            .method_call => |call| if (call.resolved_fn) |index| blk: {
+                const func = self.functions.items[index];
+                break :blk if (func.return_type == .aggregate) func.return_struct_id else null;
+            } else null,
             else => null,
         };
     }
@@ -636,7 +928,12 @@ pub const Checker = struct {
                 break :blk if (sym.typ == .enumeration) sym.enum_id else null;
             } else null,
             .field_access => |access| access.resolved_enum,
-            .method_call => |call| call.resolved_enum,
+            // A constructor carries `resolved_enum`; a method call that returns
+            // an enum carries the method, whose return names the enum.
+            .method_call => |call| if (call.resolved_fn) |index| blk: {
+                const func = self.functions.items[index];
+                break :blk if (func.return_type == .enumeration) func.return_enum_id else null;
+            } else call.resolved_enum,
             .call => |call| if (call.callee_fn) |index| blk: {
                 const func = self.functions.items[index];
                 break :blk if (func.return_type == .enumeration) func.return_enum_id else null;
@@ -1406,14 +1703,21 @@ pub const Checker = struct {
                     null;
                 const enum_id = if (base_name) |name| self.findEnumIndex(name) else null;
                 if (enum_id == null) {
-                    try self.diags.add(
-                        .unsupported,
-                        call.base.span,
-                        "method calls are not supported yet (only enum constructors)",
-                        .{},
-                    );
-                    for (call.args) |arg| _ = try self.checkExpr(arg);
-                    return .unknown;
+                    // A struct name is a type: there is no value to call the
+                    // method on.
+                    if (base_name) |name| {
+                        if (self.findStructIndex(name) != null) {
+                            try self.diags.add(
+                                .invalid_call,
+                                call.base.span,
+                                "struct '{s}' is a type, not a value; call the method on a variable of type '{s}'",
+                                .{ name, name },
+                            );
+                            for (call.args) |arg| _ = try self.checkExpr(arg);
+                            return .unknown;
+                        }
+                    }
+                    return self.checkMethodCall(expr.span, call);
                 }
                 const info = &self.enums.items[enum_id.?];
                 const case_index = findCaseIndex(info, call.name) orelse {
@@ -1631,6 +1935,152 @@ pub const Checker = struct {
         return .bool;
     }
 
+    /// `value.method(args)`: resolves the receiver type, then checks the
+    /// arguments against the method signature exactly like a free call. The
+    /// receiver is passed by value as argument 1.
+    fn checkMethodCall(
+        self: *Checker,
+        span: Span,
+        call: *ast.Expr.MethodCall,
+    ) std.mem.Allocator.Error!Type {
+        // The receiver may be a variable or a call: `shape.weight()` and
+        // `box.doubled().get()` both pass a value of the owner type.
+        const recv_type = try self.checkExpr(call.base);
+        if (recv_type != .aggregate and recv_type != .enumeration) {
+            if (recv_type != .unknown) {
+                try self.diags.add(
+                    .unsupported,
+                    call.name_span,
+                    "method calls are only supported on struct and enum values, but '{s}' has type '{s}'",
+                    .{ self.exprText(call.base), recv_type.name() },
+                );
+            }
+            for (call.args) |arg| _ = try self.checkExpr(arg);
+            return .unknown;
+        }
+
+        const struct_id = if (recv_type == .aggregate) self.structIdOfExpr(call.base) orelse 0 else 0;
+        const enum_id = if (recv_type == .enumeration) self.enumIdOfExpr(call.base) orelse 0 else 0;
+        const owner: MethodOwner = if (recv_type == .aggregate)
+            .{ .struct_id = struct_id }
+        else
+            .{ .enum_id = enum_id };
+        const owner_name = self.nominalLabel(recv_type, struct_id, enum_id);
+        const method_index = self.findMethodIndex(owner, call.name) orelse {
+            try self.diags.add(
+                .invalid_call,
+                call.name_span,
+                "'{s}' has no method '{s}'",
+                .{ owner_name, call.name },
+            );
+            for (call.args) |arg| _ = try self.checkExpr(arg);
+            return .unknown;
+        };
+
+        call.resolved_fn = method_index;
+        const func = self.functions.items[method_index];
+
+        var arg_types: std.ArrayList(Type) = .empty;
+        defer arg_types.deinit(self.arena);
+        for (call.args) |arg| try arg_types.append(self.arena, try self.checkExpr(arg));
+
+        // `Shape.area`: the receiver type names the method in messages.
+        const display = try std.fmt.allocPrint(self.arena, "{s}.{s}", .{ owner_name, call.name });
+        return self.checkSignature(
+            span,
+            display,
+            func,
+            call.args,
+            arg_types.items,
+            self.wordsOf(recv_type, struct_id),
+        );
+    }
+
+    /// Checks a call site against a signature: register limit, arity and the
+    /// nominal identity of struct/enum arguments. `receiver` accounts for the
+    /// words of a method receiver, which counts as argument 1.
+    fn checkSignature(
+        self: *Checker,
+        span: Span,
+        display: []const u8,
+        func: FunctionInfo,
+        args: []*ast.Expr,
+        arg_types: []const Type,
+        receiver_words: ?usize,
+    ) std.mem.Allocator.Error!Type {
+        // The receiver is argument 1 of the callee but not written at the call
+        // site, so it shifts the expected parameter of every written argument.
+        const offset: usize = if (receiver_words != null) 1 else 0;
+        const written_params: usize = func.params.len -| offset;
+
+        var arg_words: usize = receiver_words orelse 0;
+        for (arg_types, args) |typ, arg| {
+            arg_words += self.wordsOf(typ, self.structIdOfExpr(arg) orelse 0);
+        }
+        if (arg_words > max_arg_registers) {
+            try self.diags.add(
+                .unsupported,
+                span,
+                "call to '{s}' uses {d} registers; the current backend supports at most {d} ('str' and an enum take two, each struct field one)",
+                .{ display, arg_words, max_arg_registers },
+            );
+        }
+
+        if (arg_types.len != written_params) {
+            try self.diags.add(
+                .invalid_call,
+                span,
+                "'{s}' expects {d} argument(s), received {d}",
+                .{ display, written_params, arg_types.len },
+            );
+            return func.return_type;
+        }
+
+        for (arg_types, 0..) |actual, i| {
+            const param_index = i + offset;
+            if (param_index >= func.params.len) break;
+            const expected = func.params[param_index];
+            if (actual == .unknown or expected == .unknown) continue;
+            if (actual == .enumeration and expected == .enumeration) {
+                // Enums are nominal: the same shape is not enough.
+                const got = self.enumIdOfExpr(args[i]);
+                const want = if (param_index < func.param_enum_ids.len) func.param_enum_ids[param_index] else 0;
+                if (got != null and got.? != want and want < self.enums.items.len) {
+                    try self.diags.add(
+                        .type_mismatch,
+                        args[i].span,
+                        "argument {d} of '{s}' is enum '{s}', expected '{s}'",
+                        .{ i + 1, display, self.enums.items[got.?].decl.name, self.enums.items[want].decl.name },
+                    );
+                }
+                continue;
+            }
+            if (actual == .aggregate and expected == .aggregate) {
+                const got = self.structIdOfExpr(args[i]) orelse 0;
+                const want = if (param_index < func.param_struct_ids.len) func.param_struct_ids[param_index] else 0;
+                if (got != want) {
+                    try self.diags.add(
+                        .type_mismatch,
+                        args[i].span,
+                        "argument {d} of '{s}' is struct '{s}', expected '{s}'",
+                        .{ i + 1, display, self.structs.items[got].decl.name, self.structs.items[want].decl.name },
+                    );
+                }
+                continue;
+            }
+            if (actual != expected) {
+                try self.diags.add(
+                    .type_mismatch,
+                    args[i].span,
+                    "argument {d} of '{s}' must be '{s}', found '{s}'",
+                    .{ i + 1, display, expected.name(), actual.name() },
+                );
+            }
+        }
+
+        return func.return_type;
+    }
+
     fn checkCall(self: *Checker, span: Span, call: *ast.Expr.Call) std.mem.Allocator.Error!Type {
         var arg_types = std.ArrayList(Type).empty;
         defer arg_types.deinit(self.arena);
@@ -1676,75 +2126,28 @@ pub const Checker = struct {
 
         const func = self.functions.items[fn_index.?];
         call.callee_fn = fn_index;
-
-        var arg_words: usize = 0;
-        for (arg_types.items, 0..) |typ, i| {
-            arg_words += self.wordsOf(typ, self.structIdOfExpr(call.args[i]) orelse 0);
-        }
-        if (arg_words > max_arg_registers) {
-            try self.diags.add(
-                .unsupported,
-                span,
-                "call to '{s}' uses {d} registers; the current backend supports at most {d} ('str' and an enum take two, each struct field one)",
-                .{ call.callee, arg_words, max_arg_registers },
-            );
-        }
-
-        if (arg_types.items.len != func.params.len) {
-            try self.diags.add(
-                .invalid_call,
-                span,
-                "'{s}' expects {d} argument(s), received {d}",
-                .{ call.callee, func.params.len, arg_types.items.len },
-            );
-            return func.return_type;
-        }
-
-        for (arg_types.items, func.params, 0..) |actual, expected, i| {
-            if (actual == .unknown or expected == .unknown) continue;
-            if (actual == .enumeration and expected == .enumeration) {
-                // Enums are nominal: the same shape is not enough.
-                const got = self.enumIdOfExpr(call.args[i]);
-                const want = if (i < func.param_enum_ids.len) func.param_enum_ids[i] else 0;
-                if (got != null and got.? != want and want < self.enums.items.len) {
-                    try self.diags.add(
-                        .type_mismatch,
-                        call.args[i].span,
-                        "argument {d} of '{s}' is enum '{s}', expected '{s}'",
-                        .{ i + 1, call.callee, self.enums.items[got.?].decl.name, self.enums.items[want].decl.name },
-                    );
-                }
-                continue;
-            }
-            if (actual == .aggregate and expected == .aggregate) {
-                const got = self.structIdOfExpr(call.args[i]) orelse 0;
-                const want = if (i < func.param_struct_ids.len) func.param_struct_ids[i] else 0;
-                if (got != want) {
-                    try self.diags.add(
-                        .type_mismatch,
-                        call.args[i].span,
-                        "argument {d} of '{s}' is struct '{s}', expected '{s}'",
-                        .{ i + 1, call.callee, self.structs.items[got].decl.name, self.structs.items[want].decl.name },
-                    );
-                }
-                continue;
-            }
-            if (actual != expected) {
-                try self.diags.add(
-                    .type_mismatch,
-                    call.args[i].span,
-                    "argument {d} of '{s}' must be '{s}', found '{s}'",
-                    .{ i + 1, call.callee, expected.name(), actual.name() },
-                );
-            }
-        }
-
-        return func.return_type;
+        return self.checkSignature(span, call.callee, func, call.args, arg_types.items, null);
     }
 
+    /// Free function by name: methods never answer a bare call.
     fn findFunctionIndex(self: *const Checker, name: []const u8) ?u32 {
         for (self.functions.items, 0..) |func, i| {
+            if (func.is_method) continue;
             if (std.mem.eql(u8, func.decl.name, name)) return @intCast(i);
+        }
+        return null;
+    }
+
+    /// Method of the receiver type, by name.
+    fn findMethodIndex(self: *const Checker, owner: MethodOwner, name: []const u8) ?u32 {
+        for (self.functions.items, 0..) |func, i| {
+            if (!func.is_method) continue;
+            if (!std.mem.eql(u8, func.decl.name, name)) continue;
+            const matches = switch (owner) {
+                .struct_id => |id| func.owner_struct_id != null and func.owner_struct_id.? == id,
+                .enum_id => |id| func.owner_enum_id != null and func.owner_enum_id.? == id,
+            };
+            if (matches) return @intCast(i);
         }
         return null;
     }
@@ -3119,4 +3522,150 @@ test "sema: alwaysReturns understands a switch with every arm returning" {
     , .{});
     defer f.deinit();
     try testing.expectEqual(@as(usize, 0), f.diags.count());
+}
+
+test "sema: methods resolve through the receiver type and stay nominal" {
+    var f = try Fixture.check(
+        \\struct Point { x: i32, y: i32 }
+        \\struct Pair { a: i32, b: i32 }
+        \\enum Shape { Circle(i32), Empty }
+        \\impl Point {
+        \\    fn sum(self: Point) -> i32 { return self.x + self.y; }
+        \\    fn shifted(self: Point, dx: i32, dy: i32) -> Point {
+        \\        return Point { x: self.x + dx, y: self.y + dy };
+        \\    }
+        \\}
+        \\impl Shape {
+        \\    fn weight(self: Shape) -> i32 { return 1; }
+        \\    fn grow(self: Shape) -> Shape { return Shape.Empty; }
+        \\}
+        \\fn free_sum(p: Point) -> i32 { return p.sum(); }
+        \\fn main() -> i32 {
+        \\    let p = Point { x: 1, y: 2 };
+        \\    let q = p.shifted(1, 1);
+        \\    let s = Shape.Circle(3);
+        \\    let t = s.grow();
+        \\    return p.sum() + q.sum() + free_sum(p) + s.weight() + t.weight();
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 0), f.diags.count());
+
+    const checked = f.checked.?;
+    // Methods are registered with their owner and mangled symbol name.
+    const sum = checked.findMethod(.{ .struct_id = 0 }, "sum").?;
+    try testing.expect(checked.functions[sum].isMethod());
+    try testing.expectEqualStrings("Point_sum", checked.functions[sum].symbol_name);
+    try testing.expectEqualStrings("sum", checked.functions[sum].decl.name);
+    try testing.expectEqual(@as(u32, 0), checked.functions[sum].owner_struct_id.?);
+    try testing.expectEqualStrings("Point", checked.structs[0].decl.name);
+
+    const weight = checked.findMethod(.{ .enum_id = 0 }, "weight").?;
+    try testing.expectEqualStrings("Shape_weight", checked.functions[weight].symbol_name);
+    // The receiver is the only parameter of `fn weight(self: Shape)`.
+    try testing.expectEqual(@as(usize, 1), checked.functions[weight].params.len);
+
+    // A method is never reachable as a free function, and `main` is a free
+    // function, not a method.
+    try testing.expect(checked.findFunction("sum") == null);
+    try testing.expect(checked.findFunction("main") != null);
+    try testing.expect(checked.findMethod(.{ .struct_id = 1 }, "sum") == null);
+}
+
+test "sema: a method call checks its arguments like a free call" {
+    var f = try Fixture.check(
+        \\struct Point { x: i32 }
+        \\enum Shape { Circle(i32), Empty }
+        \\impl Point {
+        \\    fn move(self: Point, dx: i32) -> i32 { return self.x + dx; }
+        \\}
+        \\impl Shape {
+        \\    fn swap(self: Shape, other: Shape) -> i32 { return 0; }
+        \\}
+        \\fn main() -> i32 {
+        \\    let p = Point { x: 1 };
+        \\    let s = Shape.Circle(2);
+        \\    let a = p.move(1, 2);
+        \\    let b = p.move(s);
+        \\    let c = s.swap(p);
+        \\    return a + b + c;
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expect(sawMessage(&f, "'Point.move' expects 1 argument(s), received 2"));
+    try testing.expect(sawMessage(&f, "argument 1 of 'Point.move' must be 'i32', found 'enum'"));
+    try testing.expect(sawMessage(&f, "argument 1 of 'Shape.swap' must be 'enum', found 'struct'"));
+}
+
+test "sema: method declarations are validated" {
+    var f = try Fixture.check(
+        \\struct Point { x: i32 }
+        \\struct Pair { a: i32 }
+        \\impl Point {
+        \\    fn sum(self: Point) -> i32 { return self.x; }
+        \\    fn sum(self: Point) -> i32 { return 0; }
+        \\    fn x(self: Point) -> i32 { return self.x; }
+        \\    fn wrong(self: Pair) -> i32 { return 0; }
+        \\    fn noargs() -> i32 { return 1; }
+        \\    fn misnamed(that: Point) -> i32 { return 2; }
+        \\    fn main() -> i32 { return 3; }
+        \\}
+        \\impl Missing {
+        \\    fn ghost(self: Missing) -> i32 { return 4; }
+        \\}
+        \\fn Point_sum() -> i32 { return 5; }
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer f.deinit();
+    try testing.expect(sawMessage(&f, "impl target 'Missing' is not a declared struct or enum"));
+    try testing.expect(sawMessage(&f, "method 'sum' already declared for 'Point'"));
+    try testing.expect(sawMessage(&f, "struct 'Point' already has a field 'x'; a method cannot reuse the name"));
+    try testing.expect(sawMessage(&f, "parameter 'self' of method 'Point.wrong' must have type 'Point', found 'Pair'"));
+    try testing.expect(sawMessage(&f, "method 'Point.noargs' must declare its receiver: 'self: Point'"));
+    try testing.expect(sawMessage(&f, "the first parameter of method 'Point.misnamed' must be named 'self', found 'that'"));
+    try testing.expect(sawMessage(&f, "method 'main' is not supported; declare 'fn main()' outside the 'impl'"));
+    try testing.expect(sawMessage(&f, "function 'Point_sum' shares the symbol 'kyn_Point_sum' with the method 'sum'"));
+}
+
+test "sema: unknown methods and non-method receivers are diagnosed" {
+    var f = try Fixture.check(
+        \\struct Point { x: i32 }
+        \\struct Sink { v: i32 }
+        \\impl Point {
+        \\    fn sum(self: Point) -> i32 { return self.x; }
+        \\}
+        \\fn main() -> i32 {
+        \\    let p = Point { x: 1 };
+        \\    let sink = Sink { v: 2 };
+        \\    let n: i32 = 3;
+        \\    let a = p.nope();
+        \\    let b = sink.sum();
+        \\    let c = n.sum();
+        \\    let d = Point.sum(p);
+        \\    return a + b + c + d;
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expect(sawMessage(&f, "'Point' has no method 'nope'"));
+    try testing.expect(sawMessage(&f, "'Sink' has no method 'sum'"));
+    try testing.expect(sawMessage(&f, "method calls are only supported on struct and enum values, but 'n' has type 'i32'"));
+    try testing.expect(sawMessage(&f, "struct 'Point' is a type, not a value; call the method on a variable of type 'Point'"));
+}
+
+test "sema: the method receiver counts as argument 1 in the register limit" {
+    var f = try Fixture.check(
+        \\struct Wide { a: i32, b: i32, c: i32 }
+        \\impl Wide {
+        \\    fn pad(self: Wide, x: i32, y: i32, z: i32, w: i32) -> i32 {
+        \\        return x + y + z + w;
+        \\    }
+        \\}
+        \\fn main() -> i32 {
+        \\    let w = Wide { a: 1, b: 2, c: 3 };
+        \\    return w.pad(1, 2, 3, 4);
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expect(sawMessage(&f, "method 'Wide.pad' uses 7 parameter registers"));
+    try testing.expect(sawMessage(&f, "call to 'Wide.pad' uses 7 registers"));
 }

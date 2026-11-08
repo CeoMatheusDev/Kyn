@@ -1,0 +1,49 @@
+// Methods of an enum: the receiver is the pair (tag, payload), and the method
+// returns an enum, which chains into another method call.
+// expect-stdout: 5
+// expect-stdout: 6
+// expect-stdout: 0
+// expect-stdout: 7
+// expect-exit: 11
+enum Shape {
+    Circle(i32),
+    Square(i32),
+    Empty,
+}
+
+impl Shape {
+    fn weight(self: Shape) -> i32 {
+        var result: i32 = 0;
+        switch self {
+            Circle(r) => { result = r; }
+            Square(side) => { result = side * 2; }
+            Empty => { result = 0; }
+        }
+        return result;
+    }
+
+    fn grow(self: Shape, delta: i32) -> Shape {
+        var bigger: Shape = Shape.Empty;
+        switch self {
+            Circle(r) => { bigger = Shape.Circle(r + delta); }
+            Square(side) => { bigger = Shape.Square(side + delta); }
+            Empty => { bigger = Shape.Empty; }
+        }
+        return bigger;
+    }
+}
+
+fn reach(shape: Shape) -> i32 {
+    return shape.weight() + shape.grow(1).weight();
+}
+
+fn main() -> i32 {
+    let circle = Shape.Circle(5);
+    let square = Shape.Square(3);
+    let empty = Shape.Empty;
+    print_i32(circle.weight());
+    print_i32(square.weight());
+    print_i32(empty.weight());
+    print_i32(circle.grow(2).weight());
+    return reach(circle);
+}

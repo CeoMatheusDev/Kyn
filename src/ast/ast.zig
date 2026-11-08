@@ -1,4 +1,4 @@
-//! AST do Kyn (bootstrap).
+//! Kyn AST (bootstrap).
 //!
 //! Ownership: every node, parameter slice and statement list is allocated by
 //! the allocator passed to the parser (in practice, one arena per compilation).
@@ -21,13 +21,17 @@ pub const TypeName = struct {
 
 pub const Program = struct {
     /// Imports declared in the file, in source order. The module loader
-    /// resolves them; the flattened program handed to semantics/backends
-    /// tem `imports` vazio.
+    /// resolves them; the flattened program handed to semantics/backends has
+    /// an empty `imports`.
     imports: []Import = &.{},
     /// `struct` declarations of every module, in pre-order.
     structs: []*StructDecl = &.{},
     /// `enum` declarations of every module, in pre-order.
     enums: []*EnumDecl = &.{},
+    /// `impl` blocks of every module, in pre-order.
+    impls: []*ImplBlock = &.{},
+    /// Every function declaration in source order, free functions and methods
+    /// mixed. Methods also belong to their `ImplBlock`.
     functions: []*Function,
     span: Span,
 };
@@ -64,6 +68,18 @@ pub const EnumCase = struct {
     span: Span,
 };
 
+/// `impl Name { fn method(self: Name, ...) -> T { ... } }` — methods of a
+/// struct or enum. The methods are also part of `Program.functions` (the single
+/// list the pipeline walks); this block keeps the declaration order and the
+/// target span for diagnostics.
+pub const ImplBlock = struct {
+    type_name: TypeName,
+    methods: []*Function,
+    /// Source file of origin, assigned by the module loader.
+    file_id: u32 = 0,
+    span: Span,
+};
+
 pub const Field = struct {
     name: []const u8,
     name_span: Span,
@@ -81,6 +97,9 @@ pub const Import = struct {
 pub const Function = struct {
     name: []const u8,
     name_span: Span,
+    /// Type the function is a method of (`impl Name { ... }`); `null` for a
+    /// free function. Methods live in their own name space per type.
+    owner_type: ?TypeName = null,
     /// Source file of origin (index into `driver.SourceFile`), assigned by the
     /// module loader; 0 for single-buffer compilations.
     file_id: u32 = 0,
@@ -122,8 +141,10 @@ pub const Expr = struct {
         method_call: MethodCall,
     };
 
-    /// `base.name(args)`. Today only enum constructors (`Shape.Circle(5)`);
-    /// the parser produces it for any dotted name followed by `(`.
+    /// `base.name(args)`: an enum constructor (`Shape.Circle(5)`, base is the
+    /// enum name) or a method call (`shape.area()`, base is a value). The
+    /// parser produces it for any dotted name followed by `(`; semantics
+    /// decides which of the two it is.
     pub const MethodCall = struct {
         base: *Expr,
         name: []const u8,
@@ -134,6 +155,8 @@ pub const Expr = struct {
         resolved_enum: ?u32 = null,
         /// Index of the case in `EnumDecl.cases`.
         resolved_case: ?u32 = null,
+        /// Index of the method in `Checked.functions` (method calls only).
+        resolved_fn: ?u32 = null,
     };
 
     pub const FieldAccess = struct {
@@ -258,7 +281,7 @@ pub const Expr = struct {
         /// Index of the function resolved by semantic analysis.
         callee_fn: ?u32 = null,
         /// Filled in by semantic analysis when the call is a builtin
-        /// (nesse caso `callee_fn` fica nulo).
+        /// (`callee_fn` stays null in that case).
         builtin: ?Builtin = null,
     };
 
@@ -379,7 +402,7 @@ test "ast: builds an expression node in an arena" {
     try std.testing.expect(lit.resolved == null);
 }
 
-test "ast: operadores reportam ortografia e categoria" {
+test "ast: operators report spelling and category" {
     try std.testing.expectEqualStrings("+", Expr.BinaryOp.add.spelling());
     try std.testing.expect(Expr.BinaryOp.mul.isArithmetic());
     try std.testing.expect(!Expr.BinaryOp.mul.isComparison());

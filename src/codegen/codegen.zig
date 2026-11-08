@@ -20,6 +20,29 @@ const sema = @import("../sema/sema.zig");
 pub const llvm = @import("llvm.zig");
 pub const x86_64 = @import("x86_64.zig");
 
+/// Arguments of a call as seen by the callee: the receiver of a method comes
+/// first (argument 1), then the arguments written at the call site.
+///
+/// Both backends walk the arguments through this view, so a method call and a
+/// free call share the same marshalling code (`str`: two words, enum: two
+/// words, struct: one word per field, scalar: one).
+pub const Arguments = struct {
+    receiver: ?*ast.Expr = null,
+    list: []*ast.Expr = &.{},
+
+    pub fn count(self: Arguments) usize {
+        return self.list.len + @intFromBool(self.receiver != null);
+    }
+
+    pub fn at(self: Arguments, index: usize) *ast.Expr {
+        if (self.receiver) |recv| {
+            if (index == 0) return recv;
+            return self.list[index - 1];
+        }
+        return self.list[index];
+    }
+};
+
 pub const Backend = enum {
     llvm_ir,
     x86_64_asm,

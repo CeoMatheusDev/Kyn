@@ -1,0 +1,51 @@
+// Methods of a struct: the receiver is passed by value as argument 1, a method
+// calls another method of the same receiver, and `Type_method` is the symbol.
+// expect-stdout: 7
+// expect-stdout: 8
+// expect-stdout: 14
+// expect-stdout: small
+// expect-stdout: big
+// expect-stdout: 40
+// expect-exit: 21
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+impl Point {
+    fn sum(self: Point) -> i32 {
+        return self.x + self.y;
+    }
+
+    fn moved(self: Point, dx: i32, dy: i32) -> Point {
+        return Point { x: self.x + dx, y: self.y + dy };
+    }
+
+    fn doubled_sum(self: Point) -> Point {
+        // A method calling another method of the same receiver.
+        return Point { x: self.sum() * 2, y: 0 };
+    }
+
+    fn describe(self: Point) -> str {
+        if self.sum() > 10 {
+            return "big";
+        }
+        return "small";
+    }
+}
+
+fn twice(p: Point) -> i32 {
+    return p.sum() * 2;
+}
+
+fn main() -> i32 {
+    let p = Point { x: 3, y: 4 };
+    print_i32(p.sum());
+    print_i32(p.moved(0, 1).sum());
+    print_i32(p.doubled_sum().sum());
+    print(p.describe());
+    let far = Point { x: 9, y: 9 };
+    print(far.describe());
+    print_i32(twice(p.moved(6, 7)));
+    return p.sum() + twice(p);
+}

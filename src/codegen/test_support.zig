@@ -65,6 +65,8 @@ fn isTerminator(line: []const u8) bool {
     return std.mem.startsWith(u8, line, "ret ") or
         std.mem.startsWith(u8, line, "ret void") or
         std.mem.startsWith(u8, line, "br ") or
+        // `switch i32 %tag, label %default [ ... ]` closes a block as well.
+        std.mem.startsWith(u8, line, "switch ") or
         std.mem.eql(u8, line, "unreachable");
 }
 

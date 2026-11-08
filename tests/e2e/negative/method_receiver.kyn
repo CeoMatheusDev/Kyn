@@ -1,0 +1,18 @@
+// The receiver must be `self` with exactly the owner type.
+struct Point {
+    x: i32,
+}
+
+struct Pair {
+    a: i32,
+}
+
+impl Point {
+    fn sum(self: Pair) -> i32 {
+        return 1;
+    }
+}
+
+fn main() -> i32 {
+    return 0;
+}

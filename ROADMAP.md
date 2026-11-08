@@ -40,13 +40,17 @@ implementation and reproducible tests.
       (tag, payload) in two registers, with nominal identity enforced in
       arguments, returns and annotations; an enum parameter counts two of the
       six argument registers.
+- [x] `impl`/methods: `impl Name { fn method(self: Name, ...) }` for structs and
+      enums, receiver passed by value as argument 1, `Type_method` mangling,
+      per-type name spaces, nominal receiver rules and a shared argument checker
+      for free and method calls.
 - [ ] Complete parser and AST for the target language. Current subset: `fn`,
       `let`/`var`, assignment, `return`, `if`/`else`, `while`, `switch` over
-      enums, blocks, expressions with precedence, `import`, `struct`, `enum` and
-      `str`, structs and `str` by value across functions. Missing: `impl`,
-      `unsafe`, attributes, enums across calls or in struct fields, payload
-      types other than `i32`, `str` comparison and concatenation, slices,
-      pointers and generics.
+      enums, blocks, expressions with precedence, `import`, `struct`, `enum`,
+      `impl` and `str`, structs, enums and `str` by value across functions.
+      Missing: `unsafe`, attributes, enum struct fields, payload types other
+      than `i32`, `str` comparison and concatenation, slices, pointers and
+      generics.
 - [ ] Complete semantic analysis and the type system beyond
       `i32`/`bool`/`void`/`str` (other integer widths, `f32`/`f64`, `str` with
       ownership/lifetimes, flow checking).
@@ -55,7 +59,32 @@ implementation and reproducible tests.
       choice of the official backend (and a configurable `target triple`)
       remains pending.
 
-## Phase 2 — Language and runtime
+## Phase 2 — Freestanding and embedded targets
+
+Dependency order and rationale in `docs/embedded.md`; nothing here is started
+before the numeric-width cycles.
+
+- [ ] Fixed-width integers (`u8`/`i8`, `u16`/`i16`, `u32`, `u64`, `usize`) with
+      explicit conversions, bitwise operators, shifts and defined wrap
+      semantics.
+- [ ] Pointers (`*T`, `*const T`), address-of, dereference and the first real
+      `unsafe` blocks (wire `src/sema/unsafe.zig` to AST nodes).
+- [ ] `volatile` loads/stores preserved by both backends, plus MMIO/register
+      abstractions in a future `kyn:embedded` package.
+- [ ] Layout control: `#[repr(C)]`, explicit alignment and compile-time
+      size/offset assertions.
+- [ ] Freestanding mode: configurable entry point, `.data`/`.bss`
+      initialization, section control, linker script input and ELF output.
+- [ ] Target abstraction (`src/target/`): data layout and ABI out of the
+      x86-64 backend, selected by the CLI instead of hard-coded.
+- [ ] First embedded target: ARM Cortex-M4 (STM32F401RE) with startup code,
+      vector table, linker script and a blink without runtime; then RISC-V
+      RV32 to prove the abstraction.
+- [ ] Split the standard library into `kyn:core` (target independent),
+      `kyn:embedded` and `kyn:os`, replacing the documented stubs with real
+      implementations.
+
+## Phase 3 — Language and runtime
 
 - [ ] Formalize syntax and semantics (make `syntax.ebnf` normative for the
       target language, today limited to the implemented subset).
@@ -71,7 +100,7 @@ implementation and reproducible tests.
 - [ ] Extend the runner to diagnostic fixtures (expected message/position per
       file) instead of only exit code and stdout.
 
-## Phase 3 — Quality and portability
+## Phase 4 — Quality and portability
 
 - [x] Add CI for build, tests and formatting: `.github/workflows/ci.yml` runs
       `zig fmt --check`, `zig build test`, `zig build e2e` and
@@ -82,7 +111,7 @@ implementation and reproducible tests.
 - [ ] Create interoperability and regression tests.
 - [ ] Document reproducible benchmarks, with no unverified claims.
 
-## Phase 4 — Self-hosting and stability
+## Phase 5 — Self-hosting and stability
 
 - [ ] Implement the compiler in Kyn without placeholders.
 - [ ] Demonstrate reproducible bootstrap using the previous compiler.

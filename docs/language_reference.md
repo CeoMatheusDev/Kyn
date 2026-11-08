@@ -223,23 +223,54 @@ Current limits, all diagnosed: field of struct type (nested struct); empty
 `struct`; struct as a condition, arithmetic operand or comparison; struct literal
 outside initialization/assignment.
 
-**Design vision (not implemented):** the example below shows aggregates with
-non-scalar types and associated methods:
+### Methods (`impl`)
+
+Methods are **implemented** for structs and enums, in a name space per type:
 
 ```kyn
-struct Vector3 {
-    x: f32,
-    y: f32,
-    z: f32,
+struct Point {
+    x: i32,
+    y: i32,
 }
 
+impl Point {
+    // The receiver is an explicit first parameter, passed by value.
+    fn sum(self: Point) -> i32 {
+        return self.x + self.y;
+    }
+
+    fn moved(self: Point, dx: i32, dy: i32) -> Point {
+        return Point { x: self.x + dx, y: self.y + dy };
+    }
+}
+
+fn main() -> i32 {
+    let p = Point { x: 3, y: 4 };
+    return p.moved(1, 1).sum(); // 9
+}
+```
+
+- The receiver is `self: Name` as the first **parameter of the signature** (no
+  implicit `self` yet); the written arguments of `p.moved(1, 1)` are parameters
+  2 and 3.
+- `Type_method` is the symbol in both backends; a method never answers a bare
+  call, never collides silently with a free function (`fn Point_sum()` is
+  diagnosed) and may not reuse a field name.
+- The receiver counts as argument 1 for the six-register limit.
+- `main` stays a free function; an `impl` for an undeclared type is diagnosed.
+
+Limits, all diagnosed: associated functions without a receiver
+(`Point.new(...)`), receiver literal (`Point { x: 1, y: 2 }.sum()`), field read on
+a call result (`p.moved(1, 1).x`), references (`&self`), operator methods,
+visibility, generics and `f32` fields.
+
+**Design vision (not implemented):** references, associated functions and
+`f32` arithmetic — the example below is the intended shape, still unsupported:
+
+```kyn
 impl Vector3 {
     fn new(x: f32, y: f32, z: f32) -> Vector3 {
-        return Vector3 {
-            x: x,
-            y: y,
-            z: z,
-        };
+        return Vector3 { x: x, y: y, z: z };
     }
 
     fn magnitude(self: &Vector3) -> f32 {
@@ -252,8 +283,8 @@ impl Vector3 {
 }
 ```
 
-The initialization syntax, associated methods, receiver, visibility and struct
-layout still have to be formalized.
+References, `f32`, initialization syntax and visibility still have to be
+formalized.
 
 ## 7. Enumerations and results
 

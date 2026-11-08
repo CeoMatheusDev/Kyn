@@ -29,6 +29,9 @@ pub const Kind = enum {
     /// `switch` arm whose case exists but whose payload binding is wrong
     /// (missing payload, payload on a payload-less case, wrong arity).
     invalid_switch_arm,
+    /// Method declaration problem: missing/misnamed receiver or a receiver of
+    /// the wrong nominal type.
+    invalid_method,
     /// Case name that the enum does not declare.
     unknown_case,
     /// `switch` without an `else` and without covering every case.

@@ -1,12 +1,13 @@
 (* Kyn — syntactic grammar of the implemented subset.
    This file describes exactly what the parser in src/parser/parser.zig accepts
-   today. Constructs from the language vision (impl, generics, slices,
-   pointers, unsafe, attributes) are NOT part of this subset yet; see
+   today. Constructs from the language vision (generics, slices, pointers,
+   unsafe, attributes) are NOT part of this subset yet; see
    docs/language_reference.md and docs/status.md. *)
 
 (* Imports come before any declaration; the path is a string literal and is
    resolved relative to the directory of the importing file. *)
-program          = { import_decl }, { struct_decl | enum_decl | function_decl }, EOF ;
+program          = { import_decl },
+                   { struct_decl | enum_decl | impl_decl | function_decl }, EOF ;
 
 import_decl      = "import", string_literal, ";" ;
 
@@ -24,6 +25,13 @@ enum_case        = identifier, [ "(", type_expr, ")" ] ;
 
 function_decl    = "fn", identifier, "(", [ parameters ], ")",
                    [ "->", type_expr ], block ;
+
+(* Methods of a struct or an enum: the block holds only `fn` declarations and the
+   target type is resolved by semantics (a name that is not a declared struct or
+   enum is diagnosed). At this stage every method declares its receiver
+   explicitly as the first parameter: `self: Name`, by value. Methods live in a
+   name space per type and are mangled `Type_method` in both backends. *)
+impl_decl        = "impl", identifier, "{", { function_decl }, "}" ;
 
 parameters       = parameter, { ",", parameter } ;
 parameter        = identifier, ":", type_expr ;
@@ -88,10 +96,11 @@ additive         = multiplicative, { ( "+" | "-" ), multiplicative } ;
 multiplicative   = unary, { ( "*" | "/" | "%" ), unary } ;
 unary            = ( "-" | "!" ), unary | postfix ;
 
-(* Field access: the base must be an identifier (a struct with a struct field
-   does not exist in semantics yet). `Name.Case(...)` is parsed as a call and
-   resolved by semantics as an enum constructor; any other dotted call is
-   diagnosed as an unsupported method call. *)
+(* Dotted postfix. `Name.Case(...)` is an enum constructor; `value.method(...)`
+   is a method call whose receiver (the base) is passed as argument 1; a dotted
+   name without call is a field access. The base of a field access must be a
+   variable (or a call returning a struct); a struct with a struct field does not
+   exist in semantics yet. *)
 postfix          = primary, { ".", identifier, [ "(", [ arguments ], ")" ] } ;
 
 primary          = integer

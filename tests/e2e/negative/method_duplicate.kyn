@@ -1,0 +1,17 @@
+// Two methods with the same name for the same type.
+struct Point {
+    x: i32,
+}
+
+impl Point {
+    fn sum(self: Point) -> i32 {
+        return self.x;
+    }
+    fn sum(self: Point) -> i32 {
+        return 0;
+    }
+}
+
+fn main() -> i32 {
+    return 0;
+}

@@ -1,0 +1,9 @@
+// Methods of a type imported from another module.
+// expect-exit: 156
+import "shape.kyn";
+
+fn main() -> i32 {
+    let s = Shape { width: 3, height: 4 };
+    let big = s.doubled();
+    return s.area() + big.area() * 3;
+}

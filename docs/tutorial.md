@@ -23,14 +23,15 @@ suite.
 9. [Functions](#9-functions)
 10. [Structs](#10-structs)
 11. [Enums and `switch`](#11-enums-and-switch)
-12. [Text and output](#12-text-and-output)
-13. [Modules](#13-modules)
-14. [Diagnostics](#14-diagnostics)
-15. [Generating binaries and IR](#15-generating-binaries-and-ir)
-16. [Testing your code](#16-testing-your-code)
-17. [Common mistakes](#17-common-mistakes)
-18. [Current limits](#18-current-limits)
-19. [Where Kyn is going](#19-where-kyn-is-going)
+12. [Methods and `impl`](#12-methods-and-impl)
+13. [Text and output](#13-text-and-output)
+14. [Modules](#14-modules)
+15. [Diagnostics](#15-diagnostics)
+16. [Generating binaries and IR](#16-generating-binaries-and-ir)
+17. [Testing your code](#17-testing-your-code)
+18. [Common mistakes](#18-common-mistakes)
+19. [Current limits](#19-current-limits)
+20. [Where Kyn is going](#20-where-kyn-is-going)
 
 ---
 
@@ -470,7 +471,112 @@ start of the arm.
 
 ---
 
-## 12. Text and output
+## 12. Methods and `impl`
+
+Methods are declared in an `impl` block for a struct or an enum and receive the
+value they work on as an **explicit first parameter** named `self`:
+
+```kyn
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+impl Point {
+    fn sum(self: Point) -> i32 {
+        return self.x + self.y;
+    }
+
+    fn moved(self: Point, dx: i32, dy: i32) -> Point {
+        return Point { x: self.x + dx, y: self.y + dy };
+    }
+}
+
+fn main() -> i32 {
+    let p = Point { x: 3, y: 4 };
+    print_i32(p.sum());            // 7
+    let far = p.moved(10, 10);     // methods receive and return values
+    print_i32(far.sum());          // 27
+    return p.sum() + far.sum();    // 34
+}
+```
+
+Rules the compiler enforces:
+
+- The receiver is the **first parameter of the signature**, written
+  `self: Point` — there is no implicit `self` at this stage. A method without it
+  (`fn sum() -> i32`), with another name (`that: Point`) or with another type
+  (`self: Pair`) is a diagnostic.
+- `p.sum()` passes `p` as **argument 1**; the arguments written in the call are
+  arguments 2..n. So `p.moved(10, 10)` is `fn moved(self: Point, dx: i32, dy:
+  i32)` called with three words.
+- Methods are **nominal** and per type: `Point.sum` exists only for `Point`, and
+  a method never answers a bare call (`sum(p)` is `function 'sum' is not
+  declared`).
+- A method name cannot repeat a **field** of the struct, another method of the
+  same type, or the symbol of a free function (`fn Point_sum()` collides with
+  `Point.sum`).
+- `main` must stay a free function.
+- An `impl` for a name that is not a declared struct or enum is diagnosed.
+
+Calling and composition work on values of any supported shape: a method may
+return the type it belongs to (`p.moved(1, 1).sum()`), take `str` or enums as
+parameters, and call other methods of the receiver. The receiver is an ordinary
+argument for the **six-register** limit, so `self: Point` (two fields) plus four
+`i32` parameters already fills it.
+
+Example with an enum method:
+
+```kyn
+enum Shape {
+    Circle(i32),
+    Square(i32),
+    Empty,
+}
+
+impl Shape {
+    fn weight(self: Shape) -> i32 {
+        var result: i32 = 0;
+        switch self {
+            Circle(r) => { result = r; }
+            Square(side) => { result = side * 2; }
+            Empty => { result = 0; }
+        }
+        return result;
+    }
+
+    fn grow(self: Shape, delta: i32) -> Shape {
+        var bigger: Shape = Shape.Empty;
+        switch self {
+            Circle(r) => { bigger = Shape.Circle(r + delta); }
+            Square(side) => { bigger = Shape.Square(side + delta); }
+            Empty => { bigger = Shape.Empty; }
+        }
+        return bigger;
+    }
+}
+
+fn main() -> i32 {
+    let shape = Shape.Circle(5);
+    print_i32(shape.weight());              // 5
+    print_i32(shape.grow(2).weight());      // 7
+    return shape.grow(1).weight();          // 6
+}
+```
+
+Not supported yet, all diagnosed: associated functions without a receiver
+(`Point.new(...)`), a receiver that is a temporary literal
+(`Point { x: 1, y: 2 }.sum()`), reading a field of a call result
+(`p.moved(1, 1).x`), references/`&self`, `f32` fields, generics, visibility and
+operator methods.
+
+The symbol of a method is `Type_method` (`kyn_Point_sum` in the native backend,
+`@Point_sum` in the IR), so it is stable, unique per type and never collides
+silently with a free function.
+
+---
+
+## 13. Text and output
 
 `str` is a **static slice**: pointer to constant bytes + length. Today only
 literals exist — there is no concatenation, no comparison by content and no
@@ -522,7 +628,7 @@ On x86-64, `str` travels as a register pair (`%rdi`/`%rsi`, `%rdx`/`%rcx`,
 
 ---
 
-## 13. Modules
+## 14. Modules
 
 `import "path.kyn";` comes before any declaration and loads another file,
 resolved **relative to the importing file**:
@@ -560,7 +666,7 @@ Current rules:
 
 ---
 
-## 14. Diagnostics
+## 15. Diagnostics
 
 The compiler reports **every** independent error in one run, with file, line,
 column, the source line and a marker:
@@ -592,7 +698,7 @@ Common messages and what they mean:
 
 ---
 
-## 15. Generating binaries and IR
+## 16. Generating binaries and IR
 
 Two backends, one semantics:
 
@@ -617,7 +723,7 @@ a struct as an aggregate in the return (parameters are flattened field by field)
 
 ---
 
-## 16. Testing your code
+## 17. Testing your code
 
 The repository's `e2e` suite is driven by comments at the top of the file:
 
@@ -643,7 +749,7 @@ zig build e2e        # 102 cases today
 
 ---
 
-## 17. Common mistakes
+## 18. Common mistakes
 
 **Forgetting to cover every path with `return`**
 
@@ -714,7 +820,7 @@ fn main() -> str {
 
 ---
 
-## 18. Current limits
+## 19. Current limits
 
 The compiler explicitly diagnoses every item below — nothing fails silently:
 
@@ -741,20 +847,26 @@ The compiler explicitly diagnoses every item below — nothing fails silently:
 
 ---
 
-## 19. Where Kyn is going
+## 20. Where Kyn is going
 
-Planned order (detailed in `DEVELOPMENT_STATE.md` §5 and `ROADMAP.md`):
+Planned order (detailed in `DEVELOPMENT_STATE.md` §5, `ROADMAP.md` and, for the
+hardware direction, `docs/embedded.md`):
 
-1. `impl`/methods with `self`, enums across calls (parameters, returns, struct
-   fields) and payloads beyond `i32`.
-2. Larger numeric types (`i64`, `u8`, `f32`) with explicit conversion rules.
-3. Pointers, fixed arrays and slices with documented layout.
-4. `unsafe`, `volatile`, atomics and MMIO — the explicit border to hardware.
-5. Error sets/unions, `try`, `defer`/`errdefer`.
-6. Static generics and `comptime`.
-7. C FFI, cross-compilation, ARM64, freestanding and controllable linking.
-8. First-class diagnostics: stable codes, notes, fix suggestions and JSON output
+1. Fixed-width integers (`u8`/`i8`, `u16`/`i16`, `u32`, `u64`, `usize`) with
+   explicit conversions and bitwise/shift operators.
+2. Pointers (`*T`) and real `unsafe` blocks, followed by `volatile` and MMIO.
+3. `#[repr(C)]`, explicit alignment and compile-time size/offset assertions.
+4. Freestanding mode: configurable entry point, sections, linker script, ELF.
+5. A target abstraction (`src/target/`) and the first embedded target — ARM
+   Cortex-M4 (STM32F401RE) — then RISC-V RV32.
+6. Error sets/unions, `try`, `defer`/`errdefer`.
+7. Static generics and `comptime`.
+8. C FFI, cross-compilation, ARM64 and controllable linking.
+9. First-class diagnostics: stable codes, notes, fix suggestions and JSON output
    for editors.
+
+Methods (`impl`) and enums by value already landed; enum **struct fields** and
+payloads beyond `i32` stay on the list.
 
 Every step lands with success **and** failure tests, documentation and an entry
 in `DEVELOPMENT_STATE.md` — and none of them gives up the central rule: the

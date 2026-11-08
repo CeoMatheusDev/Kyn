@@ -28,7 +28,7 @@ Kyn is conceived as a systems programming language, with modern syntax and expli
 | Functions | Declaration with `fn` and `-> Type` return | Proposed |
 | Mutability | `let` immutable and `var` mutable | Proposed |
 | Aggregates | `struct` and `enum` | `struct` and `enum` with exhaustive `switch` implemented for scalars |
-| Methods | `impl` blocks | Proposed |
+| Methods | `impl` blocks | Implemented (explicit `self: T`, by value) |
 | Modules | Explicit imports | Experimental / under definition |
 | Memory | Explicit allocators, no GC as a goal | Proposed |
 | References | Shared and mutable borrowing | Proposed |

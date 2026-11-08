@@ -23,7 +23,7 @@ string_literal = '"', { any_char - ( '"' | "\n" | "\r" ) }, '"' ;
 
 keyword    = "fn" | "let" | "var" | "return"
            | "if" | "else" | "while" | "switch"
-           | "import" | "struct" | "enum" | "true" | "false" ;
+           | "import" | "struct" | "enum" | "impl" | "true" | "false" ;
 
 (* "=>" (fat arrow) separates a switch case from its body; "->" is only the
    return arrow of a function signature. *)
