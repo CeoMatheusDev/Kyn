@@ -82,6 +82,8 @@ fn llvmType(typ: sema.Type) codegen.Error![]const u8 {
         .void => "void",
         // A struct in LLVM is represented field by field (scalar replacement).
         .aggregate => error.UnsupportedType,
+        // An enum is tag + payload slots, never a single operand.
+        .enumeration => error.UnsupportedType,
         // `str` is pointer + length: represented by two slots.
         .str => error.UnsupportedType,
         .unknown => error.UnsupportedType,
@@ -99,6 +101,7 @@ fn typeAlign(typ: sema.Type) codegen.Error!u32 {
         .bool => 1,
         .void => error.UnsupportedType,
         .aggregate => error.UnsupportedType,
+        .enumeration => error.UnsupportedType,
         .str => error.UnsupportedType,
         .unknown => error.UnsupportedType,
     };
@@ -284,6 +287,14 @@ const FnEmitter = struct {
                 try self.emit("  {s} = alloca i64, align 8\n", .{try self.varName(sym.slot + 1)});
                 continue;
             }
+            if (sym.typ == .enumeration) {
+                // Tag in the base slot, payload in the next one (same mapping
+                // as the native backend); the payload slot stays unused when
+                // no case declares a payload.
+                try self.emit("  {s} = alloca i32, align 4\n", .{try self.varName(sym.slot)});
+                try self.emit("  {s} = alloca i32, align 4\n", .{try self.varName(sym.slot + 1)});
+                continue;
+            }
             if (sym.typ == .aggregate) {
                 if (sym.struct_id >= self.checked.structs.len) return error.MiscompiledAst;
                 for (self.checked.structs[sym.struct_id].fields, 0..) |field, i| {
@@ -406,6 +417,10 @@ const FnEmitter = struct {
                     try self.emitStrStore(symbol, decl.init);
                     return;
                 }
+                if (symbol.typ == .enumeration) {
+                    try self.emitEnumStore(symbol, decl.init);
+                    return;
+                }
                 const value = try self.emitExpr(decl.init);
                 if (value.typ == .void) return error.UnsupportedNode;
                 const ty = try llvmType(symbol.typ);
@@ -422,6 +437,10 @@ const FnEmitter = struct {
                 }
                 if (symbol.typ == .str) {
                     try self.emitStrStore(symbol, assign.value);
+                    return;
+                }
+                if (symbol.typ == .enumeration) {
+                    try self.emitEnumStore(symbol, assign.value);
                     return;
                 }
                 const value = try self.emitExpr(assign.value);
@@ -535,8 +554,100 @@ const FnEmitter = struct {
                 try self.startBlock(end_label);
             },
 
+            .switch_stmt => |*sw| try self.emitSwitch(sw),
+
             .block => |stmts| try self.emitStatements(stmts),
         }
+    }
+
+    /// Tag constant of an enum case.
+    fn caseTag(self: *FnEmitter, enum_id: u32, case_index: u32) Error![]const u8 {
+        if (enum_id >= self.checked.enums.len) return error.MiscompiledAst;
+        const info = &self.checked.enums[enum_id];
+        if (case_index >= info.cases.len) return error.MiscompiledAst;
+        return std.fmt.allocPrint(self.arena, "{d}", .{info.cases[case_index].tag});
+    }
+
+    /// Writes an enum value (tag + optional payload) into the two slots of
+    /// `dst`: a case without payload, a constructor with payload, or a copy of
+    /// another enum variable.
+    fn emitEnumStore(self: *FnEmitter, dst: *const sema.Symbol, value: *ast.Expr) Error!void {
+        switch (value.kind) {
+            .field_access => |access| {
+                const tag = try self.caseTag(
+                    access.resolved_enum orelse return error.MiscompiledAst,
+                    access.resolved_case orelse return error.MiscompiledAst,
+                );
+                try self.emit("  store i32 {s}, ptr {s}, align 4\n", .{ tag, try self.varName(dst.slot) });
+            },
+            .method_call => |call| {
+                const tag = try self.caseTag(
+                    call.resolved_enum orelse return error.MiscompiledAst,
+                    call.resolved_case orelse return error.MiscompiledAst,
+                );
+                if (call.args.len != 1) return error.MiscompiledAst;
+                const payload = try self.emitExpr(call.args[0]);
+                try self.emit("  store i32 {s}, ptr {s}, align 4\n", .{ tag, try self.varName(dst.slot) });
+                try self.emit("  store i32 {s}, ptr {s}, align 4\n", .{ payload.text, try self.varName(dst.slot + 1) });
+            },
+            .identifier => {
+                const src = self.symbolAt(value.resolved orelse return error.MiscompiledAst);
+                if (src.typ != .enumeration) return error.MiscompiledAst;
+                const tag = try self.newTemp();
+                try self.emit("  {s} = load i32, ptr {s}, align 4\n", .{ tag, try self.varName(src.slot) });
+                const payload = try self.newTemp();
+                try self.emit("  {s} = load i32, ptr {s}, align 4\n", .{ payload, try self.varName(src.slot + 1) });
+                try self.emit("  store i32 {s}, ptr {s}, align 4\n", .{ tag, try self.varName(dst.slot) });
+                try self.emit("  store i32 {s}, ptr {s}, align 4\n", .{ payload, try self.varName(dst.slot + 1) });
+            },
+            else => return error.MiscompiledAst,
+        }
+    }
+
+    /// `switch` over an enum variable: one block per arm, `switch` on the tag
+    /// and the payload copied into the binding slot at the start of the arm.
+    fn emitSwitch(self: *FnEmitter, sw: *ast.Stmt.SwitchStmt) Error!void {
+        if (sw.scrutinee.kind != .identifier) return error.MiscompiledAst;
+        const subject = self.symbolAt(sw.scrutinee.resolved orelse return error.MiscompiledAst);
+        if (subject.typ != .enumeration) return error.MiscompiledAst;
+        const enum_id = sw.resolved_enum orelse return error.MiscompiledAst;
+
+        const tag = try self.newTemp();
+        try self.emit("  {s} = load i32, ptr {s}, align 4\n", .{ tag, try self.varName(subject.slot) });
+
+        const end_label = try self.newLabel("switch_end");
+        const arm_labels = try self.arena.alloc([]const u8, sw.arms.len);
+        for (sw.arms, 0..) |_, i| arm_labels[i] = try self.newLabel("switch_case");
+        const default_label = if (sw.else_body != null) try self.newLabel("switch_else") else end_label;
+
+        var list: std.ArrayList(u8) = .empty;
+        for (sw.arms, 0..) |arm, i| {
+            const case_tag = try self.caseTag(enum_id, arm.resolved_case orelse return error.MiscompiledAst);
+            if (i > 0) try list.appendSlice(self.arena, " ");
+            try list.print(self.arena, "i32 {s}, label %{s}", .{ case_tag, arm_labels[i] });
+        }
+        try self.emit("  switch i32 {s}, label %{s} [ {s} ]\n", .{ tag, default_label, list.items });
+        self.block().terminated = true;
+
+        for (sw.arms, 0..) |*arm, i| {
+            try self.startBlock(arm_labels[i]);
+            if (arm.binding_symbol) |symbol_index| {
+                const binding = self.symbolAt(symbol_index);
+                const payload = try self.newTemp();
+                try self.emit("  {s} = load i32, ptr {s}, align 4\n", .{ payload, try self.varName(subject.slot + 1) });
+                try self.emit("  store i32 {s}, ptr {s}, align 4\n", .{ payload, try self.varName(binding.slot) });
+            }
+            try self.emitStatements(arm.body);
+            try self.br(end_label);
+        }
+
+        if (sw.else_body) |body| {
+            try self.startBlock(default_label);
+            try self.emitStatements(body);
+            try self.br(end_label);
+        }
+
+        try self.startBlock(end_label);
     }
 
     fn emitExpr(self: *FnEmitter, expr: *ast.Expr) Error!Operand {
@@ -570,6 +681,8 @@ const FnEmitter = struct {
             .call => |call| return self.emitCall(call),
 
             .field_access => |access| {
+                // An enum case (`Color.Red`) is tag + payload slots, not an operand.
+                if (access.resolved_enum != null) return error.UnsupportedNode;
                 const base = self.symbolAt(access.base.resolved orelse return error.MiscompiledAst);
                 if (base.typ != .aggregate) return error.MiscompiledAst;
                 const field_index = access.field_index orelse return error.MiscompiledAst;
@@ -587,6 +700,9 @@ const FnEmitter = struct {
             // A whole struct is not an operand: `let`/assignment handle it
             // field by field in `emitStructStore`.
             .struct_literal => return error.UnsupportedNode,
+            // An enum value is tag + payload slots: `emitEnumStore` and
+            // `emitSwitch` consume it.
+            .method_call => return error.UnsupportedNode,
             // `str` is two slots (pointer + length), handled by
             // `emitStrStore` and `emitPrint`.
             .str_literal => return error.UnsupportedNode,

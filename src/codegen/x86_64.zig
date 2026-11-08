@@ -285,6 +285,8 @@ const FnEmitter = struct {
                     try self.emitStructStore(symbol, decl.init);
                 } else if (symbol.typ == .str) {
                     try self.emitStrStore(symbol, decl.init);
+                } else if (symbol.typ == .enumeration) {
+                    try self.emitEnumStore(symbol, decl.init);
                 } else {
                     try self.emitExpr(decl.init);
                     try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
@@ -297,6 +299,8 @@ const FnEmitter = struct {
                     try self.emitStructStore(symbol, assign.value);
                 } else if (symbol.typ == .str) {
                     try self.emitStrStore(symbol, assign.value);
+                } else if (symbol.typ == .enumeration) {
+                    try self.emitEnumStore(symbol, assign.value);
                 } else {
                     try self.emitExpr(assign.value);
                     try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
@@ -379,8 +383,94 @@ const FnEmitter = struct {
                 self.terminated = false;
             },
 
+            .switch_stmt => |*sw| try self.emitSwitch(sw),
+
             .block => |stmts| try self.emitStatements(stmts),
         }
+    }
+
+    /// Tag of an enum case, verified against the checked program.
+    fn caseTag(self: *FnEmitter, enum_id: u32, case_index: u32) Error!i32 {
+        if (enum_id >= self.checked.enums.len) return error.MiscompiledAst;
+        const info = &self.checked.enums[enum_id];
+        if (case_index >= info.cases.len) return error.MiscompiledAst;
+        return info.cases[case_index].tag;
+    }
+
+    /// Writes an enum value (tag + optional payload) into the two slots of
+    /// `dst`: a case without payload, a constructor with payload, or a copy of
+    /// another enum variable.
+    fn emitEnumStore(self: *FnEmitter, dst: *const sema.Symbol, value: *ast.Expr) Error!void {
+        switch (value.kind) {
+            .field_access => |access| {
+                const tag = try self.caseTag(
+                    access.resolved_enum orelse return error.MiscompiledAst,
+                    access.resolved_case orelse return error.MiscompiledAst,
+                );
+                try self.print("    movl ${d}, -{d}(%rbp)\n", .{ tag, slotOffset(dst.slot) });
+            },
+            .method_call => |call| {
+                const tag = try self.caseTag(
+                    call.resolved_enum orelse return error.MiscompiledAst,
+                    call.resolved_case orelse return error.MiscompiledAst,
+                );
+                if (call.args.len != 1) return error.MiscompiledAst;
+                try self.emitExpr(call.args[0]);
+                try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(dst.slot + 1)});
+                try self.print("    movl ${d}, -{d}(%rbp)\n", .{ tag, slotOffset(dst.slot) });
+            },
+            .identifier => {
+                const src = self.symbolAt(value.resolved orelse return error.MiscompiledAst);
+                if (src.typ != .enumeration) return error.MiscompiledAst;
+                try self.print("    movl -{d}(%rbp), %eax\n", .{slotOffset(src.slot)});
+                try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(dst.slot)});
+                try self.print("    movl -{d}(%rbp), %eax\n", .{slotOffset(src.slot + 1)});
+                try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(dst.slot + 1)});
+            },
+            else => return error.MiscompiledAst,
+        }
+    }
+
+    /// `switch` over an enum variable: compare the tag against each case and
+    /// jump; the payload is copied into the binding slot at the arm start.
+    fn emitSwitch(self: *FnEmitter, sw: *ast.Stmt.SwitchStmt) Error!void {
+        if (sw.scrutinee.kind != .identifier) return error.MiscompiledAst;
+        const subject = self.symbolAt(sw.scrutinee.resolved orelse return error.MiscompiledAst);
+        if (subject.typ != .enumeration) return error.MiscompiledAst;
+        const enum_id = sw.resolved_enum orelse return error.MiscompiledAst;
+
+        const end_label = try self.label("switch_end");
+        const arm_labels = try self.arena.alloc([]const u8, sw.arms.len);
+        for (sw.arms, 0..) |_, i| arm_labels[i] = try self.label("switch_case");
+        const else_label = if (sw.else_body != null) try self.label("switch_else") else end_label;
+
+        try self.print("    movl -{d}(%rbp), %eax\n", .{slotOffset(subject.slot)});
+        for (sw.arms, 0..) |arm, i| {
+            const tag = try self.caseTag(enum_id, arm.resolved_case orelse return error.MiscompiledAst);
+            try self.print("    cmpl ${d}, %eax\n", .{tag});
+            try self.print("    je {s}\n", .{arm_labels[i]});
+        }
+        try self.print("    jmp {s}\n", .{else_label});
+
+        for (sw.arms, 0..) |*arm, i| {
+            try self.print("{s}:\n", .{arm_labels[i]});
+            if (arm.binding_symbol) |symbol_index| {
+                const binding = self.symbolAt(symbol_index);
+                try self.print("    movl -{d}(%rbp), %eax\n", .{slotOffset(subject.slot + 1)});
+                try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(binding.slot)});
+            }
+            try self.emitStatements(arm.body);
+            if (!self.terminated) try self.print("    jmp {s}\n", .{end_label});
+            self.terminated = false;
+        }
+
+        if (sw.else_body) |body| {
+            try self.print("{s}:\n", .{else_label});
+            try self.emitStatements(body);
+            self.terminated = false;
+        }
+
+        try self.print("{s}:\n", .{end_label});
     }
 
     fn emitExpr(self: *FnEmitter, expr: *ast.Expr) Error!void {
@@ -436,6 +526,8 @@ const FnEmitter = struct {
             },
 
             .field_access => |access| {
+                // An enum case (`Color.Red`) is tag + payload slots, not an operand.
+                if (access.resolved_enum != null) return error.UnsupportedNode;
                 const base = self.symbolAt(access.base.resolved orelse return error.MiscompiledAst);
                 if (base.typ != .aggregate) return error.MiscompiledAst;
                 const field_index = access.field_index orelse return error.MiscompiledAst;
@@ -447,6 +539,9 @@ const FnEmitter = struct {
             // A struct value does not fit in `%eax`: `let`/assignment handle the
             // literal field by field in `emitStructStore`.
             .struct_literal => return error.UnsupportedNode,
+            // An enum value is tag + payload slots: `emitEnumStore` and
+            // `emitSwitch` consume it.
+            .method_call => return error.UnsupportedNode,
             // `str` is two slots (pointer + length), handled by
             // `emitStrStore` and `emitPrint`.
             .str_literal => return error.UnsupportedNode,

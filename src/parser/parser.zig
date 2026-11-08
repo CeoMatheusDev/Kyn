@@ -503,6 +503,7 @@ pub const Parser = struct {
 
         var arms: std.ArrayList(ast.Stmt.SwitchArm) = .empty;
         var else_body: ?[]*ast.Stmt = null;
+        var else_span: ?Span = null;
         var else_seen = false;
 
         while (!self.at(.rbrace)) {
@@ -535,6 +536,7 @@ pub const Parser = struct {
                 }
                 else_seen = true;
                 else_body = body.stmts;
+                else_span = arm_tok.span;
                 continue;
             }
 
@@ -567,6 +569,7 @@ pub const Parser = struct {
                 .scrutinee = scrutinee,
                 .arms = try arms.toOwnedSlice(self.arena),
                 .else_body = else_body,
+                .else_span = else_span,
             },
         });
     }

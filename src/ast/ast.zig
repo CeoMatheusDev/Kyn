@@ -293,6 +293,8 @@ pub const Stmt = struct {
         scrutinee: *Expr,
         arms: []SwitchArm,
         else_body: ?[]*Stmt,
+        /// Span of the `else` keyword, when present.
+        else_span: ?Span = null,
         /// Enum index resolved by semantic analysis.
         resolved_enum: ?u32 = null,
     };
