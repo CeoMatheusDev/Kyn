@@ -1,0 +1,5 @@
+// Dereference of a non-pointer should be rejected
+fn main() -> i32 {
+    var x: i32 = 42;
+    return *x;
+}

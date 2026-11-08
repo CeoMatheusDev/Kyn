@@ -1,0 +1,8 @@
+// expect-exit: 1
+// Operadores relacionais em str devem falhar
+fn main() -> i32 {
+    let a = "hello";
+    let b = "world";
+    if a < b { return 1; }
+    return 0;
+}

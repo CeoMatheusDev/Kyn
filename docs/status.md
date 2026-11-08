@@ -1,7 +1,10 @@
 # Implementation status
 
 This document describes what was **observed at run time** in the review of
-November 7, 2026, with Zig 0.17.0 and `as`/`ld` available. It replaces earlier
+November 8, 2026, with Zig 0.17.0 and `as`/`ld` available. It adds the Phase
+1.1 features: fixed-width integers (`i8`/`i16`/`i32`/`i64`/`u8`/`u16`/`u32`/
+`u64`/`usize`), bitwise operators (`&` `|` `^` `~` `<<` `>>`) and explicit
+conversion (`as T`). It replaces earlier
 assessments based only on reading files.
 
 ## Summary
@@ -38,7 +41,7 @@ declaration rules (receiver shape, no field/duplicate/symbol clash, `main` free,
 target declared) are all diagnosed. Methods also work for enums, chain on call
 results (`p.moved(1, 1).sum()`) and count in the six-register limit.
 
-Still missing: generics, slices, pointers, `unsafe`, struct with a struct field
+Still missing: generics, slices, `unsafe`, struct with a struct field
 (nested), `str` in a struct field, `str` comparison, concatenation or formatting,
 integrated FFI, a stable standard library and functional self-hosting. The path
 to freestanding/embedded targets is analysed in `docs/embedded.md`.
@@ -52,12 +55,12 @@ to freestanding/embedded targets is analysed in `docs/embedded.md`.
 | Lexer | `src/lexer/lexer.zig` | Typed tokens with span (line/column), keywords (including `import`, `struct`, `enum`, `impl` and `switch`), two-character operators (including `->` and `=>`), punctuation with `.`, string literal without escapes; discards comments/whitespace | Unit tests |
 | Spans | `src/span.zig` | Offsets + line/column; no text copies | Unit tests |
 | Diagnostics | `src/diagnostics.zig` | Stable category + message + line/caret + source file (`file`) | Unit tests |
-| AST | `src/ast/ast.zig` | Functions, `struct`/fields, `enum`/cases (optional payload), parameters, `let`/`var`, assignment (variable and field), `return`, `if`/`else`, `while`, `switch` with arms/`else`, blocks, expressions (field access, struct literal, enum case, enum constructor, string literal), `Call.builtin` for `print` | Unit tests |
-| Parser | `src/parser/parser.zig` | Whole program, `import` before declarations, `struct`, `enum` with optional payload, `impl` blocks (their methods join `Program.functions` in source order), `switch` arms (`Case`, `Case(name)`, `else`), struct literals and field access, enum constructors (`Shape.Circle(5)`), method calls (`value.method(args)`), precedence and associativity, errors with span | Unit and negative tests |
+| AST | `src/ast/ast.zig` | Functions, `struct`/fields, `enum`/cases (optional payload), parameters, `let`/`var`, assignment (variable and field), `return`, `if`/`else`, `while`, `switch` with arms/`else`, blocks, expressions (field access, struct literal, enum case, enum constructor, string literal), binary operators (`+ - * / % == != < <= > >= && || & | ^ << >>`), unary operators (`- ! ~`), `Expr.Kind.cast` (struct `Cast` with `expr` + `type_name`), `Call.builtin` for `print` | Unit tests |
+| Parser | `src/parser/parser.zig` | Whole program, `import` before declarations, `struct`, `enum` with optional payload, `impl` blocks (their methods join `Program.functions` in source order), `switch` arms (`Case`, `Case(name)`, `else`), struct literals and field access, enum constructors (`Shape.Circle(5)`), method calls (`value.method(args)`), precedence and associativity (including bitwise `|`/`^`/`&`/`<<`/`>>`), unary `~`, `expr as Type` cast syntax, errors with span | Unit and negative tests |
 | Modules | `src/driver.zig` | `compilePath` loads the import graph in pre-order, normalizes paths, deduplicates and flattens into one `Program` | Tests with a temporary directory + 3 executed e2e fixtures + 3 negative ones |
-| Semantics | `src/sema/sema.zig` | Nested scopes, name resolution, types `i32`/`bool`/`str`/`void`/struct/enum, enum cases (unique name and case, `i32` payload only), enum nominality in annotations, assignments, arguments and returns (`param_enum_ids`/`return_enum_id`), exhaustive `switch` (missing cases listed, unreachable `else`, unknown/duplicated case, payload binding rules), struct fields and literals, methods (`impl` target resolution, per-type name space, `Type_method` mangling, receiver `self: Name` rules, field/duplicate/symbol clash checks, shared argument checking between free and method calls), `str` and struct by value in parameters/returns (nominal identity preserved), six-register limit through `registerWordsOf` (`str` = 2, enum = 2, struct field = 1, receiver included), `print`/`print_i32` builtins (arity and type checked, reserved names), mutability, calls, stack slots, `main` validation | Unit tests |
-| LLVM IR backend | `src/codegen/llvm.zig` | Textual IR derived from the AST (arithmetic, comparisons, `&&`/`||` with `phi`, `if`, `while`, calls, `switch` lowered to `switch i32` on the tag with one block per arm); enums as two `alloca i32` slots (tag + payload), two `i32` parameters and a `{ i32, i32 }` return (`insertvalue`/`extractvalue`); structs through scalar replacement (one `alloca` per field); `str` in `@.strN` with `declare i64 @write(i32, ptr, i64)`, `str` by value as `ptr`+`i64` in parameters and `{ ptr, i64 }` return, struct by value with parameters flattened into scalars and aggregate return `{ i32, i1, … }` (`insertvalue`/`extractvalue`); `print` calling `write` and `print_i32` through `@kyn_print_i32` (`urem`/`udiv`) | Structural tests locally; 87/87 modules accepted by the LLVM verifier (LLVM 22 through `llvmlite` locally, `llvm-as` in CI) |
-| x86-64 backend | `src/codegen/x86_64.zig` | System V assembly without libc, `_start` + `exit` syscall; enums in two slots (tag + payload) with `switch` as `cmpl`/`je` chains, parameters/arguments as register pairs and the return in `%eax`/`%edx`; struct in consecutive slots (base + one per field); `str` in two slots, `str` parameters/returns in register pairs (`(%rdi,%rsi)`, `(%rdx,%rcx)`, `(%r8,%r9)`; return in `%rax`/`%rdx`), struct by value with one register per field (return in `%eax`/`%edx`/`%ecx`/`%r8d`/`%r9d`/`%r10d`), text in `.rodata` and `print` through the `write` syscall; `print_i32` with a single decimal routine (unsigned `divl`) | Executed: `as` + `ld` + exit code and stdout checked |
+| Semantics | `src/sema/sema.zig` | Nested scopes, name resolution, types `i8`/`i16`/`i32`/`i64`/`u8`/`u16`/`u32`/`u64`/`usize`/`bool`/`str`/`void`/struct/enum (`isInteger`, `isValue`, `bitWidth`, `isSigned`, `fromName`, `name`, `registerWords`), enum cases (unique name and case, `i32` payload only), enum nominality in annotations, assignments, arguments and returns (`param_enum_ids`/`return_enum_id`), exhaustive `switch` (missing cases listed, unreachable `else`, unknown/duplicated case, payload binding rules), struct fields and literals, methods (`impl` target resolution, per-type name space, `Type_method` mangling, receiver `self: Name` rules, field/duplicate/symbol clash checks, shared argument checking between free and method calls), `str` and struct by value in parameters/returns (nominal identity preserved), six-register limit through `registerWordsOf` (`str` = 2, enum = 2, struct field = 1, receiver included), `print`/`print_i32` builtins (arity and type checked, reserved names), mutability, calls, stack slots, `main` validation, `checkBinary` width-aware (arithmetic/comparison/bitwise require same non-bool integer type; shift result = left operand type; logical requires bool; `==`/`!=` fallback via `isValue()`), `checkExpr` for `.unary.bitnot` (integer only, same type) and `.cast` (int↔int only, `bool`/`str` rejected, clear diagnostic), implicit narrowing rejected (initializer of `u8` from `i32` literal `300` fails) | Unit tests |
+| LLVM IR backend | `src/codegen/llvm.zig` | Textual IR derived from the AST (arithmetic, comparisons, `&&`/`||` with `phi`, `if`, `while`, calls, `switch` lowered to `switch i32` on the tag with one block per arm); enums as two `alloca i32` slots (tag + payload), two `i32` parameters and a `{ i32, i32 }` return (`insertvalue`/`extractvalue`); structs through scalar replacement (one `alloca` per field); `str` in `@.strN` with `declare i64 @write(i32, ptr, i64)`, `str` by value as `ptr`+`i64` in parameters and `{ ptr, i64 }` return, struct by value with parameters flattened into scalars and aggregate return `{ i32, i1, … }` (`insertvalue`/`extractvalue`); `print` calling `write` and `print_i32` through `@kyn_print_i32` (`urem`/`udiv`); `llvmType` maps `i8/u8`→`i8`, `i16/u16`→`i16`, `i32/u32`→`i32`, `i64/u64/usize`→`i64`; `typeAlign` maps 1/2/4/8; bitwise operators emit `and`/`or`/`xor`/`shl`/`lshr`; `~` emits `xor -1`; `as` emits `trunc`/`zext`/`sext` | Structural tests locally; 87/87 modules accepted by the LLVM verifier (LLVM 22 through `llvmlite` locally, `llvm-as` in CI) |
+| x86-64 backend | `src/codegen/x86_64.zig` | System V assembly without libc, `_start` + `exit` syscall; enums in two slots (tag + payload) with `switch` as `cmpl`/`je` chains, parameters/arguments as register pairs and the return in `%eax`/`%edx`; struct in consecutive slots (base + one per field); `str` in two slots, `str` parameters/returns in register pairs (`(%rdi,%rsi)`, `(%rdx,%rcx)`, `(%r8,%r9)`; return in `%rax`/`%rdx`), struct by value with one register per field (return in `%eax`/`%edx`/`%ecx`/`%r8d`/`%r9d`/`%r10d`), text in `.rodata` and `print` through the `write` syscall; `print_i32` with a single decimal routine (unsigned `divl`); `regForWidth` maps 8→`%al`, 16→`%ax`, 32→`%eax`, 64→`%rax`; bitwise emit `andl`/`orl`/`xorl`/`shll`/`shrl`; `~` emits `notl %eax`; `as` emits `movsx`/`movzx` (extension) or no-op (truncation reads low part) | Executed: `as` + `ld` + exit code and stdout checked |
 | FFI | `src/ffi/ffi.zig` | Isolated `extern "c" printf` experiment | Not integrated |
 | `unsafe`/`repr(C)` | `src/sema/unsafe.zig` | Isolated, tested policy; the AST still has no such nodes | Unit tests of the module |
 | Self-hosting | `src/kyn/*.kyn`, `src/compiler/*.kyn` | Placeholders; not executed by `kync` | Not demonstrated |
@@ -96,49 +99,58 @@ access and `p.field = v` assignment on `var` variables, struct copy by value,
 string literals and `str` variables (inferred or annotated) with copy and
 assignment, builtin `print(s: str)` and `print_i32(n: i32)` (text and decimals
 with a line break), `fn`, `let`/`var` with a mandatory initializer, type
-annotation or inference (`i32`, `bool`, `str`, `void`), assignment (only on
+annotation or inference (`i8`/`i16`/`i32`/`i64`/`u8`/`u16`/`u32`/`u64`/
+`usize`, `bool`, `str`, `void`, `ptr`), assignment (only on
 `var`), `return`, `if`/`else`/`else if`, `while`, blocks, arithmetic
-expressions, comparisons, `&&`/`||` with short-circuit, unary `-`/`!`, integer
-and boolean literals, direct calls to functions of the program itself (up to 6
-argument registers, counting `str` as two and each struct field as one), `str`
+expressions, comparisons, `&&`/`||` with short-circuit, bitwise `&` `|` `^` `~`
+`<<` `>>` (same-type integers), unary `-`/`!`/`~`/`&`/`*`, integer and boolean
+literals, direct calls to functions of the program itself (up to 6 argument
+registers, counting `str` as two and each struct field as one), `str`
 by value in parameters/returns and struct by value in parameters, arguments and
-returns (up to 6 fields).
+returns (up to 6 fields), explicit conversion `expr as T` (int↔int only;
+`bool`/`str`/`void` rejected; same-width is a no-op; narrowing truncates,
+widening zero/sign-extends), address-of `&var` (yields `ptr<T>` where `T` is
+the type of `var`; written as `ptr` means `ptr<unknown>`, assignment-compatible
+with any `ptr<T>`), dereference `*ptr` (yields the pointee type `T`),
+field access through a pointer `(*ptr).field` (the pointee must be a known
+struct, the struct_id is tracked from `&struct_var`), pointer arithmetic
+(`ptr + i32`, `i32 + ptr`, `ptr - i32` yield `ptr`; `ptr - ptr` yields `i32`)
+and pointer comparison (`ptr == ptr`, `ptr != ptr` yield `bool`). Pointers
+count as one register in the six-register limit. String comparison
+(`str == str`, `str != str`) compares both pointer and length and yields `bool`.
 
 Outside the subset (diagnosed or rejected): enum **struct fields**, enum payload
 types other than `i32`, operators on enum values (`==`, arithmetic), `switch`
 over a constructed value, associated functions without a receiver, receiver
 literal or field read on a call result, references (`&self`), `unsafe`,
 `#[...]` attributes, struct with a struct field, empty struct, struct field of
-type `str`, `str` comparison (`==`/`!=`), concatenation and formatting of `str`,
-`f32`/`f64` and other types, `[]T` slices, pointers, generics, `Result<T, E>`/`?`,
-closures, `for`, visibility (`pub`), qualified/selective imports and packages.
+type `str`, `str` relational operators (`<`, `<=`, `>`, `>=`), concatenation
+and formatting of `str`, `f32`/`f64` and other types, `[]T` slices, generics,
+`Result<T, E>`/`?`, closures, `for`, visibility (`pub`), qualified/selective
+imports and packages.
 
 ## Validation executed in this cycle
 
 - `zig build` — success.
-- `zig build test` — 244 tests in the compiler suite (spans, lexer,
+- `zig build test` — 246 tests in the compiler suite (spans, lexer,
   diagnostics, ast, parser, sema, unsafe, backends, driver, multi-file loading,
   structs, `str`/`print`, `str` by value in calls, struct by value in calls,
   enums by value in calls, `impl`/methods, `print_i32`, enums with payload and
   exhaustive `switch`, string pool and rejection of `void` variables) plus 7
-  from the experimental `std` (251 in total).
-- `zig build e2e` — 121/121 cases: 31 behavioral fixtures (2 with methods
-  covering struct and enum receivers, chained calls, `str` returns and method
-  calls inside conditions/loops, 3 with `enum`, one passing and returning enums
-  across calls, one using `else`, 6 with `struct`, including 3 struct by value, 4
-  with `print`, 4 with `print_i32`/mixed, 3 with `str` by value, all checking
-  stdout), 9 executed multi-file programs (with struct, struct by value, methods
-  of an imported type, `print` in the module and imported `str`), 50
-  `case_N.kyn` fixtures with exit code `N`, 27 negative fixtures (8 enum:
-  non-exhaustive switch, unknown case, redundant `else`, missing payload,
-  binding on a payload-less case, enum in parameter, enum struct field, operator
-  on an enum; 4 struct, including swapped nominal structs and the register
-  limit; 3 methods: unknown method, wrong receiver type, duplicated method; 4
-  `str`/`print`, 2 `print_i32`, 1 `str` field, 1 `main` returning `str`), 2
-  modules with enums (`import_enum`, plus the method example `import_method`)
-  and 3 negative modules (cycle, missing file, duplicated symbol) with the
-  expected message. The enum negatives include nominal identity (`enum_nominal`)
-  and the two-register limit (`enum_registers`).
+  from the experimental `std` (253 in total). One existing sema test was
+  retargeted from `u8` (now accepted) to `i128` (still unknown).
+- `zig build e2e` — 130/130 cases: 31 behavioral fixtures plus 3 new ones
+  (`bitwise`, `cast` and `pointer`), 2 new pointer field-access fixtures
+  (`pointer_field`, `ptr_field_unknown`), 9 executed multi-file programs,
+  50 `case_N.kyn` fixtures with exit code `N`, 29 negative fixtures
+  (8 enum, 4 struct, 3 methods, 4 `str`/`print`, 2 `print_i32`,
+  1 `str` field, 1 `main` returning `str`, 1 implicit narrowing
+  `implicit_narrowing`, 1 pointer type mismatch `ptr_type_mismatch`,
+  1 pointer field unknown field `ptr_field_unknown`), 2 modules with enums
+  (`import_enum`, plus the method example `import_method`) and 3 negative
+  modules (cycle, missing file, duplicated symbol) with the expected message.
+  The enum negatives include nominal identity (`enum_nominal`) and the
+  two-register limit (`enum_registers`).
 - `zig fmt --check build.zig src std` — no differences.
 - `zig build validate-ir` (local, no LLVM) — warns and skips, as documented for
   the development environment; the same script covers 90 modules when
@@ -146,7 +158,7 @@ closures, `for`, visibility (`pub`), qualified/selective imports and packages.
   through `llvmlite` (`parse_assembly` + `verify`).
 - CI (`.github/workflows/ci.yml`) — runs `42427966554` (PR #23) and
   `42428126584` (`main` after merge) green with `zig fmt --check`, `zig build
-  test` (244 + 7 tests), `zig build e2e` (121 cases, with stdout checked) and
+  test` (245 + 7 tests), `zig build e2e` (121 cases, with stdout checked) and
   `zig build validate-ir-strict` (90 modules accepted by `llvm-as`, including
   the `{ ptr, i64 }` aggregates of `str` and the `{ i32, i1, … }` of structs).
   The strict step fails if the verifier is missing or rejects any module.

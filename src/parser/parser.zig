@@ -632,7 +632,17 @@ pub const Parser = struct {
     }
 
     pub fn parseExpression(self: *Parser) Error!*ast.Expr {
-        return self.parseBinary(1);
+        var expr = try self.parseBinary(1);
+        // `expr as Type` — explicit numeric conversion. `as` binds looser than
+        // all binary operators but tighter than a semicolon.
+        if (self.at(.kw_as)) {
+            self.advance();
+            const type_name = try self.parseTypeName("type after 'as'");
+            expr = try ast.Expr.create(self.arena, expr.span.merge(type_name.span), .{
+                .cast = .{ .expr = expr, .type_name = type_name },
+            });
+        }
+        return expr;
     }
 
     /// Condition expression: no `Name { ... }` so it does not consume the `{` of
@@ -653,23 +663,29 @@ pub const Parser = struct {
         return switch (tag) {
             .pipe_pipe => .{ .prec = 1, .op = .or_op },
             .amp_amp => .{ .prec = 2, .op = .and_op },
-            .eq => .{ .prec = 3, .op = .eq },
-            .ne => .{ .prec = 3, .op = .ne },
-            .lt => .{ .prec = 4, .op = .lt },
-            .le => .{ .prec = 4, .op = .le },
-            .gt => .{ .prec = 4, .op = .gt },
-            .ge => .{ .prec = 4, .op = .ge },
-            .plus => .{ .prec = 5, .op = .add },
-            .minus => .{ .prec = 5, .op = .sub },
-            .star => .{ .prec = 6, .op = .mul },
-            .slash => .{ .prec = 6, .op = .div },
-            .percent => .{ .prec = 6, .op = .mod },
+            .bitor => .{ .prec = 3, .op = .bitor },
+            .bitxor => .{ .prec = 4, .op = .bitxor },
+            .bitand => .{ .prec = 5, .op = .bitand },
+            .eq => .{ .prec = 6, .op = .eq },
+            .ne => .{ .prec = 6, .op = .ne },
+            .lt => .{ .prec = 7, .op = .lt },
+            .le => .{ .prec = 7, .op = .le },
+            .gt => .{ .prec = 7, .op = .gt },
+            .ge => .{ .prec = 7, .op = .ge },
+            .shl => .{ .prec = 8, .op = .shl },
+            .shr => .{ .prec = 8, .op = .shr },
+            .plus => .{ .prec = 9, .op = .add },
+            .minus => .{ .prec = 9, .op = .sub },
+            .star => .{ .prec = 10, .op = .mul },
+            .slash => .{ .prec = 10, .op = .div },
+            .percent => .{ .prec = 10, .op = .mod },
             else => null,
         };
     }
 
     fn parseBinary(self: *Parser, min_prec: u8) Error!*ast.Expr {
         var lhs = try self.parseUnary();
+        lhs = try self.parseFieldChain(lhs);
         while (binaryInfo(self.current().tag)) |info| {
             if (info.prec < min_prec) break;
             self.advance();
@@ -683,23 +699,45 @@ pub const Parser = struct {
 
     fn parseUnary(self: *Parser) Error!*ast.Expr {
         const tok = self.current();
-        switch (tok.tag) {
-            .minus => {
-                self.advance();
-                const operand = try self.parseUnary();
-                return ast.Expr.create(self.arena, tok.span.merge(operand.span), .{
-                    .unary = .{ .op = .neg, .operand = operand },
-                });
-            },
-            .bang => {
-                self.advance();
-                const operand = try self.parseUnary();
-                return ast.Expr.create(self.arena, tok.span.merge(operand.span), .{
-                    .unary = .{ .op = .not, .operand = operand },
-                });
-            },
-            else => return self.parsePrimary(),
+        var base: ?*ast.Expr = null;
+        if (tok.tag == .minus) {
+            self.advance();
+            const operand = try self.parseUnary();
+            base = try ast.Expr.create(self.arena, tok.span.merge(operand.span), .{
+                .unary = .{ .op = .neg, .operand = operand },
+            });
+        } else if (tok.tag == .bang) {
+            self.advance();
+            const operand = try self.parseUnary();
+            base = try ast.Expr.create(self.arena, tok.span.merge(operand.span), .{
+                .unary = .{ .op = .not, .operand = operand },
+            });
+        } else if (tok.tag == .bitnot) {
+            self.advance();
+            const operand = try self.parseUnary();
+            base = try ast.Expr.create(self.arena, tok.span.merge(operand.span), .{
+                .unary = .{ .op = .bitnot, .operand = operand },
+            });
+        } else if (tok.tag == .bitand) {
+            // Address-of (`&var`): unary only in operand position. The binary
+            // `&` (bitwise AND) is handled in `parseBinary`.
+            self.advance();
+            const operand = try self.parseUnary();
+            base = try ast.Expr.create(self.arena, tok.span.merge(operand.span), .{
+                .unary = .{ .op = .address_of, .operand = operand },
+            });
+        } else if (tok.tag == .star) {
+            // Dereference (`*ptr`): unary only in operand position. The binary
+            // `*` (multiplication) is handled in `parseBinary`.
+            self.advance();
+            const operand = try self.parseUnary();
+            base = try ast.Expr.create(self.arena, tok.span.merge(operand.span), .{
+                .unary = .{ .op = .dereference, .operand = operand },
+            });
+        } else {
+            return self.parsePrimary();
         }
+        return try self.parseFieldChain(base.?);
     }
 
     fn parsePrimary(self: *Parser) Error!*ast.Expr {

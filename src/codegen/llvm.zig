@@ -77,7 +77,10 @@ pub fn emit(
 
 fn llvmType(typ: sema.Type) codegen.Error![]const u8 {
     return switch (typ) {
-        .i32 => "i32",
+        .i8, .u8 => "i8",
+        .i16, .u16 => "i16",
+        .i32, .u32 => "i32",
+        .i64, .u64, .usize => "i64",
         .bool => "i1",
         .void => "void",
         // A struct in LLVM is represented field by field (scalar replacement).
@@ -86,6 +89,8 @@ fn llvmType(typ: sema.Type) codegen.Error![]const u8 {
         .enumeration => error.UnsupportedType,
         // `str` is pointer + length: represented by two slots.
         .str => error.UnsupportedType,
+        // A pointer is a 64-bit address.
+        .ptr => "i64",
         .unknown => error.UnsupportedType,
     };
 }
@@ -102,10 +107,15 @@ fn llvmReturnType(typ: sema.Type) codegen.Error![]const u8 {
 
 fn typeAlign(typ: sema.Type) codegen.Error!u32 {
     return switch (typ) {
-        .i32 => 4,
+        .i8, .u8 => 1,
+        .i16, .u16 => 2,
+        .i32, .u32 => 4,
+        .i64, .u64, .usize => 8,
         .bool => 1,
         .void => error.UnsupportedType,
         .aggregate => error.UnsupportedType,
+        // A pointer is 8-byte aligned.
+        .ptr => 8,
         .enumeration => error.UnsupportedType,
         .str => error.UnsupportedType,
         .unknown => error.UnsupportedType,
@@ -791,7 +801,73 @@ const FnEmitter = struct {
             // `str` is two slots (pointer + length), handled by
             // `emitStrStore` and `emitPrint`.
             .str_literal => return error.UnsupportedNode,
+
+            // `expr as Type` — explicit integer width conversion.
+            .cast => |cast_expr| {
+                const operand = try self.emitExpr(cast_expr.expr);
+                if (operand.typ == .void) return error.UnsupportedNode;
+
+                const dst_width = try self.intWidthOfTypeName(cast_expr.type_name);
+                const src_width = operand.typ.bitWidth();
+                if (dst_width == 0 or src_width == 0) return error.UnsupportedType;
+
+                const dst_typ = try llvmTypeOfWidth(dst_width);
+                if (dst_width == src_width) {
+                    // No-op conversion: keep the value, just retype it.
+                    return .{ .text = operand.text, .typ = operand.typ };
+                }
+                const result = try self.newTemp();
+                if (dst_width < src_width) {
+                    try self.emit("  {s} = trunc {s} {s} to {s}\\n", .{
+                        result, try llvmType(operand.typ), operand.text, dst_typ,
+                    });
+                } else if (operand.typ.isSigned()) {
+                    try self.emit("  {s} = sext {s} {s} to {s}\\n", .{
+                        result, try llvmType(operand.typ), operand.text, dst_typ,
+                    });
+                } else {
+                    try self.emit("  {s} = zext {s} {s} to {s}\\n", .{
+                        result, try llvmType(operand.typ), operand.text, dst_typ,
+                    });
+                }
+                // Retype the operand to the destination type for the caller.
+                return .{ .text = result, .typ = try typeOfWidth(dst_width) };
+            },
         }
+    }
+
+    /// Maps an integer bit width to its LLVM type string.
+    fn llvmTypeOfWidth(width: u32) Error![]const u8 {
+        return switch (width) {
+            8 => "i8",
+            16 => "i16",
+            32 => "i32",
+            64 => "i64",
+            else => error.UnsupportedType,
+        };
+    }
+
+    /// Maps an integer bit width back to a sema.Type for result typing.
+    fn typeOfWidth(width: u32) Error!sema.Type {
+        return switch (width) {
+            8 => .i8,
+            16 => .i16,
+            32 => .i32,
+            64 => .i64,
+            else => error.UnsupportedType,
+        };
+    }
+
+    /// Resolves a type name written in `expr as Type` to its bit width.
+    /// Only fixed-width integer names are accepted here.
+    fn intWidthOfTypeName(self: *FnEmitter, tn: ast.TypeName) Error!u32 {
+        _ = self;
+        const name = tn.name;
+        if (std.mem.eql(u8, name, "i8") or std.mem.eql(u8, name, "u8")) return 8;
+        if (std.mem.eql(u8, name, "i16") or std.mem.eql(u8, name, "u16")) return 16;
+        if (std.mem.eql(u8, name, "i32") or std.mem.eql(u8, name, "u32")) return 32;
+        if (std.mem.eql(u8, name, "i64") or std.mem.eql(u8, name, "u64") or std.mem.eql(u8, name, "usize")) return 64;
+        return error.UnsupportedType;
     }
 
     /// Writes a `str` value (pointer and length) into the two slots of `dst`:
@@ -864,28 +940,31 @@ const FnEmitter = struct {
         }
     }
 
-    fn emitUnary(self: *FnEmitter, expr: *ast.Expr, unary: ast.Expr.Unary) Error!Operand {
+        fn emitUnary(self: *FnEmitter, expr: *ast.Expr, unary: ast.Expr.Unary) Error!Operand {
         const operand = try self.emitExpr(unary.operand);
         if (operand.typ == .void) return error.UnsupportedNode;
+        const ty = try llvmType(operand.typ);
         const result = try self.newTemp();
         switch (unary.op) {
-            .neg => try self.emit("  {s} = sub i32 0, {s}\n", .{ result, operand.text }),
+            .neg => try self.emit("  {s} = sub {s} 0, {s}\n", .{ result, ty, operand.text }),
             .not => try self.emit("  {s} = xor i1 {s}, true\n", .{ result, operand.text }),
+            .bitnot => try self.emit("  {s} = xor {s} {s}, -1\n", .{ result, ty, operand.text }),
+            .address_of, .dereference => return error.UnsupportedNode,
         }
         _ = expr;
         return .{
             .text = result,
-            .typ = if (unary.op == .neg) .i32 else .bool,
+            .typ = if (unary.op == .not) .bool else operand.typ,
         };
     }
 
-    fn emitBinary(self: *FnEmitter, binary: ast.Expr.Binary) Error!Operand {
+        fn emitBinary(self: *FnEmitter, binary: ast.Expr.Binary) Error!Operand {
         if (binary.op.isLogical()) return self.emitLogical(binary);
 
         const lhs = try self.emitExpr(binary.lhs);
         const rhs = try self.emitExpr(binary.rhs);
         if (lhs.typ == .void or rhs.typ == .void) return error.UnsupportedNode;
-        if (lhs.typ != rhs.typ) return error.UnsupportedNode;
+        if (!lhs.typ.eq(rhs.typ)) return error.UnsupportedNode;
 
         const ty = try llvmType(lhs.typ);
         const result = try self.newTemp();
@@ -902,12 +981,17 @@ const FnEmitter = struct {
             .ge => try self.emit("  {s} = icmp sge {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
             .eq => try self.emit("  {s} = icmp eq {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
             .ne => try self.emit("  {s} = icmp ne {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
+            .bitand => try self.emit("  {s} = and {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
+            .bitor => try self.emit("  {s} = or {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
+            .bitxor => try self.emit("  {s} = xor {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
+            .shl => try self.emit("  {s} = shl {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
+            .shr => try self.emit("  {s} = lshr {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
             .and_op, .or_op => unreachable,
         }
 
         return .{
             .text = result,
-            .typ = if (binary.op.isArithmetic()) .i32 else .bool,
+            .typ = if (binary.op.isLogical()) .bool else lhs.typ,
         };
     }
 

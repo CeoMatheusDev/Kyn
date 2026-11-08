@@ -1,0 +1,9 @@
+// ptr + ptr deve ser rejeitado
+fn main() -> i32 {
+    var a: i32 = 10;
+    var b: i32 = 20;
+    let pa: ptr = &a;
+    let pb: ptr = &b;
+    let invalid: ptr = pa + pb;
+    return invalid as i32;
+}

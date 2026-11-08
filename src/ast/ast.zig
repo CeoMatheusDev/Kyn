@@ -139,6 +139,8 @@ pub const Expr = struct {
         /// `Enum.Case(value)` — enum constructor with payload. A dotted name
         /// without parentheses is a `field_access` whose base is the enum name.
         method_call: MethodCall,
+        /// `expr as Type` — explicit numeric conversion.
+        cast: Cast,
     };
 
     /// `base.name(args)`: an enum constructor (`Shape.Circle(5)`, base is the
@@ -159,7 +161,14 @@ pub const Expr = struct {
         resolved_fn: ?u32 = null,
     };
 
-    pub const FieldAccess = struct {
+    /// `expr as Type` — explicit numeric conversion between integer widths.
+    pub const Cast = struct {
+        expr: *Expr,
+        /// Target type name exactly as written in the source.
+        type_name: TypeName,
+    };
+
+        pub const FieldAccess = struct {
         base: *Expr,
         name: []const u8,
         name_span: Span,
@@ -170,7 +179,6 @@ pub const Expr = struct {
         resolved_enum: ?u32 = null,
         resolved_case: ?u32 = null,
     };
-
     pub const StructLiteral = struct {
         type_name: TypeName,
         fields: []FieldInit,
@@ -203,6 +211,16 @@ pub const Expr = struct {
         ge,
         and_op,
         or_op,
+        /// Bitwise AND (`&`).
+        bitand,
+        /// Bitwise XOR (`^`).
+        bitxor,
+        /// Bitwise OR (`|`).
+        bitor,
+        /// Shift left (`<<`).
+        shl,
+        /// Shift right (`>>`).
+        shr,
 
         pub fn spelling(self: BinaryOp) []const u8 {
             return switch (self) {
@@ -219,12 +237,31 @@ pub const Expr = struct {
                 .ge => ">=",
                 .and_op => "&&",
                 .or_op => "||",
+                .bitand => "&",
+                .bitxor => "^",
+                .bitor => "|",
+                .shl => "<<",
+                .shr => ">>",
             };
         }
 
         pub fn isArithmetic(self: BinaryOp) bool {
             return switch (self) {
                 .add, .sub, .mul, .div, .mod => true,
+                else => false,
+            };
+        }
+
+        pub fn isBitwise(self: BinaryOp) bool {
+            return switch (self) {
+                .bitand, .bitxor, .bitor, .shl, .shr => true,
+                else => false,
+            };
+        }
+
+        pub fn isShift(self: BinaryOp) bool {
+            return switch (self) {
+                .shl, .shr => true,
                 else => false,
             };
         }
@@ -253,11 +290,20 @@ pub const Expr = struct {
     pub const UnaryOp = enum {
         neg,
         not,
+        /// Bitwise complement (`~`).
+        bitnot,
+        /// Address-of (`&`): yields a pointer to the operand.
+        address_of,
+        /// Dereference (`*`): yields the value pointed to by the operand.
+        dereference,
 
         pub fn spelling(self: UnaryOp) []const u8 {
             return switch (self) {
                 .neg => "-",
                 .not => "!",
+                .bitnot => "~",
+                .address_of => "&",
+                .dereference => "*",
             };
         }
     };

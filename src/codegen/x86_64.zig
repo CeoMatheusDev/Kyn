@@ -155,6 +155,14 @@ pub fn emit(
     return out.toOwnedSlice(arena);
 }
 
+/// Returns a pointer type whose pointee is `.unknown`. Used when the exact
+/// pointee type is not tracked (e.g. the result of `&x` before pointee
+/// tracking is fully integrated).
+fn ptr_to_unknown() sema.Type {
+    var unknown: sema.Type = .unknown;
+    return sema.Type{ .ptr = .{ .pointee = &unknown } };
+}
+
 const FnEmitter = struct {
     arena: std.mem.Allocator,
     func: *const ast.Function,
@@ -166,6 +174,16 @@ const FnEmitter = struct {
     label_count: u32 = 0,
     /// Has the current block already ended (return)? Avoids unreachable code.
     terminated: bool = false,
+    /// Type of the value left by the last `emitExpr` call. Used to know whether
+    /// the result is in `%eax` (32-bit scalar) or was spilled to memory (e.g.
+    /// a 64-bit pointer). `null` means no expression has been emitted yet.
+    last_expr_type: ?sema.Type = null,
+    /// Slot where the last expression was spilled, if `last_expr_type` is a
+    /// pointer (stored as a 64-bit value in memory rather than in `%eax`).
+    last_expr_slot: u32 = 0,
+    /// Number of extra stack slots reserved for pointer temporaries (beyond
+    /// the slots already counted by `info.slot_count`).
+    ptr_slots: u32 = 0,
 
     fn init(
         arena: std.mem.Allocator,
@@ -174,7 +192,7 @@ const FnEmitter = struct {
         info: sema.FunctionInfo,
         state: *codegen.ProgramState,
     ) FnEmitter {
-        return .{ .arena = arena, .func = func, .checked = checked, .info = info, .state = state };
+        return .{ .arena = arena, .func = func, .checked = checked, .info = info, .state = state, .last_expr_type = null, .last_expr_slot = 0, .ptr_slots = 0 };
     }
 
     fn print(self: *FnEmitter, comptime fmt: []const u8, args: anytype) !void {
@@ -195,6 +213,21 @@ const FnEmitter = struct {
 
     fn symbolAt(self: *FnEmitter, index: u32) *const sema.Symbol {
         return &self.checked.symbols[index];
+    }
+
+    /// Allocates an extra stack slot for a pointer temporary and returns its
+    /// slot index (counting from 0, after the regular `info.slot_count` slots).
+    fn allocPtrSlot(self: *FnEmitter) u32 {
+        const slot = self.info.slot_count + self.ptr_slots;
+        self.ptr_slots += 1;
+        return slot;
+    }
+
+    /// Offset of a stack slot (regular slots use `slot` directly; pointer
+    /// temporaries use `allocPtrSlot` which returns indices starting after
+    /// `info.slot_count`).
+    fn ptrSlotOffset(slot: u32) u32 {
+        return 8 * (slot + 1);
     }
 
     /// Register words the type consumes (struct: one per field).
@@ -219,7 +252,16 @@ const FnEmitter = struct {
         }
         if (register_words > arg_registers.len) return error.UnsupportedNode;
 
-        const frame_bytes: u32 = std.mem.alignForward(u32, self.info.slot_count * 8, 16);
+        // Reserve extra slots for pointer temporaries (address-of results).
+        // Count pointer-typed locals/params: each may need an extra stack slot
+        // for an address-of temporary. This keeps the frame size unchanged for
+        // functions that don't use pointers.
+        var ptr_var_count: u32 = 0;
+        for (self.info.symbol_start .. self.info.symbol_start + self.info.symbol_count) |i| {
+            if (self.checked.symbols[i].typ.isPtr()) ptr_var_count += 1;
+        }
+        const total_slots: u32 = self.info.slot_count + ptr_var_count;
+        const frame_bytes: u32 = std.mem.alignForward(u32, total_slots * 8, 16);
 
         try self.print(".type kyn_{s}, @function\n", .{self.info.symbol_name});
         try self.print("kyn_{s}:\n", .{self.info.symbol_name});
@@ -294,7 +336,19 @@ const FnEmitter = struct {
                     try self.emitEnumStore(symbol, decl.init);
                 } else {
                     try self.emitExpr(decl.init);
-                    try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
+                    if (self.last_expr_type) |t| {
+                        if (t.isPtr()) {
+                            // Pointer value was spilled to memory by emitExpr;
+                            // store it into the variable's slot.
+                            try self.print("    mov %rax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
+                            self.last_expr_type = null;
+                            self.last_expr_slot = 0;
+                        } else {
+                            try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
+                        }
+                    } else {
+                        try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
+                    }
                 }
             },
 
@@ -308,7 +362,19 @@ const FnEmitter = struct {
                     try self.emitEnumStore(symbol, assign.value);
                 } else {
                     try self.emitExpr(assign.value);
-                    try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
+                    if (self.last_expr_type) |t| {
+                        if (t.isPtr()) {
+                            // Pointer value was spilled to memory by emitExpr;
+                            // store it into the variable's slot.
+                            try self.print("    mov %rax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
+                            self.last_expr_type = null;
+                            self.last_expr_slot = 0;
+                        } else {
+                            try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
+                        }
+                    } else {
+                        try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
+                    }
                 }
             },
 
@@ -518,19 +584,76 @@ const FnEmitter = struct {
                 // `str` does not fit in `%eax`: it is only copied/printed by dedicated
                 // routines, and semantics refuses to use it as a scalar.
                 if (symbol.typ == .str) return error.MiscompiledAst;
-                try self.print("    movl -{d}(%rbp), %eax\n", .{slotOffset(symbol.slot)});
+                if (symbol.typ.isPtr()) {
+                    // Pointer values are 64-bit: load into %rax.
+                    try self.print("    movq -{d}(%rbp), %rax\n", .{slotOffset(symbol.slot)});
+                    self.last_expr_type = ptr_to_unknown();
+                    self.last_expr_slot = 0; // in %rax, not memory
+                } else {
+                    try self.print("    movl -{d}(%rbp), %eax\n", .{slotOffset(symbol.slot)});
+                }
             },
 
             .unary => |unary| {
-                try self.emitExpr(unary.operand);
                 switch (unary.op) {
-                    .neg => try self.print("    negl %eax\n", .{}),
+                    .address_of => {
+                        // `&var`: emit the address of a local variable.
+                        // The operand must be an identifier resolving to a
+                        // symbol with a stack slot.
+                        const operand_expr = unary.operand;
+                        if (operand_expr.kind != .identifier) {
+                            return error.UnsupportedNode;
+                        }
+                        const symbol = self.symbolAt(operand_expr.resolved orelse return error.MiscompiledAst);
+                        if (symbol.typ == .str) return error.MiscompiledAst;
+                        // Allocate a stack slot to hold the 64-bit pointer.
+                        const ptr_slot = self.allocPtrSlot();
+                        // lea -offset(%rbp), %rax
+                        try self.print("    lea -{d}(%rbp), %rax\n", .{slotOffset(symbol.slot)});
+                        // mov %rax, -ptr_slot(%rbp)
+                        try self.print("    mov %rax, -{d}(%rbp)\n", .{ptrSlotOffset(ptr_slot)});
+                        self.last_expr_type = ptr_to_unknown();
+                        self.last_expr_slot = ptr_slot;
+                    },
+                    .dereference => {
+                        // `*ptr`: load the value pointed to by the pointer.
+                        // The pointer operand should have been emitted already,
+                        // leaving either a 64-bit pointer in memory (last_expr_slot > 0)
+                        // or already in %rax (last_expr_slot == 0).
+                        try self.emitExpr(unary.operand);
+                        if (self.last_expr_type) |t| {
+                            if (t.isPtr() and self.last_expr_slot != 0) {
+                                // Pointer was spilled to memory: load it into %rax.
+                                try self.print("    mov -{d}(%rbp), %rax\n", .{ptrSlotOffset(self.last_expr_slot)});
+                            }
+                        }
+                        // If last_expr_slot == 0, the pointer is already in %rax
+                        // (loaded by the .identifier case). Just dereference.
+                        // mov (%rax), %eax  -- load the i32 value pointed to.
+                        try self.print("    mov (%rax), %eax\n", .{});
+                        self.last_expr_type = .i32;
+                        self.last_expr_slot = 0;
+                    },
+                    .neg => {
+                        try self.emitExpr(unary.operand);
+                        try self.print("    negl %eax\n", .{});
+                    },
                     .not => {
+                        try self.emitExpr(unary.operand);
                         try self.print("    cmpl $0, %eax\n", .{});
                         try self.print("    sete %al\n", .{});
                         try self.print("    movzbl %al, %eax\n", .{});
                     },
+                    .bitnot => {
+                        try self.emitExpr(unary.operand);
+                        try self.print("    notl %eax\n", .{});
+                    },
                 }
+                self.last_expr_type = switch (unary.op) {
+                    .address_of => ptr_to_unknown(),
+                    .dereference => .i32,
+                    else => self.last_expr_type,
+                };
             },
 
             .binary => |binary| {
@@ -567,12 +690,44 @@ const FnEmitter = struct {
             .field_access => |access| {
                 // An enum case (`Color.Red`) is tag + payload slots, not an operand.
                 if (access.resolved_enum != null) return error.UnsupportedNode;
-                const base = self.symbolAt(access.base.resolved orelse return error.MiscompiledAst);
-                if (base.typ != .aggregate) return error.MiscompiledAst;
                 const field_index = access.field_index orelse return error.MiscompiledAst;
-                try self.print("    movl -{d}(%rbp), %eax\n", .{
-                    slotOffset(base.slot + 1 + field_index),
-                });
+
+                // Support `(*ptr).field`: dereference a pointer to a struct,
+                // then access a field at the given offset.
+                if (access.base.kind == .unary) {
+                    const unary_expr = access.base.kind.unary;
+                    if (unary_expr.op == .dereference) {
+                        // Emit only the pointer operand (e.g. `ptr` in `*ptr`),
+                // leaving the 64-bit pointer in %rax or in a stack slot.
+                        try self.emitExpr(unary_expr.operand);
+                        if (self.last_expr_type) |t| {
+                            if (t.isPtr() and self.last_expr_slot != 0) {
+                                // Pointer was spilled to memory: load it into %rax.
+                                try self.print("    mov -{d}(%rbp), %rax\n", .{ptrSlotOffset(self.last_expr_slot)});
+                            }
+                        }
+                        // If last_expr_slot == 0, the pointer is already in %rax
+                        // (loaded by the .identifier case). Now load the field.
+                        // Struct layout: slot 0 is the struct base, fields start
+                        // at slot 1. Each slot is 8 bytes. Fields are at negative
+                        // offsets from the base: field i at -{(i+1)*8}(%rax).
+                        try self.print("    movl -{d}(%rax), %eax\n", .{(field_index + 1) * 8});
+                        self.last_expr_type = .i32;
+                        self.last_expr_slot = 0;
+                    } else {
+                        const base = self.symbolAt(access.base.resolved orelse return error.MiscompiledAst);
+                        if (base.typ != .aggregate) return error.MiscompiledAst;
+                        try self.print("    movl -{d}(%rbp), %eax\n", .{
+                            slotOffset(base.slot + 1 + field_index),
+                        });
+                    }
+                } else {
+                    const base = self.symbolAt(access.base.resolved orelse return error.MiscompiledAst);
+                    if (base.typ != .aggregate) return error.MiscompiledAst;
+                    try self.print("    movl -{d}(%rbp), %eax\n", .{
+                        slotOffset(base.slot + 1 + field_index),
+                    });
+                }
             },
 
             // A struct value does not fit in `%eax`: `let`/assignment handle the
@@ -581,7 +736,110 @@ const FnEmitter = struct {
             // `str` is two slots (pointer + length), handled by
             // `emitStrStore` and `emitPrint`.
             .str_literal => return error.UnsupportedNode,
+
+            // `expr as Type` — explicit integer width conversion.
+            .cast => |cast_expr| {
+                const src_type = try self.exprType(cast_expr.expr);
+                if (src_type == .unknown) return error.MiscompiledAst;
+
+                const dst_width = try self.intWidthOfTypeName(cast_expr.type_name);
+                const src_width = src_type.bitWidth();
+                if (dst_width == 0 or src_width == 0) return error.UnsupportedType;
+
+                try self.emitExpr(cast_expr.expr);
+
+                const src_reg = try self.regForWidth(src_width);
+                const dst_reg = try self.regForWidth(dst_width);
+
+                if (dst_width == src_width) {
+                    // No-op: value already in the right-width register.
+                    if (!std.mem.eql(u8, src_reg, dst_reg)) try self.print("    mov {s}, {s}", .{src_reg, dst_reg});
+                    try self.out.appendSlice(self.arena, "\n");
+                    return;
+                }
+
+                if (dst_width < src_width) {
+                    // Truncation: no instruction needed; the low part of the
+                    // source register already holds the truncated value.
+                } else if (src_type.isSigned()) {
+                    // Sign extension.
+                    try self.print("    movsx {s}, {s}", .{src_reg, dst_reg});
+                    try self.out.appendSlice(self.arena, "\n");
+                } else {
+                    // Zero extension.
+                    try self.print("    movzx {s}, {s}", .{src_reg, dst_reg});
+                    try self.out.appendSlice(self.arena, "\n");
+                }
+            },
         }
+    }
+
+    /// Determines the type of an expression without emitting code, walking only
+    /// the constructs that can appear as the source of a `cast`.
+    fn exprType(self: *FnEmitter, expr: *const ast.Expr) Error!sema.Type {
+        return switch (expr.kind) {
+            .int_literal => .i32,
+            .bool_literal => .bool,
+            .identifier => {
+                const sym = self.symbolAt(expr.resolved orelse return error.MiscompiledAst);
+                return sym.typ;
+            },
+            .binary => |binary| self.exprType(binary.lhs),
+            .unary => |unary| {
+                if (unary.op == .not) return .bool;
+                return self.exprType(unary.operand);
+            },
+            .call => |call| {
+                const index = call.callee_fn orelse return error.MiscompiledAst;
+                return self.checked.functions[index].return_type;
+            },
+            .cast => |cast_expr| {
+                const width = try self.intWidthOfTypeName(cast_expr.type_name);
+                return try self.typeOfWidth(width);
+            },
+            .field_access => |access| {
+                const base = self.symbolAt(access.base.resolved orelse return error.MiscompiledAst);
+                if (base.typ != .aggregate) return error.MiscompiledAst;
+                const field_index = access.field_index orelse return error.MiscompiledAst;
+                return self.checked.structs[base.struct_id].fields[field_index].typ;
+            },
+            else => .unknown,
+        };
+    }
+
+    /// Returns the register name for a given integer bit width.
+    fn regForWidth(self: *FnEmitter, width: u32) Error![]const u8 {
+        _ = self;
+        return switch (width) {
+            8 => "%al",
+            16 => "%ax",
+            32 => "%eax",
+            64 => "%rax",
+            else => error.UnsupportedType,
+        };
+    }
+
+    /// Resolves a type name written in `expr as Type` to its bit width.
+    fn intWidthOfTypeName(self: *FnEmitter, tn: ast.TypeName) Error!u32 {
+        _ = self;
+        const name = tn.name;
+        if (std.mem.eql(u8, name, "i8") or std.mem.eql(u8, name, "u8")) return 8;
+        if (std.mem.eql(u8, name, "i16") or std.mem.eql(u8, name, "u16")) return 16;
+        if (std.mem.eql(u8, name, "i32") or std.mem.eql(u8, name, "u32")) return 32;
+        if (std.mem.eql(u8, name, "i64") or std.mem.eql(u8, name, "u64") or std.mem.eql(u8, name, "usize")) return 64;
+        return error.UnsupportedType;
+    }
+
+    /// Maps an integer bit width back to a sema.Type for result typing.
+    fn typeOfWidth(self: *FnEmitter, width: u32) Error!sema.Type {
+        _ = self;
+        return switch (width) {
+            8 => .i8,
+            16 => .i16,
+            32 => .i32,
+            64 => .i64,
+            else => error.UnsupportedType,
+        };
     }
 
     /// Copies a struct value into the slots of `dst`: literal (each field
@@ -791,6 +1049,16 @@ const FnEmitter = struct {
     }
 
     fn emitBinaryOp(self: *FnEmitter, binary: ast.Expr.Binary) Error!void {
+        // `str == str` / `str != str`: compare both pointer and length.
+        // `str` is two 8-byte slots (ptr, len). Result in %eax as bool.
+        if (binary.op == .eq or binary.op == .ne) {
+            const lhs_type = self.checkedExprType(binary.lhs);
+            const rhs_type = self.checkedExprType(binary.rhs);
+            if (lhs_type == .str and rhs_type == .str) {
+                return self.emitStrCmp(binary);
+            }
+        }
+
         try self.emitExpr(binary.lhs);
         try self.print("    pushq %rax\n", .{});
         try self.emitExpr(binary.rhs);
@@ -824,8 +1092,77 @@ const FnEmitter = struct {
                 try self.print("    {s} %al\n", .{setcc});
                 try self.print("    movzbl %al, %eax\n", .{});
             },
+            .bitand => try self.print("    andl %ecx, %eax\n", .{}),
+            .bitor => try self.print("    orl %ecx, %eax\n", .{}),
+            .bitxor => try self.print("    xorl %ecx, %eax\n", .{}),
+            .shl => try self.print("    shll %cl, %eax\n", .{}),
+            .shr => try self.print("    shrl %cl, %eax\n", .{}),
             .and_op, .or_op => unreachable,
         }
+    }
+
+    /// Returns the type of an expression without emitting code, or `.unknown`
+    /// when the type cannot be determined statically.
+    fn checkedExprType(self: *FnEmitter, expr: *const ast.Expr) sema.Type {
+        return self.exprType(expr) catch .unknown;
+    }
+
+    /// `str == str` / `str != str`: compare both pointer (8 bytes) and length
+    /// (8 bytes). Two `str` values are equal iff both pointers and lengths
+    /// match. Result (bool) is left in `%eax`.
+    fn emitStrCmp(self: *FnEmitter, binary: ast.Expr.Binary) Error!void {
+        // Emit lhs str: pointer in %rax, length in %rdx.
+        try self.emitStrValue(binary.lhs);
+        // Save lhs pointer and length on the stack.
+        try self.print("    pushq %rax\n", .{});
+        try self.print("    pushq %rdx\n", .{});
+
+        // Emit rhs str: pointer in %rax, length in %rdx.
+        try self.emitStrValue(binary.rhs);
+
+        // Compare pointers: %rax (rhs ptr) vs (%rsp) (lhs ptr).
+        try self.print("    cmpq (%rsp), %rax\n", .{});
+
+        // Labels for the two comparison outcomes.
+        const ptr_diff_label = try self.label("str_cmp_ptr_diff");
+        const end_label = try self.label("str_cmp_end");
+
+        // If pointers differ, jump to length comparison only matters for == vs !=.
+        // For !=: pointers differ => true. For ==: pointers differ => false.
+        // We handle this by falling through to compare lengths only when ==,
+        // and setting the result directly when !=.
+        if (binary.op == .ne) {
+            // != : pointers differ => true (1), otherwise fall through to compare lengths.
+            try self.print("    jne {s}\n", .{end_label});
+        } else {
+            // == : pointers differ => false (0).
+            try self.print("    jne {s}\n", .{ptr_diff_label});
+        }
+
+        // Pointers are equal: compare lengths.
+        // %rdx = rhs len, (%rsp+8) = lhs len.
+        try self.print("    cmpq 8(%rsp), %rdx\n", .{});
+
+        if (binary.op == .ne) {
+            // != : lengths differ => true (1), lengths equal => false (0).
+            try self.print("    setne %al\n", .{});
+        } else {
+            // == : lengths equal => true (1), lengths differ => false (0).
+            try self.print("    sete %al\n", .{});
+        }
+        try self.print("    jmp {s}\n", .{end_label});
+
+        // Pointers differ: for ==, result is false (0).
+        try self.print("{s}:\n", .{ptr_diff_label});
+        if (binary.op == .eq) {
+            try self.print("    movb $0, %al\n", .{});
+        }
+        // For !=, we already jumped to end_label when pointers differ.
+
+        try self.print("{s}:\n", .{end_label});
+        try self.print("    movzbl %al, %eax\n", .{});
+        // Clean up the stack.
+        try self.print("    addq $16, %rsp\n", .{});
     }
 
     /// Short-circuit: `&&` only evaluates the right side when the left is true.

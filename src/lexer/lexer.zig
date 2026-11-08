@@ -35,6 +35,7 @@ pub const Tag = enum {
     kw_enum,
     kw_switch,
     kw_impl,
+    kw_as,
     kw_true,
     kw_false,
 
@@ -65,7 +66,13 @@ pub const Tag = enum {
     percent, // %
     bang, // !
     amp_amp, // &&
+    bitand, // &
     pipe_pipe, // ||
+    bitor, // |
+    bitxor, // ^
+    bitnot, // ~
+    shl, // <<
+    shr, // >>
 
     /// String literal without a closing quote (up to end of line/file).
     string_unterminated,
@@ -102,6 +109,7 @@ pub const Token = struct {
             .kw_enum => "'enum'",
             .kw_switch => "'switch'",
             .kw_impl => "'impl'",
+            .kw_as => "'as'",
             .kw_true => "'true'",
             .kw_false => "'false'",
             .lparen => "'('",
@@ -128,7 +136,13 @@ pub const Token = struct {
             .percent => "'%'",
             .bang => "'!'",
             .amp_amp => "'&&'",
+            .bitand => "'&'",
             .pipe_pipe => "'||'",
+            .bitor => "'|'",
+            .bitxor => "'^'",
+            .bitnot => "'~'",
+            .shl => "'<<'",
+            .shr => "'>>'",
             .string_unterminated => "unterminated string literal",
             .invalid => "invalid character",
             .eof => "end of file",
@@ -137,7 +151,7 @@ pub const Token = struct {
 
     pub fn isKeyword(self: Token) bool {
         return switch (self.tag) {
-            .kw_fn, .kw_struct, .kw_let, .kw_var, .kw_return, .kw_if, .kw_else, .kw_while, .kw_enum, .kw_switch, .kw_impl, .kw_true, .kw_false => true,
+            .kw_fn, .kw_struct, .kw_let, .kw_var, .kw_return, .kw_if, .kw_else, .kw_while, .kw_enum, .kw_switch, .kw_impl, .kw_as, .kw_true, .kw_false => true,
             else => false,
         };
     }
@@ -157,6 +171,7 @@ fn keywordTag(text: []const u8) ?Tag {
         .{ "enum", .kw_enum },
         .{ "switch", .kw_switch },
         .{ "impl", .kw_impl },
+        .{ "as", .kw_as },
         .{ "true", .kw_true },
         .{ "false", .kw_false },
     });
@@ -277,11 +292,13 @@ pub const Lexer = struct {
             '%' => .percent,
             '=' => if (self.eat('=')) .eq else if (self.eat('>')) .fat_arrow else .assign,
             '!' => if (self.eat('=')) .ne else .bang,
-            '<' => if (self.eat('=')) .le else .lt,
-            '>' => if (self.eat('=')) .ge else .gt,
+            '<' => if (self.eat('<')) .shl else if (self.eat('=')) .le else .lt,
+            '>' => if (self.eat('>')) .shr else if (self.eat('=')) .ge else .gt,
             '-' => if (self.eat('>')) .arrow else .minus,
-            '&' => if (self.eat('&')) .amp_amp else .invalid,
-            '|' => if (self.eat('|')) .pipe_pipe else .invalid,
+            '&' => if (self.eat('&')) .amp_amp else .bitand,
+            '|' => if (self.eat('|')) .pipe_pipe else .bitor,
+            '^' => .bitxor,
+            '~' => .bitnot,
             else => .invalid,
         };
         return Token.init(tag, self.makeSpan(start, start_line, start_column), self.source[start..self.pos]);
@@ -422,8 +439,16 @@ test "lexer: invalid character does not panic" {
     try std.testing.expectEqual(Tag.eof, lex.next().tag);
 }
 
-test "lexer: isolated and/or are invalid" {
-    try expectTags("& |", &.{ .invalid, .invalid, .eof });
+test "lexer: bitwise operators" {
+    try expectTags("& | ^ ~ << >>", &.{
+        .bitand, .bitor, .bitxor, .bitnot, .shl, .shr, .eof,
+    });
+}
+
+test "lexer: && and || remain distinct from single & and |" {
+    try expectTags("&& || & |", &.{
+        .amp_amp, .pipe_pipe, .bitand, .bitor, .eof,
+    });
 }
 
 test "lexer: tokenize allocates and ends with eof" {
@@ -514,4 +539,12 @@ test "lexer: 'enum' and 'switch' are keywords, not identifiers" {
     try std.testing.expectEqual(Tag.kw_switch, second.tag);
     try std.testing.expect(first.isKeyword());
     try std.testing.expect(second.isKeyword());
+}
+
+test "lexer: 'as' is a keyword" {
+    var lex = Lexer.init("as");
+    const tok = lex.next();
+    try std.testing.expectEqual(Tag.kw_as, tok.tag);
+    try std.testing.expectEqualStrings("as", tok.text);
+    try std.testing.expect(tok.isKeyword());
 }

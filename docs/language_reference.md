@@ -101,19 +101,113 @@ remain available. Shadowing and initialization rules still have to be defined.
 
 Suggested initial set:
 
-| Family | Proposed types |
+| Family | Implemented types |
 | --- | --- |
-| Signed integers | `i8`, `i16`, `i32`, `i64`, `i128` |
-| Unsigned integers | `u8`, `u16`, `u32`, `u64`, `u128` |
-| Architecture width | `isize`, `usize` |
-| Floating point | `f32`, `f64` |
+| Signed integers | `i8`, `i16`, `i32`, `i64` |
+| Unsigned integers | `u8`, `u16`, `u32`, `u64` |
+| Architecture width | `usize` |
 | Boolean | `bool` |
-| Character | `char` |
 | Text | `str` |
 | No return value | `void` |
 
-**Implemented today:** `i32` (32-bit signed, literal overflow diagnosed), `bool`
-and `void`, plus `str` for static literals.
+**Implemented today:** all fixed-width integer types above (`i8`/`i16`/`i32`/`i64`,
+`u8`/`u16`/`u32`/`u64`, `usize`), `bool` and `void`, plus `str` for static
+literals. All integer types share the same semantics: operators require operands
+of the same type, integer literals default to `i32` and overflow is diagnosed.
+
+### Numeric conversion (`as`)
+
+There are no implicit conversions between integer types. To convert between
+them, or from/to `bool`, use the explicit cast expression `expr as Type`:
+
+```kyn
+let a: u8 = 255 as u8;
+let b: u32 = a as u32;   // widening (zero-extend)
+let c: i32 = (-42 as i16) as i32;  // sign-extend then widen
+let d: u8 = (300 as u32) as u8;    // narrowing (truncate)
+```
+
+Only fixed-width integer names are accepted as cast targets: `i8`, `i16`,
+`i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `usize`. Casting to `bool`, `str` or
+`void` is rejected by semantics. A same-width cast (`u8 as u8`) is a no-op.
+
+### Bitwise operators
+
+All fixed-width integer types support bitwise operators. Operands must have the
+same type; the result has that same type:
+
+| Operator | Meaning | Precedence | Associativity |
+| --- | --- | --- | --- |
+| `~` | bitwise NOT (unary) | 11 (highest, prefix) | right |
+| `<<` `>>` | left / right shift | 8 | left |
+| `&` | bitwise AND | 7 | left |
+| `^` | bitwise XOR | 6 | left |
+| \| | bitwise OR | 5 | left |
+
+Shifts use the same type for both operands; the result type is the left operand's
+type. Bitwise AND/XOR/OR require both operands to have the same type:
+
+```kyn
+fn main() -> i32 {
+    let a: u8 = 240 as u8;  // 11110000
+    let b: u8 = 170 as u8;  // 10101010
+
+    let and: u8 = a & b;    // 10100000 = 160
+    let or:  u8 = a | b;    // 11111010 = 250
+    let xor: u8 = a ^ b;    // 01011010 = 90
+    let not: u8 = ~a;       // 00001111 = 15
+    let shl: u8 = (1 as u8) << (4 as u8);   // 16
+    let shr: u8 = (240 as u8) >> (4 as u8); // 15
+
+    return 0;
+}
+```
+
+Bitwise operators bind tighter than comparison but looser than additive
+operators. Use parentheses to disambiguate when mixing them with `+`/`-` or
+`==`/`!=`.
+
+### Pointers (`ptr`, `&`, `*`)
+
+**Implemented:** pointer values (`ptr<T>`), address-of (`&var`) and dereference
+(`*ptr`). A pointer is address-sized (one 64-bit register). The pointee type is
+tracked: `&` applied to a value of type `T` yields `ptr<T>`, and `*` applied to
+a `ptr<T>` yields `T`. Writing `ptr` (without a pointee) means `ptr<unknown>`,
+which is assignment-compatible with any `ptr<T>`. Pointers can be stored in
+variables, passed as arguments and returned from functions. They count as one
+register in the six-register limit.
+
+```kyn
+fn main() -> i32 {
+    var x: i32 = 42;
+    let p: ptr = &x;      // address of x; p has type ptr<i32>
+    return *p;            // 42
+}
+```
+
+Pointer arithmetic and comparison are supported:
+- `ptr<T> + i32`, `i32 + ptr<T>`, `ptr<T> - i32` yield `ptr<T>`
+- `ptr<T> - ptr<T>` yields `i32` (difference in units of pointee size)
+- `ptr<T> == ptr<T>` and `ptr<T> != ptr<T>` yield `bool`
+- `ptr<T> + ptr<T>` (and other combinations of two pointers) is rejected.
+
+Field access through a pointer is supported via `(*ptr).field`. The pointer
+must point to a struct, and the struct's layout must be known (the pointer must
+have been obtained via `&struct_var`):
+
+```kyn
+struct Point { x: i32, y: i32 }
+fn main() -> i32 {
+    var p: Point = Point { x: 7, y: 8 };
+    let ptr: ptr = &p;
+    return (*ptr).x + (*ptr).y;  // 15
+}
+```
+
+Current limits, all diagnosed: `&` applied to a non-lvalue (literal, call
+result), `*` applied to a non-pointer type, `ptr` used with `<`, `<=`, `>`,
+`>=` (relational comparison of pointers is not supported yet), `(*ptr).field`
+when the pointee type is unknown (`ptr` without a tracked struct).
 
 At this stage `str` is a **static slice**: pointer to constant bytes + length,
 kept in two slots. It exists to give the program text output:
@@ -165,10 +259,11 @@ fn main() -> i32 {
 ```
 
 Current limits, all diagnosed: struct field of type `str`, `str` in arithmetic,
-condition or `==`/`!=` (comparing would require comparing bytes), concatenation,
+condition or relational operators (`<`, `<=`, `>`, `>=`), concatenation,
 formatting, `main` returning `str`, more than six registers in
 parameters/arguments (each `str` counts two) and an unused `str` expression
-(`print(...)` or assignment).
+(`print(...)` or assignment). String equality (`str == str`, `str != str`) is
+supported: it compares both the pointer and the length and yields `bool`.
 
 Not stable contracts yet: sizes and alignments of the other types, run-time
 overflow, implicit conversions, `char` representation and the `str` lifetime
