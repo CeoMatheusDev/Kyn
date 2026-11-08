@@ -1039,6 +1039,14 @@ const FnEmitter = struct {
         try self.emitExpr(binary.rhs);
         try self.print("    mov{s} {s}, {s}\n", .{ suffix, acc, right });
         try self.print("    popq %rax\n", .{});
+        if (binary.op.isShift()) {
+            if (!lhs_type.isInteger()) return error.MiscompiledAst;
+            // x86 masks counts to 5/6 bits for 32/64-bit ALU operations.
+            // Narrow values use the 32-bit ALU, so mask to their own width.
+            if (lhs_type.bitWidth() < 32) {
+                try self.print("    andl ${d}, %ecx\n", .{lhs_type.bitWidth() - 1});
+            }
+        }
 
         switch (binary.op) {
             .add => try self.print("    add{s} {s}, {s}\n", .{ suffix, right, acc }),
@@ -1929,6 +1937,21 @@ test "x86_64: pointer parameters and struct fields keep 64-bit addresses" {
     try support.expectContains(asm_text, "movq %rax, %rdi");
     try support.expectContains(asm_text, "movq %rsi, -24(%rbp)");
     try support.expectContains(asm_text, "movq -24(%rbp), %rax");
+}
+
+test "x86_64: narrow shifts mask counts; wide shifts use the hardware mask" {
+    var f = try support.Fixture.build(
+        \\fn byte(v: u8, n: u64) -> u8 { return v << n; }
+        \\fn half(v: i16, n: i8) -> i16 { return v >> n; }
+        \\fn wide(v: u64, n: i32) -> u64 { return v >> n; }
+        \\fn main() -> i32 { return 0; }
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+    try support.expectContains(asm_text, "andl $7, %ecx\n    shll %cl, %eax");
+    try support.expectContains(asm_text, "andl $15, %ecx\n    sarl %cl, %eax");
+    try support.expectContains(asm_text, "shrq %cl, %rax");
+    try testing.expect(std.mem.indexOf(u8, asm_text, "andl $63, %ecx") == null);
 }
 
 test "x86_64: unsigned division, comparisons and signed shifts keep their width contract" {

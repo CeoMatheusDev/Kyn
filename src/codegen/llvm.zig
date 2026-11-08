@@ -1019,14 +1019,20 @@ const FnEmitter = struct {
 
         const ty = try llvmType(lhs.typ);
         var rhs_text = rhs.text;
-        // LLVM requires the shift amount to have the same bit width as the
-        // value, while Kyn permits independently typed integer operands.
-        if (binary.op.isShift() and lhs.typ.bitWidth() != rhs.typ.bitWidth()) {
+        if (binary.op.isShift()) {
             if (!lhs.typ.isInteger() or !rhs.typ.isInteger()) return error.MiscompiledAst;
-            const casted = try self.newTemp();
-            const cast_op = if (rhs.typ.bitWidth() > lhs.typ.bitWidth()) "trunc" else "zext";
-            try self.emit("  {s} = {s} {s} {s} to {s}\n", .{ casted, cast_op, try llvmType(rhs.typ), rhs.text, ty });
-            rhs_text = casted;
+            // LLVM requires a same-width count. Kyn reduces the count modulo
+            // the value width (8/16/32/64), including signed/negative counts.
+            // Masking before the shift prevents LLVM poison for count >= width.
+            if (lhs.typ.bitWidth() != rhs.typ.bitWidth()) {
+                const casted = try self.newTemp();
+                const cast_op = if (rhs.typ.bitWidth() > lhs.typ.bitWidth()) "trunc" else "zext";
+                try self.emit("  {s} = {s} {s} {s} to {s}\n", .{ casted, cast_op, try llvmType(rhs.typ), rhs.text, ty });
+                rhs_text = casted;
+            }
+            const masked = try self.newTemp();
+            try self.emit("  {s} = and {s} {s}, {d}\n", .{ masked, ty, rhs_text, lhs.typ.bitWidth() - 1 });
+            rhs_text = masked;
         }
         const result = try self.newTemp();
         const signed = lhs.typ.isSigned();
@@ -1818,6 +1824,29 @@ test "llvm: casts preserve destination signedness and emit real line breaks" {
     try support.expectContains(ir, "sext i8");
     try support.expectContains(ir, "icmp ugt i8");
     try testing.expect(std.mem.indexOf(u8, ir, "\\n  store") == null);
+    try support.expectAllBlocksTerminated(ir);
+}
+
+test "llvm: shift amounts are masked to the left operand width" {
+    var f = try support.Fixture.build(
+        \\fn byte(v: u8, n: u64) -> u8 { return v << n; }
+        \\fn half(v: i16, n: i8) -> i16 { return v >> n; }
+        \\fn word(v: u32, n: u32) -> u32 { return v << n; }
+        \\fn wide(v: i64, n: i32) -> i64 { return v >> n; }
+        \\fn main() -> i32 { return 0; }
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+    try support.expectContains(ir, "trunc i64");
+    try support.expectContains(ir, "and i8");
+    try support.expectContains(ir, ", 7\n");
+    try support.expectContains(ir, "zext i8");
+    try support.expectContains(ir, "and i16");
+    try support.expectContains(ir, ", 15\n");
+    try support.expectContains(ir, "and i32");
+    try support.expectContains(ir, ", 31\n");
+    try support.expectContains(ir, "and i64");
+    try support.expectContains(ir, ", 63\n");
     try support.expectAllBlocksTerminated(ir);
 }
 

@@ -1,0 +1,37 @@
+// expect-exit: 0
+// Shift counts are reduced modulo the left operand's width. Negative counts
+// use their two's-complement low bits; the count may have a different type.
+fn next(n: i32) -> i32 { return n + 1; }
+
+fn main() -> i32 {
+    let bit: u8 = 1 as u8;
+    let count: i32 = 8;
+    if (bit << count) != bit { return 1; }
+    if (bit << next(count)) != (2 as u8) { return 2; }
+    if ((128 as u8) >> (8 as u8)) != (128 as u8) { return 3; }
+    let negative8: i8 = (0 - 16) as i8;
+    if (negative8 >> (9 as u16)) != ((0 - 8) as i8) { return 4; }
+    if (negative8 >> ((0 - 1) as i8)) != ((0 - 1) as i8) { return 5; }
+
+    let bit16: u16 = 1 as u16;
+    if (bit16 << (16 as u8)) != bit16 { return 6; }
+    if ((32768 as u16) >> (17 as u16)) != (16384 as u16) { return 7; }
+    let negative16: i16 = (0 - 8) as i16;
+    if negative16 >> (17 as i32) != ((0 - 4) as i16) { return 8; }
+
+    let bit32: u32 = 1 as u32;
+    if (bit32 << (32 as i32)) != bit32 { return 9; }
+    if (bit32 << ((0 - 1) as i32)) != (bit32 << (31 as u8)) { return 10; }
+    let high_count: u64 = (1 as u64) << (40 as u8);
+    if (bit32 << high_count) != bit32 { return 11; }
+
+    let bit64: u64 = 1 as u64;
+    if (bit64 << (64 as u8)) != bit64 { return 12; }
+    if (bit64 << (65 as u8)) != (2 as u64) { return 13; }
+    if ((bit64 << (63 as u8)) >> ((0 - 1) as i32)) != bit64 { return 14; }
+    if (bit64 << ((0 - 1) as i8)) != (bit64 << (63 as u8)) { return 15; }
+    if ((3 as u8) << high_count) != (3 as u8) { return 16; }
+    let size: usize = 1 as usize;
+    if (size << (64 as i32)) != size { return 17; }
+    return 0;
+}
