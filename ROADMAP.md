@@ -134,7 +134,7 @@ tests are executable and the documentation describes the observed behavior.
 
 ### Current x86-64 implementation checkpoint
 
-- [x] Add the initial typed target model for Linux/System V and freestanding
+- [ ] Add the initial typed target model for Linux/System V and freestanding
       x86-64, including validation of the kernel red-zone and runtime contract.
 - [ ] Execute the new target tests in the Zig 0.17.0 build and preserve the
       result as CI evidence.
