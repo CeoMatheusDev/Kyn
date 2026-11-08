@@ -1,17 +1,17 @@
-//! Parser do bootstrap em Zig.
+//! Parser for the Zig bootstrap compiler.
 //!
-//! Contrato:
-//! - Consumes lexer tokens (no whitespace/comments) and builds the AST
-//!   completa do programa.
-//! - Fails on the first syntax error: records a diagnostic with a span and
-//!   returns `error.ParseError`. Allocation errors return the original error.
-//! - The whole AST is allocated in the arena received by `init`.
+//! Contract:
+//! - Consumes significant lexer tokens and builds an arena-owned AST.
+//! - Stops at the first syntax error, records a source diagnostic and returns
+//!   `error.ParseError`; allocation errors are propagated unchanged.
+//! - Preserves source spans and source-backed text slices throughout the AST.
 //!
-//! Subconjunto suportado (ver `docs/syntax.ebnf` e `docs/status.md`):
-//!   `fn`, `let`/`var` with a mandatory initializer, assignment, `return`,
-//!   `if`/`else`, `while`, blocks and expressions with precedence (`||`, `&&`,
-//!   `==`/`!=`, comparisons, `+`/`-`, `*`/`/`/`%`, unary `-`/`!`), integer and
-//!   boolean literals, variables and direct function calls.
+//! The parser accepts the grammar documented in `docs/syntax.ebnf`, including
+//! imports, structs, enums, impl blocks, functions, declarations, control flow,
+//! calls, aggregate literals, pointer expressions and typed integer casts.
+//! Semantic restrictions are enforced by the semantic-analysis stage, not by
+//! duplicating type rules in the parser.
+
 
 const std = @import("std");
 const ast = @import("../ast/ast.zig");
