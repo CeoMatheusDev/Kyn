@@ -249,6 +249,11 @@ const FnEmitter = struct {
                 try self.print("    movq {s}, -{d}(%rbp)\n", .{ arg_registers_64[reg], slotOffset(sym.slot) });
                 try self.print("    movq {s}, -{d}(%rbp)\n", .{ arg_registers_64[reg + 1], slotOffset(sym.slot + 1) });
                 reg += 2;
+            } else if (sym.typ == .enumeration) {
+                // Tag and payload, in that order (the same pair as the return).
+                try self.print("    movl {s}, -{d}(%rbp)\n", .{ arg_registers[reg], slotOffset(sym.slot) });
+                try self.print("    movl {s}, -{d}(%rbp)\n", .{ arg_registers[reg + 1], slotOffset(sym.slot + 1) });
+                reg += 2;
             } else {
                 try self.print("    movl {s}, -{d}(%rbp)\n", .{ arg_registers[reg], slotOffset(sym.slot) });
                 reg += 1;
@@ -325,6 +330,9 @@ const FnEmitter = struct {
                     } else if (self.info.return_type == .aggregate) {
                         // A struct returns with one register per field.
                         try self.emitStructReturn(expr);
+                    } else if (self.info.return_type == .enumeration) {
+                        // Enum: tag in `%eax`, payload in `%edx`.
+                        try self.emitEnumValue(expr);
                     } else {
                         try self.emitExpr(expr);
                     }
@@ -397,17 +405,17 @@ const FnEmitter = struct {
         return info.cases[case_index].tag;
     }
 
-    /// Writes an enum value (tag + optional payload) into the two slots of
-    /// `dst`: a case without payload, a constructor with payload, or a copy of
-    /// another enum variable.
-    fn emitEnumStore(self: *FnEmitter, dst: *const sema.Symbol, value: *ast.Expr) Error!void {
+    /// Leaves an enum value in `%eax` (tag) and `%edx` (payload) — the same
+    /// convention as a function returning an enum, which lets calls be reused.
+    fn emitEnumValue(self: *FnEmitter, value: *ast.Expr) Error!void {
         switch (value.kind) {
             .field_access => |access| {
                 const tag = try self.caseTag(
                     access.resolved_enum orelse return error.MiscompiledAst,
                     access.resolved_case orelse return error.MiscompiledAst,
                 );
-                try self.print("    movl ${d}, -{d}(%rbp)\n", .{ tag, slotOffset(dst.slot) });
+                try self.print("    movl ${d}, %eax\n", .{tag});
+                try self.print("    movl $0, %edx\n", .{});
             },
             .method_call => |call| {
                 const tag = try self.caseTag(
@@ -415,20 +423,32 @@ const FnEmitter = struct {
                     call.resolved_case orelse return error.MiscompiledAst,
                 );
                 if (call.args.len != 1) return error.MiscompiledAst;
+                // The payload is evaluated first: it may use `%edx` itself
+                // (`idivl`), so the tag is written afterwards.
                 try self.emitExpr(call.args[0]);
-                try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(dst.slot + 1)});
-                try self.print("    movl ${d}, -{d}(%rbp)\n", .{ tag, slotOffset(dst.slot) });
+                try self.print("    movl %eax, %edx\n", .{});
+                try self.print("    movl ${d}, %eax\n", .{tag});
             },
             .identifier => {
                 const src = self.symbolAt(value.resolved orelse return error.MiscompiledAst);
                 if (src.typ != .enumeration) return error.MiscompiledAst;
                 try self.print("    movl -{d}(%rbp), %eax\n", .{slotOffset(src.slot)});
-                try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(dst.slot)});
-                try self.print("    movl -{d}(%rbp), %eax\n", .{slotOffset(src.slot + 1)});
-                try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(dst.slot + 1)});
+                try self.print("    movl -{d}(%rbp), %edx\n", .{slotOffset(src.slot + 1)});
+            },
+            .call => |call| {
+                const index = call.callee_fn orelse return error.MiscompiledAst;
+                if (self.checked.functions[index].return_type != .enumeration) return error.MiscompiledAst;
+                try self.emitCall(call);
             },
             else => return error.MiscompiledAst,
         }
+    }
+
+    /// Writes an enum value (tag + payload) into the two slots of `dst`.
+    fn emitEnumStore(self: *FnEmitter, dst: *const sema.Symbol, value: *ast.Expr) Error!void {
+        try self.emitEnumValue(value);
+        try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(dst.slot)});
+        try self.print("    movl %edx, -{d}(%rbp)\n", .{slotOffset(dst.slot + 1)});
     }
 
     /// `switch` over an enum variable: compare the tag against each case and
@@ -824,6 +844,10 @@ const FnEmitter = struct {
                 try self.emitStrValue(call.args[0]);
                 try self.print("    movq %rax, {s}\n", .{arg_registers_64[0]});
                 try self.print("    movq %rdx, {s}\n", .{arg_registers_64[1]});
+            } else if (callee.params[0] == .enumeration) {
+                try self.emitEnumValue(call.args[0]);
+                try self.print("    movl %eax, {s}\n", .{arg_registers[0]});
+                try self.print("    movl %edx, {s}\n", .{arg_registers[1]});
             } else {
                 try self.emitExpr(call.args[0]);
                 try self.print("    movl %eax, {s}\n", .{arg_registers[0]});
@@ -841,6 +865,12 @@ const FnEmitter = struct {
                 try self.emitStructArgsPush(struct_id, arg);
             } else if (ptype == .str) {
                 try self.emitStrValue(arg);
+                try self.print("    pushq %rax\n", .{});
+                try self.print("    pushq %rdx\n", .{});
+            } else if (ptype == .enumeration) {
+                // Tag then payload: the payload pops first, into the higher
+                // register index (same pairing as `str`).
+                try self.emitEnumValue(arg);
                 try self.print("    pushq %rax\n", .{});
                 try self.print("    pushq %rdx\n", .{});
             } else {
@@ -1292,12 +1322,17 @@ test "x86_64: enum stores the tag in the first slot and the payload in the secon
     );
     defer f.deinit();
     const asm_text = try emitFixture(&f);
-    // `Empty` is case 1: tag only.
-    try support.expectContains(asm_text, "movl $1, -8(%rbp)");
-    // `Circle` is case 0: payload in the payload slot, then the tag.
+    // `Empty` is case 1: tag in `%eax`, payload in `%edx`, then the two stores.
+    try support.expectContains(asm_text, "movl $1, %eax");
+    try support.expectContains(asm_text, "movl $0, %edx");
+    try support.expectContains(asm_text, "movl %eax, -8(%rbp)");
+    try support.expectContains(asm_text, "movl %edx, -16(%rbp)");
+    // `Circle` is case 0 with the payload evaluated first.
     try support.expectContains(asm_text, "movl $7, %eax");
-    try support.expectContains(asm_text, "movl %eax, -32(%rbp)");
-    try support.expectContains(asm_text, "movl $0, -24(%rbp)");
+    try support.expectContains(asm_text, "movl %eax, %edx");
+    // Tag and payload of the constructor, in the second enum's slots.
+    try support.expectContains(asm_text, "movl %eax, -24(%rbp)");
+    try support.expectContains(asm_text, "movl %edx, -32(%rbp)");
 }
 
 test "x86_64: switch compares the tag and copies the payload into the binding" {
@@ -1320,4 +1355,49 @@ test "x86_64: switch compares the tag and copies the payload into the binding" {
     try support.expectContains(asm_text, "je .Lmain_switch_case");
     try support.expectContains(asm_text, "jmp .Lmain_switch_end");
     try support.expectContains(asm_text, ".Lmain_switch_end");
+}
+
+test "x86_64: an enum parameter arrives in two registers and returns in %eax/%edx" {
+    var f = try support.Fixture.build(
+        \\enum Color { Red, Green, Blue }
+        \\fn pick() -> Color {
+        \\    return Color.Blue;
+        \\}
+        \\fn label(c: Color) -> i32 {
+        \\    var value: i32 = 0;
+        \\    switch c {
+        \\        Red => { value = 1; }
+        \\        Green => { value = 2; }
+        \\        Blue => { value = 3; }
+        \\    }
+        \\    return value;
+        \\}
+        \\fn mix(c: Color, extra: i32) -> i32 {
+        \\    return label(c) + extra;
+        \\}
+        \\fn main() -> i32 {
+        \\    let single = label(pick());
+        \\    return mix(pick(), single);
+        \\}
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+
+    // Parameter: tag in `%edi`, payload in `%esi`, stored in the two slots.
+    try support.expectContains(asm_text, "movl %edi, -8(%rbp)");
+    try support.expectContains(asm_text, "movl %esi, -16(%rbp)");
+
+    // `return Color.Blue;` leaves the tag in `%eax` and the payload in `%edx`.
+    try support.expectContains(asm_text, "movl $2, %eax");
+    try support.expectContains(asm_text, "movl $0, %edx");
+
+    // Single argument: the pair moves straight into the argument registers.
+    try support.expectContains(asm_text, "movl %eax, %edi");
+    try support.expectContains(asm_text, "movl %edx, %esi");
+
+    // Two arguments: the enum contributes two stack words (tag then payload)
+    // and the pop restores them in order.
+    try support.expectContains(asm_text, "pushq %rax");
+    try support.expectContains(asm_text, "pushq %rdx");
+    try support.expectContains(asm_text, "call kyn_mix");
 }

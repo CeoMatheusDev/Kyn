@@ -120,6 +120,10 @@ pub const FunctionInfo = struct {
     params: []Type,
     /// Struct tied to each parameter (0 when the parameter is not a struct).
     param_struct_ids: []u32 = &.{},
+    /// Enum tied to each parameter (0 when the parameter is not an enum).
+    param_enum_ids: []u32 = &.{},
+    /// Enum tied to the return when `return_type == .enumeration`.
+    return_enum_id: u32 = 0,
     /// Number of stack slots used by the function (parameters + locals).
     slot_count: u32,
     /// Symbol range of this function in `Checked.symbols`
@@ -479,19 +483,13 @@ pub const Checker = struct {
 
         const params = try self.arena.alloc(Type, func.params.len);
         const param_struct_ids = try self.arena.alloc(u32, func.params.len);
+        const param_enum_ids = try self.arena.alloc(u32, func.params.len);
         // Provisional index: signatures are appended in source order.
         var register_words: usize = 0;
         for (func.params, 0..) |param, i| {
             params[i] = try self.resolveTypeName(param.type_name);
             param_struct_ids[i] = self.structIdOfTypeName(param.type_name) orelse 0;
-            if (params[i] == .enumeration) {
-                try self.diags.add(
-                    .unsupported,
-                    param.type_name.span,
-                    "enum '{s}' in parameters is not supported yet; declare the enum variable inside the function and use 'switch'",
-                    .{param.type_name.name},
-                );
-            }
+            param_enum_ids[i] = self.enumIdOfTypeName(param.type_name) orelse 0;
             register_words += self.wordsOf(params[i], param_struct_ids[i]);
         }
 
@@ -501,7 +499,7 @@ pub const Checker = struct {
             try self.diags.add(
                 .unsupported,
                 func.name_span,
-                "function '{s}' uses {d} parameter registers; the current backend supports at most {d} ('str' takes two and each struct field one)",
+                "function '{s}' uses {d} parameter registers; the current backend supports at most {d} ('str' and an enum take two, each struct field one)",
                 .{ func.name, register_words, max_arg_registers },
             );
         }
@@ -515,14 +513,10 @@ pub const Checker = struct {
         else
             0;
 
-        if (return_type == .enumeration) {
-            try self.diags.add(
-                .unsupported,
-                func.return_type.?.span,
-                "enum '{s}' in returns is not supported yet",
-                .{func.return_type.?.name},
-            );
-        }
+        const return_enum_id: u32 = if (func.return_type) |tn|
+            self.enumIdOfTypeName(tn) orelse 0
+        else
+            0;
 
         // A struct returns in one register per field, in declaration order.
         if (return_type == .aggregate and return_struct_id < self.structs.items.len) {
@@ -543,6 +537,8 @@ pub const Checker = struct {
             .return_struct_id = return_struct_id,
             .params = params,
             .param_struct_ids = param_struct_ids,
+            .param_enum_ids = param_enum_ids,
+            .return_enum_id = return_enum_id,
             .slot_count = 0,
         });
     }
@@ -641,6 +637,10 @@ pub const Checker = struct {
             } else null,
             .field_access => |access| access.resolved_enum,
             .method_call => |call| call.resolved_enum,
+            .call => |call| if (call.callee_fn) |index| blk: {
+                const func = self.functions.items[index];
+                break :blk if (func.return_type == .enumeration) func.return_enum_id else null;
+            } else null,
             else => null,
         };
     }
@@ -1036,6 +1036,18 @@ pub const Checker = struct {
                             "expected return type '{s}', found '{s}'",
                             .{ expected.name(), actual.name() },
                         );
+                    } else if (expected == .enumeration and actual == .enumeration) {
+                        // Enums are nominal: the same shape is not enough.
+                        const got = self.enumIdOfExpr(expr);
+                        const want = self.functions.items[self.fn_index].return_enum_id;
+                        if (got != null and got.? != want and want < self.enums.items.len) {
+                            try self.diags.add(
+                                .invalid_return,
+                                expr.span,
+                                "expected enum '{s}' in return, found '{s}'",
+                                .{ self.enums.items[want].decl.name, self.enums.items[got.?].decl.name },
+                            );
+                        }
                     } else if (expected == .aggregate and actual == .aggregate) {
                         // Structs are nominal: the same shape is not enough.
                         const got = self.structIdOfExpr(expr) orelse 0;
@@ -1673,7 +1685,7 @@ pub const Checker = struct {
             try self.diags.add(
                 .unsupported,
                 span,
-                "call to '{s}' uses {d} registers; the current backend supports at most {d} ('str' takes two and each struct field one)",
+                "call to '{s}' uses {d} registers; the current backend supports at most {d} ('str' and an enum take two, each struct field one)",
                 .{ call.callee, arg_words, max_arg_registers },
             );
         }
@@ -1690,6 +1702,20 @@ pub const Checker = struct {
 
         for (arg_types.items, func.params, 0..) |actual, expected, i| {
             if (actual == .unknown or expected == .unknown) continue;
+            if (actual == .enumeration and expected == .enumeration) {
+                // Enums are nominal: the same shape is not enough.
+                const got = self.enumIdOfExpr(call.args[i]);
+                const want = if (i < func.param_enum_ids.len) func.param_enum_ids[i] else 0;
+                if (got != null and got.? != want and want < self.enums.items.len) {
+                    try self.diags.add(
+                        .type_mismatch,
+                        call.args[i].span,
+                        "argument {d} of '{s}' is enum '{s}', expected '{s}'",
+                        .{ i + 1, call.callee, self.enums.items[got.?].decl.name, self.enums.items[want].decl.name },
+                    );
+                }
+                continue;
+            }
             if (actual == .aggregate and expected == .aggregate) {
                 const got = self.structIdOfExpr(call.args[i]) orelse 0;
                 const want = if (i < func.param_struct_ids.len) func.param_struct_ids[i] else 0;
@@ -1830,6 +1856,14 @@ const Fixture = struct {
         return buf[0..n];
     }
 };
+
+/// True when some diagnostic contains `needle` (order-independent assertions).
+fn sawMessage(f: *const Fixture, needle: []const u8) bool {
+    for (f.diags.items.items) |d| {
+        if (std.mem.indexOf(u8, d.message, needle) != null) return true;
+    }
+    return false;
+}
 
 fn expectOnly(f: *const Fixture, kind: diagnostics.Kind) !void {
     try testing.expectEqual(@as(usize, 1), f.diags.count());
@@ -2873,25 +2907,99 @@ test "sema: enums are nominal in annotations and assignments" {
     );
 }
 
-test "sema: enum in parameters, returns and struct fields is unsupported" {
+test "sema: enum in a struct field is unsupported" {
     var f = try Fixture.check(
         \\enum Color { Red }
         \\struct Holder { c: Color }
-        \\fn takes(c: Color) -> i32 { return 0; }
-        \\fn gives() -> Color { return Color.Red; }
         \\fn main() -> i32 { return 0; }
     , .{});
     defer f.deinit();
-    try testing.expectEqual(@as(usize, 3), f.diags.count());
+    try expectOnly(&f, .unsupported);
     try testing.expect(
         std.mem.indexOf(u8, f.diags.items.items[0].message, "of enum type is not supported yet") != null,
     );
+}
+
+test "sema: enums cross calls by value" {
+    var f = try Fixture.check(
+        \\enum Color { Red, Green, Blue }
+        \\fn pick(n: i32) -> Color {
+        \\    if n == 0 { return Color.Red; }
+        \\    if n == 1 { return Color.Green; }
+        \\    return Color.Blue;
+        \\}
+        \\fn label(c: Color) -> i32 {
+        \\    var value: i32 = 0;
+        \\    switch c {
+        \\        Red => { value = 1; }
+        \\        Green => { value = 2; }
+        \\        Blue => { value = 3; }
+        \\    }
+        \\    return value;
+        \\}
+        \\fn main() -> i32 {
+        \\    let c = pick(1);
+        \\    return label(c) + label(pick(2));
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 0), f.diags.count());
+
+    const checked = f.checked.?;
+    const pick = checked.findFunction("pick").?;
+    try testing.expectEqual(Type.enumeration, checked.functions[pick].return_type);
+    try testing.expectEqual(@as(u32, 0), checked.functions[pick].return_enum_id);
+
+    const label = checked.findFunction("label").?;
+    try testing.expectEqual(Type.enumeration, checked.functions[label].params[0]);
+    try testing.expectEqual(@as(u32, 0), checked.functions[label].param_enum_ids[0]);
+    // The enum parameter takes two slots (tag + payload), the local one.
+    try testing.expectEqual(@as(u32, 3), checked.functions[label].slot_count);
+    // `let c = pick(1);` infers the enum from the call.
+    const c_symbol = checked.symbols[checked.functions[2].symbol_start];
+    try testing.expectEqual(Type.enumeration, c_symbol.typ);
+    try testing.expectEqual(@as(u32, 0), c_symbol.enum_id);
+}
+
+test "sema: enum identity is checked in arguments, returns and annotations" {
+    var f = try Fixture.check(
+        \\enum A { One, Two }
+        \\enum B { One, Two }
+        \\fn paint(a: A) -> i32 { return 0; }
+        \\fn give() -> A { return B.One; }
+        \\fn main() -> i32 {
+        \\    let a: A = B.Two;
+        \\    let painted = paint(B.One);
+        \\    return painted;
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 3), f.diags.count());
+    // Order follows the phases: signatures first, then the bodies.
+    try testing.expect(sawMessage(&f, "expected enum 'A' in return, found 'B'"));
+    try testing.expect(sawMessage(&f, "is enum 'B', but the annotation is 'A'"));
+    try testing.expect(sawMessage(&f, "argument 1 of 'paint' is enum 'B', expected 'A'"));
+}
+
+test "sema: an enum parameter counts two registers" {
+    var f = try Fixture.check(
+        \\enum Shape { Circle(i32), Empty }
+        \\fn too_wide(a: Shape, b: Shape, c: Shape, d: i32) -> i32 { return 0; }
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .unsupported);
     try testing.expect(
-        std.mem.indexOf(u8, f.diags.items.items[1].message, "in parameters is not supported yet") != null,
+        std.mem.indexOf(u8, f.diags.items.items[0].message, "uses 7 parameter registers") != null,
     );
-    try testing.expect(
-        std.mem.indexOf(u8, f.diags.items.items[2].message, "in returns is not supported yet") != null,
-    );
+
+    var g = try Fixture.check(
+        \\enum Shape { Circle(i32), Empty }
+        \\fn ok(a: Shape, b: Shape, c: i32) -> i32 { return 0; }
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer g.deinit();
+    try testing.expectEqual(@as(usize, 0), g.diags.count());
 }
 
 test "sema: switch requires an enum value" {
