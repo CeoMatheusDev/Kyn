@@ -149,6 +149,32 @@ scalar; it exists to give programs observable output (text) and to prepare
   `main` returning `str`, `str` expression as a statement and signatures above
   six registers (`'str' takes two`).
 
+### Methods (`impl`) — `src/sema/sema.zig` + backends
+
+A method is a `Function` whose `owner_type` is the `impl` target; parsing appends
+it to `Program.functions` (one list for the pipeline) and keeps the `ImplBlock`
+for the target span. Semantics resolves the owner to a nominal index
+(`FunctionInfo.owner_struct_id` / `owner_enum_id`) and computes
+`FunctionInfo.symbol_name`:
+
+- **Mangling:** `Type_method` (`Point_sum`). Deterministic, unique per type
+  (type names are unique) and checked against free functions: `fn Point_sum()`
+  becomes the diagnostic *"shares the symbol 'kyn_Point_sum'"* instead of two
+  identical labels.
+- **Name spaces:** free calls resolve through `findFunction` (methods skipped),
+  method calls through `findMethod`/`Expr.MethodCall.resolved_fn` keyed by the
+  nominal receiver type; `main` is only ever satisfied by a free function.
+- **Receiver:** the first parameter must be `self: Name` with the owner type. At
+  the call site `value.method(args)` the receiver is passed as **argument 1**;
+  `codegen.Arguments` gives both backends one view of the argument list
+  (`receiver ++ args`), so marshalling — `str` pair, enum pair, struct per field,
+  scalar — is written once and shared by free and method calls.
+- x86-64 pushes the receiver fields first and pops in reverse, which lands them
+  in `%edi`, `%esi`, … exactly like a free call; LLVM IR flattens the receiver
+  into `%arg0..` of the definition. No new ABI and no hidden parameter.
+- The receiver counts in the six-register limit (`registerWordsOf`), so a large
+  `self` plus many arguments is diagnosed at declaration *and* at the call site.
+
 ### Enums (layout) — `src/sema/sema.zig` + backends
 
 An enum value is **nominal** (`Symbol.enum_id` → `Checked.enums`) and crosses
@@ -219,10 +245,11 @@ They compile and have tests, but most APIs do no real I/O.
 2. Widen the module contract (visibility, qualified imports, packages); today
    resolution is by relative path and symbols are flattened.
 3. Define the struct-by-value convention for **aggregates larger** than the
-   register table (today limited to 6 fields) — stack passing or `sret` — before
-   `impl`/methods with a large `self`.
-4. Add the still-missing AST nodes (`enum`, `impl`, `unsafe`, attributes) and
-   wire `src/sema/unsafe.zig`.
+   register table (today limited to 6 fields, receiver included) — stack passing
+   or `sret` — which also lifts the "large `self`" limitation of methods.
+4. Add the still-missing AST nodes (`unsafe`, attributes, pointers) and wire
+   `src/sema/unsafe.zig`; extract the data layout and calling convention into an
+   explicit target description (see `docs/embedded.md` §3).
 5. Define the executable memory model (ownership, lifetimes, slices) before
    expanding the std.
 6. Define `str` comparison by content and concatenation/formatting (today

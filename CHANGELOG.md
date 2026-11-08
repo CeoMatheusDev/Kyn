@@ -10,6 +10,51 @@ Rules: Semantic Versioning 2.0.0. Pre-1.0.0 = pre-release.
 > [docs/status.md](docs/status.md). Versioning will be reconciled before any
 > public release.
 
+## [v0.3.11-alpha.1] — 2026-11-09
+
+Methods (`impl`) for structs and enums, plus the freestanding/embedded analysis.
+
+- **Language:** `impl Name { fn method(self: Name, ...) -> T { ... } }` for a
+  declared struct or enum. The receiver is the first parameter, explicit and by
+  value (`self: Name`); `value.method(args)` passes it as **argument 1** and the
+  written arguments are parameters 2..n. Methods live in a name space per type:
+  a method never answers a bare call, cannot reuse a field name, must be unique
+  per type and `main` stays a free function. An `impl` for an undeclared type is
+  diagnosed, and a free `fn Type_method` collides with `Type.method` by a
+  diagnostic instead of two identical symbols.
+- **Backends:** the symbol is `Type_method` (`kyn_Point_sum`, `@Point_sum`). New
+  `codegen.Arguments` (`receiver ++ args`) gives both backends one view of the
+  argument list, so `emitCallWith`/`callRefOf` in x86-64 and
+  `emitArgs`/`emit*Call` in the IR reuse the existing marshalling (`str` pair,
+  enum pair, struct per field, scalar). No hidden parameter, no new ABI; the
+  receiver counts in the six-register limit.
+- **Composition:** methods chain on call results (`p.moved(1, 1).sum()`,
+  `shape.grow(2).weight()`), work as arguments, and `switch` accepts `self`
+  inside a method of an enum.
+- **Semantics shared code:** the argument checking of free and method calls is a
+  single `checkSignature` (arity, nominal identity of struct/enum arguments,
+  register limit), and receiver problems use the new `invalid_method` kind.
+- **Tests:** **244** compiler tests + 7 std. New: parser (impl target and method
+  order, only `fn` inside `impl`, unclosed `impl`), semantics (resolution and
+  nominal identity, arguments checked like a free call, declaration rules,
+  unknown method/non-method receiver, receiver in the register limit) and codegen
+  (mangled symbols and receiver placement in both backends) — 11 in total.
+  **121/121** e2e cases: new positives `method_struct` and `method_enum`, new
+  negatives `method_unknown`, `method_receiver`, `method_duplicate`, and the
+  module fixture `import_method` calling methods of an imported type.
+- **IR evidence:** 90/90 modules accepted by the LLVM verifier (`llvm-as` in CI).
+  The verification caught a regression where an enum **constructor** returned
+  from a function was routed through the call path (fixed and covered by a test);
+  the test helper now recognizes `switch` as a block terminator.
+- **Docs:** new `docs/embedded.md` — readiness, blockers and dependency order for
+  freestanding and embedded targets (explicitly *not implemented*), which becomes
+  Phase 2 of `ROADMAP.md`; `docs/tutorial.md` gained §12 (methods, two executed
+  examples) and was renumbered; `docs/architecture.md`, `docs/syntax.ebnf`,
+  `docs/grammar.ebnf`, `docs/language_reference.md`, `docs/language_design.md`,
+  `docs/status.md`, `README.md`, `docs/development.md`, `ROADMAP.md` and
+  `DEVELOPMENT_STATE.md` updated.
+- **Version:** `0.3.11-alpha.1` (derived from `build.zig.zon`).
+
 ## [v0.3.10-alpha.1] — 2026-11-08
 
 Enums cross calls by value, with nominal identity enforced.
