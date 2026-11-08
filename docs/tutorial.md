@@ -7,8 +7,9 @@ suite.
 
 > **Language state:** Kyn is under active development (`0.3.x`). The subset
 > described in this tutorial is what the compiler **accepts and runs today**.
-> Planned features (pointers, slices, `defer`, generics, FFI, …) appear in the
-> last section with the real state of each one.
+> The current subset includes fixed-width integers, explicit integer casts,
+> bitwise operations, pointers, structs, enums, methods and imports. Slices,
+> generics, integrated FFI and self-hosting remain incomplete or unimplemented.
 
 ## Index
 
@@ -135,16 +136,20 @@ you point at the program's `main.kyn`.
 
 | Type | Representation | Notes |
 |---|---|---|
-| `i32` | 32-bit signed integer | the only integer type available today |
+| `i8`, `i16`, `i32`, `i64` | 8/16/32/64-bit signed integers | Fixed-width integer types |
+| `u8`, `u16`, `u32`, `u64` | 8/16/32/64-bit unsigned integers | Fixed-width integer types |
+| `usize` | Target-sized unsigned integer | Currently represented as 64-bit on the supported target |
 | `bool` | boolean | results of comparisons and `&&`/`\|\|` |
 | `str` | static slice: pointer + length | literal text only; no concatenation |
 | `void` | absence of value | return of `print`, `print_i32` and of functions with no value |
+| `ptr` / `ptr<T>` | Native pointer | Typed pointers; see the implementation status for exact constraints |
 | `struct` | scalar fields in declaration order | nominal: each `struct` is a distinct type |
+| `enum` | tag + optional payload | Nominal; payload currently limited to `i32` |
 
-Types are nominal and **there is no implicit promotion**: `i32` does not become
-`bool`, `bool` does not become `i32`, `str` does not become `i32`. Every
-conversion would have to be explicit — when conversion operators exist, they will
-be explicit by construction.
+Integer types are not implicitly converted. Use the explicit `as` operator for
+integer-to-integer conversions; narrowing truncates and widening extends
+according to the source type's signedness. Conversions involving `bool`,
+`str` or `void` are rejected. Types remain nominal where applicable.
 
 Literals:
 
@@ -209,9 +214,10 @@ fn main() -> i32 {
 }
 ```
 
-Precedence (tightest to loosest): unary `-`/`!`, `*`/`/`/`%`, `+`/`-`,
-comparisons (`<`, `<=`, `>`, `>=`), equality (`==`, `!=`), `&&`, `||`. Use
-parentheses when the intent is not obvious.
+Precedence (tightest to loosest): unary operators, multiplicative operators,
+additive operators, shifts, relational comparisons, equality, bitwise AND,
+bitwise XOR, bitwise OR, logical AND and logical OR. Integer bitwise operators
+require matching integer types. Use parentheses when the intent is not obvious.
 
 `&&` and `||` **short-circuit**: the right side is only evaluated when the result
 is not already decided.
