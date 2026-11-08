@@ -66,7 +66,12 @@ Enums with payload and exhaustive `switch`, in both backends.
   `docs/status.md`, `docs/language_design.md`, `ROADMAP.md` and
   `DEVELOPMENT_STATE.md` updated. Residual Portuguese strings in compiler
   headers/messages and in the e2e report were also translated.
-- **Version:** `0.3.9-alpha.1` (derived from `build.zig.zon`).
+- **Version:** `0.3.9-alpha.1` (derived from `build.zig.zon`), published as the
+  annotated tag `v0.3.9-alpha.1` with a GitHub release.
+- **Integration:** PR #26 merged into `main` as `9125bff`; CI green in runs
+  `42433210990`/`42433201467` (PR and push) and `42433391665` (`main`), with
+  `zig fmt --check`, 228 tests, 113 e2e cases and `validate-ir-strict` over 86
+  modules.
 
 ## [v0.3.8-alpha.1] — 2026-11-07
 
