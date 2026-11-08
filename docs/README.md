@@ -15,6 +15,7 @@ This folder holds the project's technical documentation. The documents explicitl
 | [Lexical grammar](grammar.ebnf) | Tokens, keywords and operators implemented in the lexer |
 | [Syntactic grammar](syntax.ebnf) | Exact grammar of the subset accepted by the current parser |
 | [Memory model](memory_model.md) | Proposed guidelines for memory, ownership and FFI |
+| [Maintainer guide](maintainer-guide.md) | Sources of truth, change protocol and engineering conventions |
 
 ## Conventions
 
