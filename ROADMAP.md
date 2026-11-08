@@ -114,10 +114,12 @@ covers the additional target and memory contracts required for firmware.
 - [x] Repair strict-IR fixture parity for casts, bitwise, pointers and string
       equality, including cross-backend pointer arithmetic and the native
       slice-comparison stack order; add positive and negative regressions.
-      Locally: Zig 0.17.0 unit/E2E, LLVM 20 verification and JIT execution;
-      this is not evidence of green CI until the PR checks complete.
-- [ ] Run strict `llvm-as` and the complete CI on the integration PR and on
-      `main`; do not merge target foundations while a required check is red.
+      Zig 0.17.0 local suite and LLVM 20/JIT passed; strict `llvm-as` CI
+      passed on PR #38 and after merge in `main` (`ac49f66`).
+- [x] Run strict `llvm-as` and the complete CI on PR #38 and after its merge
+      on `main` (both jobs green for each run).
+- [ ] Do not merge PR #37 (target foundation) or #36 (editor rename) while their
+      own compiler checks are red; review and retest independently.
 - [ ] Cover diagnostics, malformed input and boundary cases systematically.
 - [ ] Define targets and the supported platform matrix (the native backend is
       Linux x86-64).

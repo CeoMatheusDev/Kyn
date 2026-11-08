@@ -137,7 +137,7 @@ scalar; it exists to give programs observable output (text) and to prepare
 - LLVM IR: each text becomes `@.strN = private unnamed_addr constant [N x i8]`,
   `print` becomes `call i64 @write(i32 1, ptr @.strN, i64 N)` with
   `declare i64 @write(i32, ptr, i64)`; this form is LLVM-verifier compatible.
-  The current branch still needs the required strict CI run.
+  Strict `llvm-as` CI also passed on PR #38 and its `main` merge commit.
 - `print` and `print_i32` are builtins (`ast.Expr.Call.builtin`) with the same
   rule: exactly one argument (`str`/`i32`), `void` result and a line break at
   the end. The names are reserved for functions declared in the source, and a
