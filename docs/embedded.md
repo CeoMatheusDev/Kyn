@@ -110,42 +110,46 @@ Rules for that refactor, to avoid churn:
 
 ## 4. Implementation order
 
-Order chosen so each step is useful on its own and testable on the host:
+The language already has fixed-width integers, explicit integer casts, bitwise
+operations and basic typed pointers. The remaining work is to make those
+features safe, portable and suitable for hardware access.
 
-1. **Fixed-width integers** — `u8`/`i8`, `u16`/`i16`, `u32`, `u64`, `usize`;
-   explicit `as` conversions with truncation/sign rules; bitwise `&`/`|`/`^`,
-   `~`, `<<`/`>>`; defined wrap semantics; `print` for the new widths.
-   *Checkpoint:* value-model tests per width in both backends.
-2. **Pointers and `unsafe`** — `*T`, `*const T`, address-of, dereference,
-   integer → pointer conversion inside `unsafe`, explicit border to the type
-   checker (wire `src/sema/unsafe.zig` to real AST nodes).
-   *Checkpoint:* a fixture that writes through a pointer into an `i32` local.
-3. **`volatile` and MMIO** — `volatile` qualifier on loads/stores preserved by
-   both backends, no reordering/elimination; a `Register`/`Mmio` abstraction in
-   a future `kyn:embedded` package.
-   *Checkpoint:* IR/assembly inspection proving one load per read.
-4. **Layout control** — `#[repr(C)]`, explicit alignment, compile-time
-   `offset_of`/size assertions; documented padding rules.
-   *Checkpoint:* layout test matching a reference C struct.
-5. **Freestanding mode** — `--freestanding`, configurable entry symbol,
-   `.data`/`.bss` initialization, section control, linker script input,
-   `-o` producing ELF (plus `objcopy`-style BIN/HEX paths documented, not
-   reimplemented).
+1. **Pointer safety and memory contracts** — define nullability, aliasing,
+   provenance, ownership and lifetime rules; add const-qualified pointers and
+   explicit unsafe operations only after the rules are specified.
+   *Checkpoint:* negative semantic tests and runtime tests for valid pointer
+   operations, including documented invalidation boundaries.
+2. **`volatile` and MMIO** — preserve volatile loads/stores in both backends
+   and add register abstractions in a future `kyn:embedded` package.
+   *Checkpoint:* IR/assembly inspection proving that required accesses are
+   emitted exactly as specified.
+3. **Layout control** — `#[repr(C)]`, explicit alignment and compile-time
+   `offset_of`/size assertions with documented padding rules.
+   *Checkpoint:* layout tests matching reference C structures.
+4. **Freestanding mode** — configurable entry point, `.data`/`.bss`
+   initialization, section control, linker-script input and ELF output.
    *Checkpoint:* a freestanding x86-64 binary with no libc and a custom entry
    point, executed on the host.
-6. **First real target: ARM Cortex-M4 (STM32F401RE)** — Thumb-2 code generation
-   for the subset above, vector table and startup code, linker script, LED
-   blink with no runtime.
-   *Checkpoint:* binary produced by the compiler, checked structurally on the
-   host and flashed on the board.
-7. **Second target: RISC-V RV32** — proves the target abstraction with a very
-   different ISA.
-8. **LLVM target configuration** — select the triple/CPU/features from the
-   `Target`, keeping the native backend as the reference implementation.
+5. **Target abstraction** — move data layout, ABI, registers and word size out
+   of the x86-64 backend and select them explicitly through the compiler
+   driver.
+   *Checkpoint:* existing x86-64 tests pass through the target interface.
+6. **First embedded target: ARM Cortex-M4 (STM32F401RE)** — Thumb-2 code
+   generation, vector table, startup code, linker script and a blink program
+   without a runtime.
+   *Checkpoint:* a compiler-produced image checked structurally on the host
+   and flashed on the board.
+7. **Second target: RISC-V RV32** — validate that the target abstraction is
+   not coupled to one ISA.
+8. **LLVM target configuration** — select triple, CPU and features from the
+   target description while retaining the native backend as a reference.
 
-Steps 1–4 are language work that also benefits Linux programs; steps 5–7 are
-the freestanding milestone. That is why the roadmap marks freestanding as a
-**separate phase** rather than a rewrite of the current backends.
+These steps are deliberately incremental. The current Linux x86-64 compiler
+remains useful while memory contracts and target independence are developed.
+
+`docs/status.md` must be updated with tests and observed behavior at each
+checkpoint. A design proposal or placeholder module does not count as
+implementation.
 
 ## 5. Standard library split (direction)
 
