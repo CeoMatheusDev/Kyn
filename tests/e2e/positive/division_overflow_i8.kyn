@@ -1,0 +1,9 @@
+// expect-exit: 136
+// Linux x86-64: i8 MIN / -1 must trap, not truncate a 32-bit quotient.
+fn main() -> i32 {
+    let min: i8 = (0 - 128) as i8;
+    let minus_one: i8 = (0 - 1) as i8;
+    let result: i8 = min / minus_one;
+    if result == min { return 1; }
+    return 2;
+}

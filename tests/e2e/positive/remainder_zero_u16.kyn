@@ -1,0 +1,9 @@
+// expect-exit: 136
+// Linux x86-64: unsigned 16-bit remainder by zero traps with SIGFPE.
+fn main() -> i32 {
+    let value: u16 = 1234 as u16;
+    let zero: u16 = 0 as u16;
+    let result: u16 = value % zero;
+    if result == (0 as u16) { return 1; }
+    return 2;
+}

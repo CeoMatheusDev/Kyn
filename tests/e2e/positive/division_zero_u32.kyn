@@ -1,0 +1,9 @@
+// expect-exit: 136
+// Linux x86-64: unsigned word division by zero traps with SIGFPE.
+fn main() -> i32 {
+    let value: u32 = 1234 as u32;
+    let zero: u32 = 0 as u32;
+    let result: u32 = value / zero;
+    if result == (0 as u32) { return 1; }
+    return 2;
+}

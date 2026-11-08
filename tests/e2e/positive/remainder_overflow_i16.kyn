@@ -1,0 +1,9 @@
+// expect-exit: 136
+// Linux x86-64: i16 MIN % -1 traps along with the quotient overflow.
+fn main() -> i32 {
+    let min: i16 = (0 - 32768) as i16;
+    let minus_one: i16 = (0 - 1) as i16;
+    let result: i16 = min % minus_one;
+    if result == (0 as i16) { return 1; }
+    return 2;
+}
