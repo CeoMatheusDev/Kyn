@@ -142,7 +142,7 @@ you point at the program's `main.kyn`.
 | `bool` | boolean | results of comparisons and `&&`/`\|\|` |
 | `str` | static slice: pointer + length | literal text only; no concatenation |
 | `void` | absence of value | return of `print`, `print_i32` and of functions with no value |
-| `ptr` / `ptr<T>` | Native pointer | Typed pointers; see the implementation status for exact constraints |
+| `ptr` | Native pointer | Source annotation for an unknown pointee; `ptr<T>` is descriptive compiler notation, not source syntax |
 | `struct` | scalar fields in declaration order | nominal: each `struct` is a distinct type |
 | `enum` | tag + optional payload | Nominal; payload currently limited to `i32` |
 
