@@ -19,6 +19,7 @@ const ast = @import("ast/ast.zig");
 const sema = @import("sema/sema.zig");
 const codegen = @import("codegen/codegen.zig");
 const diagnostics = @import("diagnostics.zig");
+const semantic_index = @import("semantic_index.zig");
 
 pub const Action = enum {
     /// Lexer + parser + semantics only.
@@ -47,6 +48,11 @@ pub const Source = struct {
     text: []const u8,
 };
 
+pub const SemanticSnapshot = struct {
+    program: *ast.Program,
+    checked: sema.Checked,
+};
+
 pub const Result = struct {
     gpa: std.mem.Allocator,
     arena: *std.heap.ArenaAllocator,
@@ -55,6 +61,8 @@ pub const Result = struct {
     output: ?[]const u8 = null,
     /// Arquivos lidos, indexados por `diagnostics.Diagnostic.file`.
     sources: []const Source = &.{},
+    /// Compiler-resolved AST and symbol tables, present after successful semantics.
+    semantic: ?SemanticSnapshot = null,
 
     pub fn deinit(self: Result) void {
         self.arena.deinit();
@@ -310,6 +318,7 @@ fn runPipeline(result: *Result, program: *ast.Program, options: Options) Error!v
     const checked = try checker.checkProgram(program);
 
     if (diags.hasErrors()) return;
+    result.semantic = .{ .program = program, .checked = checked };
     if (options.action == .check) return;
 
     const output = codegen.generate(a, program, &checked, options.backend) catch |err| switch (err) {
@@ -326,6 +335,12 @@ fn runPipeline(result: *Result, program: *ast.Program, options: Options) Error!v
     };
 
     result.output = output;
+}
+
+/// Serializes the successful semantic snapshot for language tooling.
+pub fn semanticJson(result: *Result) Error![]const u8 {
+    const snapshot = result.semantic orelse return error.SemanticSnapshotUnavailable;
+    return semantic_index.generate(result.arena.allocator(), snapshot.program, &snapshot.checked, result.sources);
 }
 
 /// Renders every diagnostic, each with its correct source file.
