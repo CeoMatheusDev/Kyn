@@ -3,7 +3,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
-  validateSnapshot, filePathOf, targetAt, findSymbol, referencesFor, remapSnapshotOffsets
+  validateSnapshot, filePathOf, targetAt, findSymbol, referencesFor,
+  remapSnapshotOffsets, isIdentifier, renameEntries
 } = require("../src/index");
 
 const snapshot = {
@@ -56,4 +57,31 @@ test("converts UTF-8 byte spans to VS Code UTF-16 offsets", () => {
   assert.equal(sample.symbols[0].start, utf16Start);
   assert.equal(sample.symbols[0].end, utf16Start + 5);
   assert.equal(sample.references[0].start, utf16Start);
+});
+
+test("rename accepts Kyn identifiers and rejects keywords or malformed names", () => {
+  for (const name of ["renamed", "_private", "value2"]) assert.equal(isIdentifier(name), true);
+  for (const name of ["", "2value", "with-dash", "has space", "fn", "return", "true"]) {
+    assert.equal(isIdentifier(name), false, name);
+  }
+});
+
+test("rename entries use semantic identity, including declaration only for target", () => {
+  const sameSpelling = {
+    ...snapshot,
+    symbols: [
+      ...snapshot.symbols,
+      { id: "function:other", name: "twice", kind: "function", file: 0, start: 0, end: 5 }
+    ],
+    references: [
+      ...snapshot.references,
+      { target: "function:other", file: 0, start: 10, end: 15, role: "call" }
+    ]
+  };
+  const entries = renameEntries(sameSpelling, "function:0", "renamed");
+  assert.deepEqual(entries.map(entry => [entry.file, entry.start, entry.end]), [
+    [1, 3, 8], [0, 40, 45]
+  ]);
+  assert.equal(renameEntries(sameSpelling, "function:0", "fn"), null);
+  assert.equal(renameEntries(sameSpelling, "missing", "renamed"), null);
 });
