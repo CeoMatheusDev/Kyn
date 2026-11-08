@@ -138,33 +138,37 @@ requests and manual dispatch. On `ubuntu-24.04` the workflow:
 5. runs `zig build validate-ir-strict` (LLVM verifier required), then
    `zig build e2e` if IR validation succeeds.
 
-On the current shift-count branch, local results are 278 compiler + 7 std
-tests (285/285), 158/158 E2E cases and 111/111 LLVM 20-verified modules
-via `llvmlite`. [PR #41](https://github.com/CeoMatheusDev/Kyn/pull/41)
-passed both required CI jobs, including strict `llvm-as` (run 42532559205);
-post-merge `main` CI is a separate gate. Earlier
-[PR #40](https://github.com/CeoMatheusDev/Kyn/pull/40) and its `main` merge
-commit `33a61cd` also passed both jobs (runs 42531600138/42531803954).
-PRs #36/#37 remain separate and have a failing compiler check.
+The integrated shift-count work passed 278 compiler + 7 std tests (285/285),
+158/158 native E2E cases and 111/111 LLVM 20-verified modules via `llvmlite`
+locally. [PR #41](https://github.com/CeoMatheusDev/Kyn/pull/41) passed both CI
+jobs on its final head ([run 42532780270](https://github.com/CeoMatheusDev/Kyn/actions/runs/42532780270));
+its merge commit `c04a6a7` on `main` also passed both jobs, including strict
+`llvm-as` ([run 42532984118](https://github.com/CeoMatheusDev/Kyn/actions/runs/42532984118)).
+Earlier [PR #40](https://github.com/CeoMatheusDev/Kyn/pull/40) and its `main`
+merge commit `33a61cd` passed both jobs as well (runs
+42531600138/42531803954). PRs #36/#37 remain separate with failing compiler
+checks.
 
 A missing LLVM in CI **fails** the build, so IR validation cannot be skipped
 silently.
 
 ## Release (SemVer)
 
-The version lives only in `build.zig.zon` and is bumped on every integrated
-cycle:
+The compiler version has one source of truth: `build.zig.zon`. Before 1.0,
+`0.x.y-alpha.N` denotes an experimental snapshot; an integrated release set
+may include several PRs. The version must match the proposed tag, and the
+changelog must describe all changes since the previous published tag. This
+is not a promise of a stable language, ABI or compatibility policy.
 
-- `MAJOR` changes when the language specification gains a stable contract
-  (1.0.0 is the stabilization milestone).
-- `MINOR` follows each integrated feature set (`0.3.7`, `0.4.0`, …).
-- the `-alpha.N` pre-release covers incremental cycles within the same `MINOR`.
-
-A cycle only gets a tag after the `main` CI is green with `zig fmt --check`,
-`zig build test`, `zig build e2e` and `zig build validate-ir-strict`. Tags are
-annotated (`git tag -a vX.Y.Z-alpha.N`) and accompanied by a GitHub release with
-highlights, validation evidence and the list of what **does not exist yet**.
-First published tag: `v0.3.7-alpha.1` (commit `1c80a7b`).
+Only tag a commit on `main` after that **exact commit** passes CI formatting,
+`zig build test`, `zig build e2e` and `zig build validate-ir-strict` (plus
+extension checks). Check that the tag/release do not already exist, create an
+annotated `vX.Y.Z-alpha.N` tag pointing to the validated commit, then publish a
+GitHub **pre-release** with highlights, validation evidence and the list of
+what **does not exist yet**. Do not create tags for intermediate commits or
+backfill old version numbers without validating their exact target commits.
+The first published tag was `v0.3.7-alpha.1` (commit `1c80a7b`); not every
+historical changelog heading was a published release.
 
 ## Structure
 

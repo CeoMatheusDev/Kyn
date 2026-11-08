@@ -116,8 +116,8 @@ literals. Arithmetic, ordering and bitwise operators require operands of the
 same integer type; shifts accept an independently typed integer count. Integer
 literals default to `i32`; literal overflow is diagnosed. Executed native
 regressions now cover selected 8-/16-/32-/64-bit operations and internal wide
-arguments; this branch also defines shift counts modulo the left operand's
-width. Arithmetic overflow and division-by-zero still need portable language
+arguments; shift counts are defined modulo the left operand's width.
+Arithmetic overflow and division-by-zero still need portable language
 contracts (see `status.md`).
 
 ### Numeric conversion (`as`)
