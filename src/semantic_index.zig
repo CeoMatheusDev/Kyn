@@ -50,7 +50,7 @@ const Builder = struct {
     symbols: std.ArrayList(Symbol) = .empty,
     references: std.ArrayList(Reference) = .empty,
 
-    fn symbolId(self: *Builder, prefix: []const u8, index: usize) ![]const u8 {
+    fn symbolId(self: *Builder, prefix: []const u8, index: usize) std.mem.Allocator.Error![]const u8 {
         return std.fmt.allocPrint(self.arena, "{s}:{d}", .{ prefix, index });
     }
 
@@ -192,7 +192,7 @@ const Builder = struct {
         return null;
     }
 
-    fn walkExpr(self: *Builder, expr: *ast.Expr, file: u32) anyerror!void {
+    fn walkExpr(self: *Builder, expr: *ast.Expr, file: u32) std.mem.Allocator.Error!void {
         switch (expr.kind) {
             .identifier => {
                 if (try self.variableId(expr.resolved)) |id| try self.addReference(id, file, expr.span, "read");
