@@ -7,10 +7,11 @@
 `87903db`), PR #18 (docs, `3be9df0`), PR #19 (`str` by value, `9ec07be`),
 PR #20–#22 (records, `2a68d9a`/`da92f44`/`d6eb534`), PR #23 (struct by value,
 `1c80a7b`), PR #24 (records, `288eb3f`), PR #26 (`enum` + `switch`, `9125bff`),
-PR #27 (records, `4e6a023`), PR #28 (enums by value, `9b989ad`) and PR #29
-(release records, `d85f459`) merged into `main` (2026-11-07/08). Tags:
-**`v0.3.7-alpha.1`** at `1c80a7b` (first tag), **`v0.3.9-alpha.1`** at `9125bff`
-and **`v0.3.10-alpha.1`** at `9b989ad`, each with a GitHub release.
+PR #27 (records, `4e6a023`), PR #28 (enums by value, `9b989ad`), PR #29 (release
+records, `d85f459`) and PR #30 (methods/`impl`, `fcf49f1`) merged into `main`
+(2026-11-07/09). Tags: **`v0.3.7-alpha.1`** at `1c80a7b` (first tag),
+**`v0.3.9-alpha.1`** at `9125bff`, **`v0.3.10-alpha.1`** at `9b989ad` and
+**`v0.3.11-alpha.1`** at `fcf49f1`, each with a GitHub release.
 **Project version:** `0.3.11-alpha.1`
 **Last validation:** 2026-11-09 — local (Zig 0.17.0 + GNU `as`/`ld`, Linux
 x86-64): `zig build`, `zig build test` (244 compiler tests + 7 std), `zig build
