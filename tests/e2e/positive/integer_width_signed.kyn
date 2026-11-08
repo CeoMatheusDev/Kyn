@@ -1,0 +1,32 @@
+// expect-exit: 0
+// Regression for the i64 comparison at 2^31 in docs/status.md, plus signed
+// arithmetic, unary operations, shifts and truncation across the high word.
+fn increment(n: i64) -> i64 { return n + (1 as i64); }
+
+fn main() -> i32 {
+    let x: i64 = 2147483647 as i64;
+    var y: i64 = increment(x);
+    if y <= x { return 1; }
+    if y != ((1 as i64) << (31 as u8)) { return 2; }
+
+    y = y * (512 as i64);
+    let high: i64 = (1 as i64) << (40 as u8);
+    if y != high { return 3; }
+    if high / (256 as i64) != ((1 as i64) << (32 as u8)) { return 4; }
+    if high % (3 as i64) != (1 as i64) { return 5; }
+
+    let negative: i64 = (0 as i64) - high;
+    if negative >= (0 as i64) { return 6; }
+    if negative / (256 as i64) != ((0 as i64) - ((1 as i64) << (32 as u8))) { return 7; }
+    if negative % (3 as i64) != ((0 as i64) - (1 as i64)) { return 8; }
+    if -high != negative { return 9; }
+    if ~high != (negative - (1 as i64)) { return 10; }
+    if negative >> (40 as u8) != ((0 as i64) - (1 as i64)) { return 11; }
+    if ((high ^ ((1 as i64) << (39 as u8))) & high) != high { return 12; }
+
+    let minus_one: i64 = (0 - 1) as i64;
+    let low: u32 = minus_one as u32;
+    if (low as u64) != (((1 as u64) << (32 as u8)) - (1 as u64)) { return 13; }
+    if (negative as i32) != 0 { return 14; }
+    return 0;
+}

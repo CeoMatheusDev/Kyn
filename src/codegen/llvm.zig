@@ -5,11 +5,10 @@
 //! structs and static strings. String values are represented as pointer +
 //! length pairs in storage and calls, with aggregate returns where required.
 //!
-//! This backend is not feature-identical to the native x86-64 backend:
-//! address-of and dereference expressions currently return
-//! `error.UnsupportedNode`. Pointer semantics can therefore pass semantic
-//! analysis while LLVM emission remains unavailable for programs that use
-//! those expressions.
+//! This backend emits typed pointer operations with opaque LLVM `ptr` values.
+//! Its IR uses LLVM's own calling convention for scalar integers, while the
+//! native backend uses Kyn-specific register pairs for wide arguments; neither
+//! representation establishes an external C ABI.
 //!
 //! LLVM output is textual and must be checked with an LLVM verifier. Structural
 //! unit tests alone do not establish that emitted IR is accepted by LLVM.

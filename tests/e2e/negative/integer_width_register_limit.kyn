@@ -1,0 +1,5 @@
+// Four wide integers need eight argument registers, beyond the current six.
+fn too_many(a: i64, b: u64, c: usize, d: i64) -> i64 {
+    return a;
+}
+fn main() -> i32 { return 0; }

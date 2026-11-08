@@ -406,10 +406,10 @@ pub const Checked = struct {
     }
 };
 
-/// Register words a type occupies in the calling convention: each scalar
-/// struct field counts one, `str` counts two (pointer and length) and the
-/// remaining scalars one. Single source for the semantics limit and for the
-/// backends — so declaration, call and code emission never diverge.
+/// Register words a type occupies in the Kyn calling convention: one per
+/// struct field or pointer; two for `str`, enums and wide integers (i64,
+/// u64, usize). Single source for the semantics limit and both backends —
+/// so declaration, call and code emission never diverge.
 pub fn registerWordsOf(structs: []const StructInfo, typ: Type, struct_id: u32) usize {
     if (typ.eq(.aggregate) and struct_id < structs.len) return structs[struct_id].fields.len;
     // An enum is a tag plus a payload slot, never a single register.
@@ -418,8 +418,8 @@ pub fn registerWordsOf(structs: []const StructInfo, typ: Type, struct_id: u32) u
 }
 
 /// Limit of argument **registers** per call in the x86-64 backend
-/// (SysV). It is not a parameter limit: each `str` consumes two
-/// (`Type.registerWords`), so three `str` fill the table.
+/// (SysV registers, Kyn-specific pairing). It is not a parameter limit:
+/// each `str` or 64-bit integer consumes two (`Type.registerWords`).
 pub const max_arg_registers: usize = 6;
 
 pub const Options = struct {
@@ -839,7 +839,7 @@ pub const Checker = struct {
         }
 
         // The native backend limit is in registers, not in parameters:
-        // each `str` consumes two and each struct field one.
+        // `str` and wide integers use two; struct fields and pointers use one.
         const kind_label: []const u8 = if (owner.isMethod()) "method" else "function";
         const display: []const u8 = if (owner.isMethod())
             try std.fmt.allocPrint(self.arena, "{s}.{s}", .{ self.ownerName(owner), func.name })
@@ -849,7 +849,7 @@ pub const Checker = struct {
             try self.diags.add(
                 .unsupported,
                 func.name_span,
-                "{s} '{s}' uses {d} parameter registers; the current backend supports at most {d} ('str' and an enum take two, each struct field one)",
+                "{s} '{s}' uses {d} parameter registers; the current backend supports at most {d} ('str', an enum and a 64-bit integer take two, each struct field one)",
                 .{ kind_label, display, register_words, max_arg_registers },
             );
         }
@@ -1823,16 +1823,18 @@ pub const Checker = struct {
                 if (operand.eq(.unknown)) return .unknown;
                 switch (unary.op) {
                     .neg => {
-                        if (!operand.eq(.i32)) {
+                        // Like binary subtraction, unary minus operates at the
+                        // operand's width (including modular unsigned values).
+                        if (!operand.isInteger()) {
                             try self.diags.add(
                                 .type_mismatch,
                                 expr.span,
-                                "operator '-' expects 'i32', found '{s}'",
+                                "operator '-' expects an integer type, found '{s}'",
                                 .{operand.name()},
                             );
                             return .unknown;
                         }
-                        return .i32;
+                        return operand;
                     },
                     .not => {
                         if (!operand.eq(.bool)) {
@@ -2519,7 +2521,7 @@ pub const Checker = struct {
             try self.diags.add(
                 .unsupported,
                 span,
-                "call to '{s}' uses {d} registers; the current backend supports at most {d} ('str' and an enum take two, each struct field one)",
+                "call to '{s}' uses {d} registers; the current backend supports at most {d} ('str', an enum and a 64-bit integer take two, each struct field one)",
                 .{ display, arg_words, max_arg_registers },
             );
         }
@@ -2854,6 +2856,24 @@ test "sema: arithmetic with bool is rejected" {
     var f = try Fixture.check("fn main() -> i32 { let x = true + 1; return 0; }", .{});
     defer f.deinit();
     try expectOnly(&f, .type_mismatch);
+}
+
+test "sema: unary minus accepts integers at their own width, not bool" {
+    var valid = try Fixture.check(
+        \\fn main() -> i32 {
+        \\    let a: i8 = -(1 as i8);
+        \\    let b: u64 = -(1 as u64);
+        \\    let c: usize = -(1 as usize);
+        \\    return 0;
+        \\}
+    , .{});
+    defer valid.deinit();
+    try testing.expectEqual(@as(usize, 0), valid.diags.count());
+
+    var invalid = try Fixture.check("fn main() -> i32 { let x = -true; return 0; }", .{});
+    defer invalid.deinit();
+    try expectOnly(&invalid, .type_mismatch);
+    try testing.expect(std.mem.indexOf(u8, invalid.diags.items.items[0].message, "expects an integer type") != null);
 }
 
 test "sema: i32 comparison produces bool" {
@@ -3428,6 +3448,23 @@ test "sema: register limit counts 'str' as two" {
     defer f.deinit();
     try expectOnly(&f, .unsupported);
     try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "uses 8 parameter registers") != null);
+}
+
+test "sema: wide integer parameter pairs share the six-register budget" {
+    var valid = try Fixture.check(
+        \\fn mix(a: i64, b: u64, c: usize) -> i64 { return a; }
+        \\fn main() -> i32 { let n = mix(1 as i64, 2 as u64, 3 as usize); return 0; }
+    , .{});
+    defer valid.deinit();
+    try testing.expectEqual(@as(usize, 0), valid.diags.count());
+
+    var invalid = try Fixture.check(
+        \\fn too_many(a: i64, b: u64, c: usize, d: i32) -> i64 { return a; }
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer invalid.deinit();
+    try expectOnly(&invalid, .unsupported);
+    try testing.expect(std.mem.indexOf(u8, invalid.diags.items.items[0].message, "uses 7 parameter registers") != null);
 }
 
 test "sema: three 'str' parameters fit in the six registers" {
