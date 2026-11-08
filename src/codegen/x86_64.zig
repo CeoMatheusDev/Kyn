@@ -160,7 +160,7 @@ pub fn emit(
 /// tracking is fully integrated).
 fn ptr_to_unknown() sema.Type {
     var unknown: sema.Type = .unknown;
-    return sema.Type{ .ptr = &unknown };
+    return sema.Type{ .ptr = .{ .pointee = &unknown } };
 }
 
 const FnEmitter = struct {
@@ -690,12 +690,44 @@ const FnEmitter = struct {
             .field_access => |access| {
                 // An enum case (`Color.Red`) is tag + payload slots, not an operand.
                 if (access.resolved_enum != null) return error.UnsupportedNode;
-                const base = self.symbolAt(access.base.resolved orelse return error.MiscompiledAst);
-                if (base.typ != .aggregate) return error.MiscompiledAst;
                 const field_index = access.field_index orelse return error.MiscompiledAst;
-                try self.print("    movl -{d}(%rbp), %eax\n", .{
-                    slotOffset(base.slot + 1 + field_index),
-                });
+
+                // Support `(*ptr).field`: dereference a pointer to a struct,
+                // then access a field at the given offset.
+                if (access.base.kind == .unary) {
+                    const unary_expr = access.base.kind.unary;
+                    if (unary_expr.op == .dereference) {
+                        // Emit only the pointer operand (e.g. `ptr` in `*ptr`),
+                // leaving the 64-bit pointer in %rax or in a stack slot.
+                        try self.emitExpr(unary_expr.operand);
+                        if (self.last_expr_type) |t| {
+                            if (t.isPtr() and self.last_expr_slot != 0) {
+                                // Pointer was spilled to memory: load it into %rax.
+                                try self.print("    mov -{d}(%rbp), %rax\n", .{ptrSlotOffset(self.last_expr_slot)});
+                            }
+                        }
+                        // If last_expr_slot == 0, the pointer is already in %rax
+                        // (loaded by the .identifier case). Now load the field.
+                        // Struct layout: slot 0 is the struct base, fields start
+                        // at slot 1. Each slot is 8 bytes. Fields are at negative
+                        // offsets from the base: field i at -{(i+1)*8}(%rax).
+                        try self.print("    movl -{d}(%rax), %eax\n", .{(field_index + 1) * 8});
+                        self.last_expr_type = .i32;
+                        self.last_expr_slot = 0;
+                    } else {
+                        const base = self.symbolAt(access.base.resolved orelse return error.MiscompiledAst);
+                        if (base.typ != .aggregate) return error.MiscompiledAst;
+                        try self.print("    movl -{d}(%rbp), %eax\n", .{
+                            slotOffset(base.slot + 1 + field_index),
+                        });
+                    }
+                } else {
+                    const base = self.symbolAt(access.base.resolved orelse return error.MiscompiledAst);
+                    if (base.typ != .aggregate) return error.MiscompiledAst;
+                    try self.print("    movl -{d}(%rbp), %eax\n", .{
+                        slotOffset(base.slot + 1 + field_index),
+                    });
+                }
             },
 
             // A struct value does not fit in `%eax`: `let`/assignment handle the

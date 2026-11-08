@@ -40,9 +40,20 @@ pub const Type = union(enum) {
     enumeration,
     /// Unknown type: avoids a cascade of diagnostics after an error.
     unknown,
-    /// Pointer to a pointee type. The pointee type is tracked so that
-    /// dereference yields the correct type. Pointers take one register.
-    ptr: *Type,
+    /// Pointer to a pointee type. When the pointee is an aggregate (struct),
+    /// `struct_id` identifies which struct, enabling field access through
+    /// pointers (`(*ptr).field`). Pointers take one register.
+    ptr: PtrType,
+
+    /// Pointer type with optional struct identity for field access.
+    pub const PtrType = struct {
+        pointee: *Type,
+        /// Struct id when pointee is `.aggregate`, 0 otherwise.
+        struct_id: u32 = 0,
+        /// True when `struct_id` is a valid index into `Checked.structs`.
+        /// Needed because `struct_id == 0` is valid for the first struct.
+        has_struct_id: bool = false,
+    };
 
     /// Returns a string representation of the type. For pointers this is
     /// `*Pointee`. Uses a fixed-size buffer; no allocation is performed.
@@ -63,8 +74,8 @@ pub const Type = union(enum) {
             .str => "str",
             .enumeration => "enum",
             .unknown => "unknown",
-            .ptr => |pointee_ty| {
-                const pointee_name = pointee_ty.name();
+            .ptr => |pt| {
+                const pointee_name = pt.pointee.name();
                 // Fixed buffer: enough for "*i64" etc. Truncates if longer.
                 var buf: [16]u8 = undefined;
                 var written: usize = 0;
@@ -168,7 +179,7 @@ pub const Type = union(enum) {
         return switch (self) {
             .ptr => |a_pt| {
                 const b_pt = other.ptr;
-                return a_pt.eq(b_pt.*);
+                return a_pt.pointee.eq(b_pt.pointee.*) and a_pt.struct_id == b_pt.struct_id and a_pt.has_struct_id == b_pt.has_struct_id;
             },
             else => true,
         };
@@ -181,7 +192,7 @@ var unknown_type: Type = .unknown;
 var ptr_to_unknown_type: Type = undefined;
 
 fn initPtrToUnknown() void {
-    ptr_to_unknown_type = Type{ .ptr = &unknown_type };
+    ptr_to_unknown_type = Type{ .ptr = .{ .pointee = &unknown_type } };
 }
 
 fn ptrToUnknown() Type {
@@ -192,9 +203,9 @@ fn ptrToUnknown() Type {
 /// the same pointee, or one side is `ptr<unknown>` (written as `ptr`).
 fn ptrTypesCompatible(a: Type, b: Type) bool {
     if (!a.isPtr() or !b.isPtr()) return false;
-    const a_pt = switch (a) { .ptr => |pt| pt.*, else => unreachable };
-    const b_pt = switch (b) { .ptr => |pt| pt.*, else => unreachable };
-    return a_pt.eq(b_pt) or a_pt.eq(.unknown) or b_pt.eq(.unknown);
+    const a_pt = switch (a) { .ptr => |pt| pt.pointee, else => unreachable };
+    const b_pt = switch (b) { .ptr => |pt| pt.pointee, else => unreachable };
+    return a_pt.*.eq(b_pt.*) or a_pt.*.eq(.unknown) or b_pt.*.eq(.unknown);
 }
 
 pub const SymbolKind = enum { param, local };
@@ -208,8 +219,11 @@ pub const Symbol = struct {
     slot: u32,
     kind: SymbolKind,
     decl_span: Span,
-    /// Index into `Checked.structs` when `typ.eq(.aggregate)`.
+    /// Index into `Checked.structs` when `typ.eq(.aggregate)`. Valid only when
+    /// `has_struct_id` is true (needed because `struct_id == 0` is a valid
+    /// index for the first struct).
     struct_id: u32 = 0,
+    has_struct_id: bool = false,
     /// Index into `Checked.enums` when `typ.eq(.enumeration)`.
     enum_id: u32 = 0,
 };
@@ -1028,11 +1042,20 @@ pub const Checker = struct {
 
     /// Struct tied to an expression producing a struct value.
     fn structIdOfExpr(self: *const Checker, expr: *const ast.Expr) ?u32 {
+        if (expr.kind == .unary) {
+            const unary = expr.kind.unary;
+            if (unary.op == .address_of and unary.operand.kind == .identifier) {
+                if (unary.operand.resolved) |idx| {
+                    const sym = self.symbols.items[idx];
+                    if (sym.has_struct_id) return sym.struct_id;
+                }
+            }
+        }
         return switch (expr.kind) {
             .struct_literal => |lit| lit.resolved_struct,
             .identifier => if (expr.resolved) |idx| blk: {
                 const sym = self.symbols.items[idx];
-                break :blk if (sym.typ.eq(.aggregate)) sym.struct_id else null;
+                break :blk if (sym.has_struct_id) sym.struct_id else null;
             } else null,
             .call => |call| if (call.callee_fn) |index| blk: {
                 const func = self.functions.items[index];
@@ -1088,7 +1111,7 @@ pub const Checker = struct {
             const typ = try self.resolveTypeName(param.type_name);
             const struct_id = self.structIdOfTypeName(param.type_name) orelse 0;
             const enum_id = self.enumIdOfTypeName(param.type_name) orelse 0;
-            _ = try self.declare(param.name, param.span, typ, false, .param, struct_id, enum_id);
+            _ = try self.declare(param.name, param.span, typ, false, .param, struct_id, typ.eq(.aggregate), enum_id);
         }
 
         try self.checkStatements(func.body);
@@ -1129,6 +1152,7 @@ pub const Checker = struct {
         mutable: bool,
         kind: SymbolKind,
         struct_id: u32,
+        has_struct_id: bool,
         enum_id: u32,
     ) !?u32 {
         if (self.scopes.items.len > 0) {
@@ -1166,6 +1190,7 @@ pub const Checker = struct {
             .kind = kind,
             .decl_span = span,
             .struct_id = struct_id,
+            .has_struct_id = has_struct_id,
             .enum_id = enum_id,
         });
         return @intCast(self.symbols.items.len - 1);
@@ -1245,7 +1270,8 @@ pub const Checker = struct {
                     declared_type = try self.resolveTypeName(tn);
                     declared_struct = self.structIdOfTypeName(tn) orelse 0;
                 }
-                const init_struct = self.structIdOfExpr(decl.init) orelse 0;
+                const init_struct_opt = self.structIdOfExpr(decl.init);
+                const init_struct: u32 = init_struct_opt orelse 0;
 
                 // `void` is not storable — neither annotated (`let x: void = ...`)
                 // nor inferred from a call without a return (`let x = f();`).
@@ -1305,12 +1331,18 @@ pub const Checker = struct {
                 }
 
                 // Struct variable without annotation: the struct comes from the initializer.
-                const struct_id: u32 = if (!declared_type.eq(.aggregate))
+                // For pointer types, take the struct_id from the initializer (e.g. &struct_var).
+                const init_has_struct: bool = init_struct_opt != null;
+                const struct_id: u32 = if (!declared_type.eq(.aggregate) and !declared_type.isPtr())
                     0
+                else if (declared_type.isPtr() and init_has_struct)
+                    init_struct
                 else if (decl.type_name != null)
                     declared_struct
                 else
                     init_struct;
+
+
 
                 // Same rule for enums: without annotation the enum comes from
                 // the initializer.
@@ -1328,6 +1360,7 @@ pub const Checker = struct {
                     decl.mutable,
                     .local,
                     struct_id,
+                    init_has_struct or declared_type.eq(.aggregate),
                     enum_id,
                 );
             },
@@ -1654,6 +1687,7 @@ pub const Checker = struct {
                         false,
                         .local,
                         0,
+                        false,
                         0,
                     );
                 }
@@ -1779,7 +1813,7 @@ pub const Checker = struct {
                         // to the operand's type (e.g. `&x` where `x: i32`
                         // yields `ptr<i32>`).
                         if (operand.eq(.unknown)) return .unknown;
-                        if (!operand.isValue() and !operand.isPtr()) {
+                        if (!operand.isValue() and !operand.isPtr() and !operand.eq(.aggregate)) {
                             try self.diags.add(
                                 .type_mismatch,
                                 expr.span,
@@ -1793,7 +1827,24 @@ pub const Checker = struct {
                         const pointee: Type = operand;
                         const pointee_slot = try self.arena.alloc(Type, 1);
                         pointee_slot[0] = pointee;
-                        return Type{ .ptr = &pointee_slot[0] };
+
+                        // If the operand is an identifier resolving to a struct
+                        // variable, store the struct_id so field access through
+                        // the pointer (*ptr).field can resolve the struct layout.
+                        var ptr_struct_id: u32 = 0;
+                        var ptr_has_struct_id: bool = false;
+                        if (expr.kind.unary.operand.kind == .identifier) {
+                            const id_expr = expr.kind.unary.operand;
+                            if (id_expr.resolved) |si| {
+                                const sym = self.symbols.items[si];
+                                if (sym.has_struct_id) {
+                                    ptr_struct_id = sym.struct_id;
+                                    ptr_has_struct_id = true;
+                                }
+                            }
+                        }
+
+                        return Type{ .ptr = .{ .pointee = &pointee_slot[0], .struct_id = ptr_struct_id, .has_struct_id = ptr_has_struct_id } };
                     },
                     .dereference => {
                         // `*ptr` requires the operand to be a pointer. The
@@ -1811,10 +1862,10 @@ pub const Checker = struct {
                         }
                         // Access the pointee type through the union field.
                         const pointee = switch (operand) {
-                            .ptr => |pt| pt.*,
+                            .ptr => |pt| pt.pointee,
                             else => unreachable,
                         };
-                        return pointee;
+                        return pointee.*;
                     },
                 }
             },
@@ -1851,21 +1902,131 @@ pub const Checker = struct {
                     }
                 }
 
-                const base_index = try self.resolveFieldBase(access.base);
-                if (base_index == null) return .unknown;
+                // Support `(*ptr).field`: dereference a pointer to a struct,
+                // then access a field. The pointee type must be an aggregate
+                // with a known struct_id (stored when the pointer was created
+                // via `&struct_var`).
+                var base_struct_id: u32 = 0;
+                var is_ptr_access: bool = false;
+                var ptr_has_struct_id: bool = false;
 
-                const sym = self.symbols.items[base_index.?];
-                if (!sym.typ.eq(.aggregate)) {
+                if (access.base.kind == .unary) {
+                    const unary_expr = access.base.kind.unary;
+                    if (unary_expr.op == .dereference) {
+                        // The operand of `*` is the pointer. Its type must be
+                        // `ptr<struct>` so we can recover the struct_id.
+                        const ptr_type = try self.checkExpr(unary_expr.operand);
+                        if (ptr_type == .unknown) return .unknown;
+                        if (!ptr_type.isPtr()) {
+                            try self.diags.add(
+                                .type_mismatch,
+                                access.name_span,
+                                "field access '{s}' requires a struct pointer, but operand has type '{s}'",
+                                .{ access.name, ptr_type.name() },
+                            );
+                            return .unknown;
+                        }
+                        const pt = switch (ptr_type) {
+                            .ptr => |pt| pt,
+                            else => unreachable,
+                        };
+                        if (pt.pointee.eq(.aggregate)) {
+                            base_struct_id = pt.struct_id;
+                            ptr_has_struct_id = pt.has_struct_id;
+                        } else if (pt.pointee.eq(.unknown)) {
+                            // Pointer declared as `ptr` (ptr<unknown>) but
+                            // initialized with `&struct_var`. Recover the
+                            // struct_id from the symbol's struct_id field.
+                                if (unary_expr.operand.kind == .identifier) {
+                                if (unary_expr.operand.resolved) |idx| {
+                                    const sym = self.symbols.items[idx];
+                                    // For a `ptr` variable initialized with `&struct_var`,
+                                    // the symbol's struct_id holds the struct identity
+                                    // even though sym.typ is `.ptr`.
+                                    if (sym.has_struct_id) {
+                                        base_struct_id = sym.struct_id;
+                                        ptr_has_struct_id = true;
+                                    } else {
+                                        try self.diags.add(
+                                            .type_mismatch,
+                                            access.name_span,
+                                            "field access '{s}' requires a pointer to a struct, but pointee type is unknown",
+                                            .{ access.name },
+                                        );
+                                        return .unknown;
+                                    }
+                                } else {
+                                    try self.diags.add(
+                                        .type_mismatch,
+                                        access.name_span,
+                                        "field access '{s}' requires a pointer to a struct, but pointee type is unknown",
+                                        .{ access.name },
+                                    );
+                                    return .unknown;
+                                }
+                            } else {
+                                try self.diags.add(
+                                    .type_mismatch,
+                                    access.name_span,
+                                    "field access '{s}' requires a pointer to a struct, but pointee type is unknown",
+                                    .{ access.name },
+                                );
+                                return .unknown;
+                            }
+                        } else {
+                            try self.diags.add(
+                                .type_mismatch,
+                                access.name_span,
+                                "field access '{s}' requires a pointer to a struct, but pointee has type '{s}'",
+                                .{ access.name, pt.pointee.name() },
+                            );
+                            return .unknown;
+                        }
+                        is_ptr_access = true;
+                    }
+                }
+
+                if (!is_ptr_access) {
+                    const base_index = try self.resolveFieldBase(access.base);
+                    if (base_index == null) return .unknown;
+
+                    const sym = self.symbols.items[base_index.?];
+                    if (!sym.typ.eq(.aggregate)) {
+                        try self.diags.add(
+                            .type_mismatch,
+                            access.name_span,
+                            "field access '{s}' requires a struct, but '{s}' has type '{s}'",
+                            .{ access.name, self.exprText(access.base), self.typeLabel(sym.typ, sym.struct_id) },
+                        );
+                        return .unknown;
+                    }
+
+                    base_struct_id = sym.struct_id;
+                }
+
+                // For pointer access, missing has_struct_id means "unknown pointee"
+                // (created via `ptrToUnknown()` or `&x` where x is not a known
+                // struct). For direct access, struct_id is always a valid index.
+                if (is_ptr_access and !ptr_has_struct_id) {
                     try self.diags.add(
-                        .type_mismatch,
+                        .unsupported,
                         access.name_span,
-                        "field access '{s}' requires a struct, but '{s}' has type '{s}'",
-                        .{ access.name, self.exprText(access.base), self.typeLabel(sym.typ, sym.struct_id) },
+                        "field access through a pointer requires pointee-type tracking (struct id unknown)",
+                        .{},
+                    );
+                    return .unknown;
+                }
+                if (base_struct_id >= self.structs.items.len) {
+                    try self.diags.add(
+                        .unsupported,
+                        access.name_span,
+                        "field access: invalid struct id {d} (>= {d})",
+                        .{ base_struct_id, self.structs.items.len },
                     );
                     return .unknown;
                 }
 
-                const info = &self.structs.items[sym.struct_id];
+                const info = &self.structs.items[base_struct_id];
                 const field_index = findField(info, access.name) orelse {
                     try self.diags.add(
                         .undefined_field,

@@ -41,7 +41,7 @@ declaration rules (receiver shape, no field/duplicate/symbol clash, `main` free,
 target declared) are all diagnosed. Methods also work for enums, chain on call
 results (`p.moved(1, 1).sum()`) and count in the six-register limit.
 
-Still missing: generics, slices, pointers, `unsafe`, struct with a struct field
+Still missing: generics, slices, `unsafe`, struct with a struct field
 (nested), `str` in a struct field, `str` comparison, concatenation or formatting,
 integrated FFI, a stable standard library and functional self-hosting. The path
 to freestanding/embedded targets is analysed in `docs/embedded.md`.
@@ -112,9 +112,11 @@ returns (up to 6 fields), explicit conversion `expr as T` (int↔int only;
 widening zero/sign-extends), address-of `&var` (yields `ptr<T>` where `T` is
 the type of `var`; written as `ptr` means `ptr<unknown>`, assignment-compatible
 with any `ptr<T>`), dereference `*ptr` (yields the pointee type `T`),
-pointer arithmetic (`ptr + i32`, `i32 + ptr`, `ptr - i32` yield `ptr`;
-`ptr - ptr` yields `i32`) and pointer comparison (`ptr == ptr`, `ptr != ptr`
-yield `bool`). Pointers count as one register in the six-register limit.
+field access through a pointer `(*ptr).field` (the pointee must be a known
+struct, the struct_id is tracked from `&struct_var`), pointer arithmetic
+(`ptr + i32`, `i32 + ptr`, `ptr - i32` yield `ptr`; `ptr - ptr` yields `i32`)
+and pointer comparison (`ptr == ptr`, `ptr != ptr` yield `bool`). Pointers
+count as one register in the six-register limit.
 
 Outside the subset (diagnosed or rejected): enum **struct fields**, enum payload
 types other than `i32`, operators on enum values (`==`, arithmetic), `switch`
@@ -122,9 +124,8 @@ over a constructed value, associated functions without a receiver, receiver
 literal or field read on a call result, references (`&self`), `unsafe`,
 `#[...]` attributes, struct with a struct field, empty struct, struct field of
 type `str`, `str` comparison (`==`/`!=`), concatenation and formatting of `str`,
-`f32`/`f64` and other types, `[]T` slices, pointer pointee-type tracking,
-generics, `Result<T, E>`/`?`, closures, `for`, visibility (`pub`),
-qualified/selective imports and packages.
+`f32`/`f64` and other types, `[]T` slices, generics, `Result<T, E>`/`?`,
+closures, `for`, visibility (`pub`), qualified/selective imports and packages.
 
 ## Validation executed in this cycle
 
@@ -136,12 +137,14 @@ qualified/selective imports and packages.
   exhaustive `switch`, string pool and rejection of `void` variables) plus 7
   from the experimental `std` (253 in total). One existing sema test was
   retargeted from `u8` (now accepted) to `i128` (still unknown).
-- `zig build e2e` — 126/126 cases: 31 behavioral fixtures plus 3 new ones
-  (`bitwise`, `cast` and `pointer`), 9 executed multi-file programs, 50
-  `case_N.kyn` fixtures with exit code `N`, 29 negative fixtures (8 enum,
-  4 struct, 3 methods, 4 `str`/`print`, 2 `print_i32`, 1 `str` field,
-  1 `main` returning `str`, 1 implicit narrowing `implicit_narrowing`,
-  1 pointer type mismatch `ptr_type_mismatch`), 2 modules with enums
+- `zig build e2e` — 130/130 cases: 31 behavioral fixtures plus 3 new ones
+  (`bitwise`, `cast` and `pointer`), 2 new pointer field-access fixtures
+  (`pointer_field`, `ptr_field_unknown`), 9 executed multi-file programs,
+  50 `case_N.kyn` fixtures with exit code `N`, 29 negative fixtures
+  (8 enum, 4 struct, 3 methods, 4 `str`/`print`, 2 `print_i32`,
+  1 `str` field, 1 `main` returning `str`, 1 implicit narrowing
+  `implicit_narrowing`, 1 pointer type mismatch `ptr_type_mismatch`,
+  1 pointer field unknown field `ptr_field_unknown`), 2 modules with enums
   (`import_enum`, plus the method example `import_method`) and 3 negative
   modules (cycle, missing file, duplicated symbol) with the expected message.
   The enum negatives include nominal identity (`enum_nominal`) and the
@@ -153,7 +156,7 @@ qualified/selective imports and packages.
   through `llvmlite` (`parse_assembly` + `verify`).
 - CI (`.github/workflows/ci.yml`) — runs `42427966554` (PR #23) and
   `42428126584` (`main` after merge) green with `zig fmt --check`, `zig build
-  test` (244 + 7 tests), `zig build e2e` (121 cases, with stdout checked) and
+  test` (245 + 7 tests), `zig build e2e` (121 cases, with stdout checked) and
   `zig build validate-ir-strict` (90 modules accepted by `llvm-as`, including
   the `{ ptr, i64 }` aggregates of `str` and the `{ i32, i1, … }` of structs).
   The strict step fails if the verifier is missing or rejects any module.

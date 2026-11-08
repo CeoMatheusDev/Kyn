@@ -685,6 +685,7 @@ pub const Parser = struct {
 
     fn parseBinary(self: *Parser, min_prec: u8) Error!*ast.Expr {
         var lhs = try self.parseUnary();
+        lhs = try self.parseFieldChain(lhs);
         while (binaryInfo(self.current().tag)) |info| {
             if (info.prec < min_prec) break;
             self.advance();
@@ -698,48 +699,45 @@ pub const Parser = struct {
 
     fn parseUnary(self: *Parser) Error!*ast.Expr {
         const tok = self.current();
-        switch (tok.tag) {
-            .minus => {
-                self.advance();
-                const operand = try self.parseUnary();
-                return ast.Expr.create(self.arena, tok.span.merge(operand.span), .{
-                    .unary = .{ .op = .neg, .operand = operand },
-                });
-            },
-            .bang => {
-                self.advance();
-                const operand = try self.parseUnary();
-                return ast.Expr.create(self.arena, tok.span.merge(operand.span), .{
-                    .unary = .{ .op = .not, .operand = operand },
-                });
-            },
-            .bitnot => {
-                self.advance();
-                const operand = try self.parseUnary();
-                return ast.Expr.create(self.arena, tok.span.merge(operand.span), .{
-                    .unary = .{ .op = .bitnot, .operand = operand },
-                });
-            },
+        var base: ?*ast.Expr = null;
+        if (tok.tag == .minus) {
+            self.advance();
+            const operand = try self.parseUnary();
+            base = try ast.Expr.create(self.arena, tok.span.merge(operand.span), .{
+                .unary = .{ .op = .neg, .operand = operand },
+            });
+        } else if (tok.tag == .bang) {
+            self.advance();
+            const operand = try self.parseUnary();
+            base = try ast.Expr.create(self.arena, tok.span.merge(operand.span), .{
+                .unary = .{ .op = .not, .operand = operand },
+            });
+        } else if (tok.tag == .bitnot) {
+            self.advance();
+            const operand = try self.parseUnary();
+            base = try ast.Expr.create(self.arena, tok.span.merge(operand.span), .{
+                .unary = .{ .op = .bitnot, .operand = operand },
+            });
+        } else if (tok.tag == .bitand) {
             // Address-of (`&var`): unary only in operand position. The binary
             // `&` (bitwise AND) is handled in `parseBinary`.
-            .bitand => {
-                self.advance();
-                const operand = try self.parseUnary();
-                return ast.Expr.create(self.arena, tok.span.merge(operand.span), .{
-                    .unary = .{ .op = .address_of, .operand = operand },
-                });
-            },
+            self.advance();
+            const operand = try self.parseUnary();
+            base = try ast.Expr.create(self.arena, tok.span.merge(operand.span), .{
+                .unary = .{ .op = .address_of, .operand = operand },
+            });
+        } else if (tok.tag == .star) {
             // Dereference (`*ptr`): unary only in operand position. The binary
             // `*` (multiplication) is handled in `parseBinary`.
-            .star => {
-                self.advance();
-                const operand = try self.parseUnary();
-                return ast.Expr.create(self.arena, tok.span.merge(operand.span), .{
-                    .unary = .{ .op = .dereference, .operand = operand },
-                });
-            },
-            else => return self.parsePrimary(),
+            self.advance();
+            const operand = try self.parseUnary();
+            base = try ast.Expr.create(self.arena, tok.span.merge(operand.span), .{
+                .unary = .{ .op = .dereference, .operand = operand },
+            });
+        } else {
+            return self.parsePrimary();
         }
+        return try self.parseFieldChain(base.?);
     }
 
     fn parsePrimary(self: *Parser) Error!*ast.Expr {

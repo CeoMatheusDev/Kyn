@@ -191,9 +191,23 @@ Pointer arithmetic and comparison are supported:
 - `ptr<T> == ptr<T>` and `ptr<T> != ptr<T>` yield `bool`
 - `ptr<T> + ptr<T>` (and other combinations of two pointers) is rejected.
 
+Field access through a pointer is supported via `(*ptr).field`. The pointer
+must point to a struct, and the struct's layout must be known (the pointer must
+have been obtained via `&struct_var`):
+
+```kyn
+struct Point { x: i32, y: i32 }
+fn main() -> i32 {
+    var p: Point = Point { x: 7, y: 8 };
+    let ptr: ptr = &p;
+    return (*ptr).x + (*ptr).y;  // 15
+}
+```
+
 Current limits, all diagnosed: `&` applied to a non-lvalue (literal, call
 result), `*` applied to a non-pointer type, `ptr` used with `<`, `<=`, `>`,
-`>=` (relational comparison of pointers is not supported yet).
+`>=` (relational comparison of pointers is not supported yet), `(*ptr).field`
+when the pointee type is unknown (`ptr` without a tracked struct).
 
 At this stage `str` is a **static slice**: pointer to constant bytes + length,
 kept in two slots. It exists to give the program text output:
