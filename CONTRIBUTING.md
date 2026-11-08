@@ -29,7 +29,7 @@ Every PR must:
 
 ## Tests
 
-Run `zig build test` for the unit tests. For changes in lexer, parser, semantics or backends, also run `zig build e2e`, which compiles `.kyn` fixtures of the supported subset, assembles with `as`, links with `ld` and checks each program's exit code (plus the `// expect-stdout:` lines when present). Cases not implemented yet (for example `impl`, `Result<T, E>`, `unsafe`) remain documentation and must not be presented as supported.
+Run `zig build test` for the unit tests. For changes in lexer, parser, semantics or backends, also run `zig build e2e`, which compiles `.kyn` fixtures of the supported subset, assembles with `as`, links with `ld` and checks each program's exit code (plus the `// expect-stdout:` lines when present). Features not implemented yet (for example generics, slices, integrated `unsafe` syntax and `Result<T, E>`) must not be presented as supported. `impl`/methods are implemented for the current subset.
 
 ## Commits
 
