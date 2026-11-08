@@ -275,7 +275,10 @@ const Builder = struct {
                     try self.walkStatements(branch.then_body, file);
                     if (branch.else_body) |else_branch| switch (else_branch) {
                         .block => |body| try self.walkStatements(body, file),
-                        .if_stmt => |nested| try self.walkStatements(&.{nested}, file),
+                        .if_stmt => |nested| {
+                            var nested_statements = [1]*ast.Stmt{nested};
+                            try self.walkStatements(&nested_statements, file);
+                        },
                     };
                 },
                 .while_stmt => |loop| {
