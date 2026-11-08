@@ -134,8 +134,8 @@ pub const Type = union(enum) {
         return switch (self) {
             .i8, .u8 => 8,
             .i16, .u16 => 16,
-            .i32, .u32, .usize => 32,
-            .i64, .u64 => 64,
+            .i32, .u32 => 32,
+            .i64, .u64, .usize => 64,
             .ptr => 64,
             else => 0,
         };
@@ -144,7 +144,7 @@ pub const Type = union(enum) {
     /// True when the type is signed.
     pub fn isSigned(self: Type) bool {
         return switch (self) {
-            .i8, .i16, .i32, .i64, .usize => true, // usize treated as signed for shift amount
+            .i8, .i16, .i32, .i64 => true,
             .u8, .u16, .u32, .u64 => false,
             else => false,
         };
@@ -186,6 +186,21 @@ pub const Type = union(enum) {
         };
     }
 };
+
+test "sema type metadata: usize is a 64-bit unsigned integer" {
+    try std.testing.expectEqual(@as(u32, 64), Type.usize.bitWidth());
+    try std.testing.expect(!Type.usize.isSigned());
+    try std.testing.expectEqual(@as(usize, 2), Type.usize.registerWords());
+}
+
+test "sema type metadata: signedness and widths match integer names" {
+    try std.testing.expectEqual(@as(u32, 8), Type.i8.bitWidth());
+    try std.testing.expectEqual(@as(u32, 16), Type.u16.bitWidth());
+    try std.testing.expectEqual(@as(u32, 32), Type.i32.bitWidth());
+    try std.testing.expectEqual(@as(u32, 64), Type.u64.bitWidth());
+    try std.testing.expect(Type.i64.isSigned());
+    try std.testing.expect(!Type.u64.isSigned());
+}
 
 /// A pointer type whose pointee is `.unknown`. Used when the exact pointee
 /// type is not tracked (e.g. the result of `&x`).
