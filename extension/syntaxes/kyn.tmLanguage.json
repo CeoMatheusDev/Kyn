@@ -5,7 +5,6 @@
   "patterns": [
     { "include": "#comments" },
     { "include": "#strings" },
-    { "include": "#attributes" },
     { "include": "#keywords" },
     { "include": "#types" },
     { "include": "#functions" },
@@ -20,9 +19,8 @@
       "name": "string.quoted.double.kyn",
       "begin": "\"",
       "end": "\"",
-      "patterns": [{ "name": "constant.character.escape.kyn", "match": "\\\\." }]
+      "patterns": []
     },
-    "attributes": { "name": "meta.annotation.kyn", "match": "#\\[[^\\]]*\\]" },
     "keywords": {
       "patterns": [
         { "name": "keyword.control.kyn", "match": "\\b(if|else|while|return|switch|import|impl|as)\\b" },
@@ -38,7 +36,6 @@
       ]
     },
     "functions": { "patterns": [{ "name": "entity.name.function.kyn", "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*(?=\\s*\\()" }] },
-    "constants": { "patterns": [{ "name": "constant.language.kyn", "match": "\\b(null|undefined)\\b" }] },
     "numbers": { "patterns": [{ "name": "constant.numeric.integer.kyn", "match": "\\b[0-9]+\\b" }] },
     "operators": { "name": "keyword.operator.kyn", "match": "->|=>|==|!=|<=|>=|&&|\\|\\||<<|>>|[+*/%&|^~!<>=-]" },
     "punctuation": {
