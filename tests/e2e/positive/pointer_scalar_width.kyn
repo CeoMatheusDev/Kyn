@@ -1,0 +1,16 @@
+// expect-exit: 0
+// Typed loads use the pointee width even when the declaration says `ptr`.
+struct Pair { x: i32, y: u8 }
+fn main() -> i32 {
+    var signed: i8 = (0 - 5) as i8;
+    var unsigned: u16 = 250 as u16;
+    let sp: ptr = &signed;
+    let up: ptr = &unsigned;
+    var point: Pair = Pair { x: 7, y: 200 as u8 };
+    let field: ptr = &point.y;
+    if (*sp as i32) != (0 - 5) { return 1; }
+    if (*up as i32) != 250 { return 2; }
+    if (*field as i32) != 200 { return 3; }
+    if *(&point.x) != 7 { return 4; }
+    return 0;
+}

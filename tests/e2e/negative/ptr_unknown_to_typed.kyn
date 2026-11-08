@@ -1,0 +1,9 @@
+// A generic pointer loses its pointee: it cannot enter typed local storage.
+fn erase(p: ptr) -> ptr { return p; }
+fn main() -> i32 {
+    var x: i32 = 3;
+    var typed: ptr = &x;
+    let opaque: ptr = erase(&x);
+    typed = opaque;
+    return *typed;
+}

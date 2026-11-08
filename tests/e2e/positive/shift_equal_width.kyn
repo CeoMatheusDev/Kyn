@@ -1,0 +1,11 @@
+// expect-exit: 0
+// A signed value shifted by a same-width unsigned count stays signed.
+fn main() -> i32 {
+    let signed: i32 = 0 - 16;
+    let count: u32 = 2 as u32;
+    let shifted: i32 = signed >> count;
+    if shifted != (0 - 4) { return 1; }
+    let bits: u32 = 3 as u32;
+    if (bits << (1 as i32)) != (6 as u32) { return 2; }
+    return 0;
+}

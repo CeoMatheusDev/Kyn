@@ -57,8 +57,8 @@ pub const Type = union(enum) {
         has_struct_id: bool = false,
     };
 
-    /// Returns a string representation of the type. For pointers this is
-    /// `*Pointee`. Uses a fixed-size buffer; no allocation is performed.
+    /// Returns a static string representation of the type (`ptr<T>` for a
+    /// known pointee). No allocation and no references to temporary storage.
     pub fn name(self: Type) []const u8 {
         return switch (self) {
             .i32 => "i32",
@@ -76,18 +76,24 @@ pub const Type = union(enum) {
             .str => "str",
             .enumeration => "enum",
             .unknown => "unknown",
-            .ptr => |pt| {
-                const pointee_name = pt.pointee.name();
-                // Fixed buffer: enough for "*i64" etc. Truncates if longer.
-                var buf: [16]u8 = undefined;
-                var written: usize = 0;
-                if (written < buf.len) { buf[written] = '*'; written += 1; }
-                var i: usize = 0;
-                while (i < pointee_name.len and written < buf.len) : (i += 1) {
-                    buf[written] = pointee_name[i];
-                    written += 1;
-                }
-                return buf[0..written];
+            // Every returned slice must outlive this call. In particular, do
+            // not return a slice of a stack-allocated formatting buffer: that
+            // corrupts diagnostics for mismatched pointer types.
+            .ptr => |pt| switch (pt.pointee.*) {
+                .i8 => "ptr<i8>",
+                .i16 => "ptr<i16>",
+                .i32 => "ptr<i32>",
+                .i64 => "ptr<i64>",
+                .u8 => "ptr<u8>",
+                .u16 => "ptr<u16>",
+                .u32 => "ptr<u32>",
+                .u64 => "ptr<u64>",
+                .usize => "ptr<usize>",
+                .bool => "ptr<bool>",
+                .aggregate => "ptr<struct>",
+                .ptr => "ptr<ptr>",
+                .unknown => "ptr",
+                else => "ptr<unsupported>",
             },
         };
     }
@@ -223,13 +229,13 @@ fn ptrToUnknown() Type {
     return ptr_to_unknown_type;
 }
 
-/// True when two pointer types are assignment-compatible: either they have
-/// the same pointee, or one side is `ptr<unknown>` (written as `ptr`).
-fn ptrTypesCompatible(a: Type, b: Type) bool {
-    if (!a.isPtr() or !b.isPtr()) return false;
-    const a_pt = switch (a) { .ptr => |pt| pt.pointee, else => unreachable };
-    const b_pt = switch (b) { .ptr => |pt| pt.pointee, else => unreachable };
-    return a_pt.*.eq(b_pt.*) or a_pt.*.eq(.unknown) or b_pt.*.eq(.unknown);
+/// A known pointer can be erased to `ptr<unknown>` at a generic boundary,
+/// but an unknown pointer cannot be assigned to a known-pointee variable:
+/// doing so would enable typed dereference without a pointee contract.
+fn ptrTypesCompatible(expected: Type, actual: Type) bool {
+    if (!expected.isPtr() or !actual.isPtr()) return false;
+    // Compare full pointer types, including nominal struct identity.
+    return expected.eq(actual) or expected.ptr.pointee.* == .unknown;
 }
 
 pub const SymbolKind = enum { param, local };
@@ -1253,6 +1259,13 @@ pub const Checker = struct {
         if (typ.eq(.aggregate) and struct_id < self.structs.items.len) {
             return self.structs.items[struct_id].decl.name;
         }
+        if (typ.isPtr() and typ.ptr.pointee.* == .aggregate and typ.ptr.has_struct_id and
+            typ.ptr.struct_id < self.structs.items.len)
+        {
+            return std.fmt.allocPrint(self.arena, "ptr<{s}>", .{
+                self.structs.items[typ.ptr.struct_id].decl.name,
+            }) catch typ.name();
+        }
         return typ.name();
     }
 
@@ -1293,6 +1306,12 @@ pub const Checker = struct {
                 if (decl.type_name) |tn| {
                     declared_type = try self.resolveTypeName(tn);
                     declared_struct = self.structIdOfTypeName(tn) orelse 0;
+                    // `ptr` is an unspecified pointer annotation, not an
+                    // instruction to forget the known pointee of `&x`.
+                    // Retain it for dereference width and struct identity.
+                    if (declared_type.isPtr() and init_type.isPtr() and declared_type.ptr.pointee.* == .unknown) {
+                        declared_type = init_type;
+                    }
                 }
                 const init_struct_opt = self.structIdOfExpr(decl.init);
                 const init_struct: u32 = init_struct_opt orelse 0;
@@ -1493,7 +1512,9 @@ pub const Checker = struct {
                 }
 
                 const field_type = info.fields[field_index].typ;
-                if (!field_type.eq(.unknown) and !value_type.eq(.unknown) and !field_type.eq(value_type)) {
+                if (!field_type.eq(.unknown) and !value_type.eq(.unknown) and
+                    !field_type.eq(value_type) and !ptrTypesCompatible(field_type, value_type))
+                {
                     try self.diags.add(
                         .type_mismatch,
                         fa.value.span,
@@ -1514,7 +1535,9 @@ pub const Checker = struct {
                             "the current function returns no value ('void'), but 'return' has an expression",
                             .{},
                         );
-                    } else if (!expected.eq(.unknown) and !actual.eq(.unknown) and !expected.eq(actual)) {
+                    } else if (!expected.eq(.unknown) and !actual.eq(.unknown) and
+                        !expected.eq(actual) and !ptrTypesCompatible(expected, actual))
+                    {
                         try self.diags.add(
                             .invalid_return,
                             expr.span,
@@ -1832,17 +1855,21 @@ pub const Checker = struct {
                         return operand;
                     },
                     .address_of => {
-                        // `&expr` requires the operand to be an lvalue: a
-                        // variable or a field access. The result is a pointer
-                        // to the operand's type (e.g. `&x` where `x: i32`
-                        // yields `ptr<i32>`).
-                        if (operand.eq(.unknown)) return .unknown;
-                        if (!operand.isValue() and !operand.isPtr() and !operand.eq(.aggregate)) {
+                        if (operand == .unknown) return .unknown;
+                        // Only addressable storage has a stable location; a
+                        // temporary such as `&42` is not an lvalue. String
+                        // slices have two slots and are not addressable yet.
+                        const addressable = switch (unary.operand.kind) {
+                            .identifier => true,
+                            .field_access => |field| field.resolved_enum == null and field.base.kind == .identifier,
+                            else => false,
+                        };
+                        if (!addressable or operand == .str or operand == .enumeration or operand == .void) {
                             try self.diags.add(
                                 .type_mismatch,
                                 expr.span,
-                                "operator '&' expects a variable or field, found '{s}'",
-                                .{operand.name()},
+                                "operator '&' requires an addressable scalar or struct variable/field",
+                                .{},
                             );
                             return .unknown;
                         }
@@ -1885,11 +1912,17 @@ pub const Checker = struct {
                             return .unknown;
                         }
                         // Access the pointee type through the union field.
-                        const pointee = switch (operand) {
-                            .ptr => |pt| pt.pointee,
-                            else => unreachable,
-                        };
-                        return pointee.*;
+                        const pointee = operand.ptr.pointee.*;
+                        if (pointee == .unknown or pointee == .aggregate or pointee == .str or pointee == .enumeration) {
+                            try self.diags.add(
+                                .unsupported,
+                                expr.span,
+                                "cannot dereference pointer to '{s}' as a scalar value; the pointee must have a known scalar type",
+                                .{pointee.name()},
+                            );
+                            return .unknown;
+                        }
+                        return pointee;
                     },
                 }
             },
@@ -2182,7 +2215,9 @@ pub const Checker = struct {
 
                     const value_type = try self.checkExpr(field_init.value);
                     const field_type = info.fields[field_index].typ;
-                    if (!value_type.eq(.unknown) and !field_type.eq(.unknown) and !value_type.eq(field_type)) {
+                    if (!value_type.eq(.unknown) and !field_type.eq(.unknown) and
+                        !value_type.eq(field_type) and !ptrTypesCompatible(field_type, value_type))
+                    {
                         try self.diags.add(
                             .type_mismatch,
                             field_init.value.span,
@@ -2215,7 +2250,7 @@ pub const Checker = struct {
 
                 // Only integer <-> integer conversions are supported at this
                 // stage. bool and str cannot be cast.
-                if (!src_type.isInteger() and !src_type.eq(.bool)) {
+                if (!src_type.isInteger()) {
                     try self.diags.add(
                         .type_mismatch,
                         cast_expr.expr.span,
@@ -2288,23 +2323,23 @@ pub const Checker = struct {
         const both_bool = lhs.eq(.bool) and rhs.eq(.bool);
 
         if (op.isArithmetic()) {
-            // Pointer arithmetic: ptr + i32, i32 + ptr, ptr - i32 yield ptr;
-            // ptr - ptr yields i32 (difference in units of pointee size).
-            if (lhs.isPtr() and rhs.isInteger()) {
-                if (op == .sub) {
-                    // ptr - i32
-                    return lhs;
-                }
-                // ptr + i32 (commutative)
-                return lhs;
-            }
-            if (rhs.isPtr() and lhs.isInteger()) {
-                // i32 + ptr (commutative)
-                return rhs;
-            }
-            if (lhs.isPtr() and rhs.isPtr()) {
-                // ptr - ptr yields i32
-                if (op == .sub) return .i32;
+            // Offsets are signed i32 values measured in units of the known
+            // pointee size. Subtraction of like-typed pointers yields the
+            // distance in those units (i32). Other pointer arithmetic is
+            // rejected here instead of failing later in a backend.
+            if (lhs.isPtr() or rhs.isPtr()) {
+                if (lhs.isPtr() and rhs.isPtr() and op == .sub and
+                    lhs.ptr.pointee.* != .unknown and lhs.eq(rhs)) return .i32;
+                if (lhs.isPtr() and lhs.ptr.pointee.* != .unknown and rhs == .i32 and
+                    (op == .add or op == .sub)) return lhs;
+                if (rhs.isPtr() and rhs.ptr.pointee.* != .unknown and lhs == .i32 and op == .add) return rhs;
+                try self.diags.add(
+                    .type_mismatch,
+                    span,
+                    "pointer arithmetic requires a known pointee and ptr +/- i32, i32 + ptr or compatible ptr - ptr",
+                    .{},
+                );
+                return .unknown;
             }
 
             // Arithmetic: both operands must be the same integer type (not bool).
@@ -2321,11 +2356,8 @@ pub const Checker = struct {
         }
 
         if (op.isComparison()) {
-            // Pointer comparison: ptr == ptr and ptr != ptr yield bool.
-            if (lhs.isPtr() and rhs.isPtr()) {
-                return .bool;
-            }
-            // Relational comparisons: both operands must be the same integer type.
+            // Relational comparisons require two integers of the same type;
+            // pointer ordering has no language-level contract.
             if (lhs.eq(.bool) or rhs.eq(.bool) or !lhs.isInteger() or !rhs.isInteger() or !lhs.eq(rhs)) {
                 try self.diags.add(
                     .type_mismatch,
@@ -2379,6 +2411,10 @@ pub const Checker = struct {
             }
             return lhs;
         }
+
+        // Equality of addresses is well-defined even for different pointee
+        // types. This never dereferences either operand.
+        if ((op == .eq or op == .ne) and lhs.isPtr() and rhs.isPtr()) return .bool;
 
         // == and != (fallback for value types that are not bitwise)
         if (!lhs.eq(rhs) or !lhs.isValue()) {
@@ -2526,7 +2562,7 @@ pub const Checker = struct {
                 }
                 continue;
             }
-            if (!actual.eq(expected)) {
+            if (!actual.eq(expected) and !ptrTypesCompatible(expected, actual)) {
                 try self.diags.add(
                     .type_mismatch,
                     args[i].span,
@@ -4141,4 +4177,115 @@ test "sema: the method receiver counts as argument 1 in the register limit" {
     defer f.deinit();
     try testing.expect(sawMessage(&f, "method 'Wide.pad' uses 7 parameter registers"));
     try testing.expect(sawMessage(&f, "call to 'Wide.pad' uses 7 registers"));
+}
+
+test "sema: generic ptr annotation keeps known pointee and static type names" {
+    var f = try Fixture.check(
+        \\fn main() -> i32 {
+        \\    var x: i32 = 1;
+        \\    var y: u8 = 2 as u8;
+        \\    let p: ptr = &x;
+        \\    let q: ptr = &y;
+        \\    let eq: bool = p == q;
+        \\    return *p;
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 0), f.diags.count());
+    const symbols = f.checked.?.symbols;
+    try testing.expectEqual(Type.i32, symbols[2].typ.ptr.pointee.*);
+    try testing.expectEqual(Type.u8, symbols[3].typ.ptr.pointee.*);
+    try testing.expectEqualStrings("ptr<i32>", symbols[2].typ.name());
+    try testing.expectEqualStrings("ptr<u8>", symbols[3].typ.name());
+    try testing.expectEqual(Type.bool, symbols[4].typ);
+}
+
+test "sema: unknown pointee and temporary addresses have diagnostics" {
+    var unknown = try Fixture.check(
+        \\fn read(p: ptr) -> i32 { return *p; }
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer unknown.deinit();
+    try testing.expect(sawMessage(&unknown, "pointee must have a known scalar type"));
+
+    var temporary = try Fixture.check("fn main() -> i32 { let p: ptr = &42; return 0; }", .{});
+    defer temporary.deinit();
+    try testing.expect(sawMessage(&temporary, "requires an addressable scalar"));
+}
+
+test "sema: bool cannot be cast to integer in the backend" {
+    var f = try Fixture.check("fn main() -> i32 { return true as i32; }", .{});
+    defer f.deinit();
+    try expectOnly(&f, .type_mismatch);
+    try testing.expect(sawMessage(&f, "cannot cast from 'bool'"));
+}
+
+test "sema: pointer arithmetic validates known pointee and operators" {
+    var multiply = try Fixture.check(
+        \\fn main() -> i32 { var x = 1; let p = &x; let bad = p * 2; return 0; }
+    , .{});
+    defer multiply.deinit();
+    try testing.expect(sawMessage(&multiply, "pointer arithmetic requires a known pointee"));
+
+    var unknown = try Fixture.check(
+        \\fn advance(p: ptr) -> ptr { return p + 1; }
+        \\fn main() -> i32 { return 0; }
+    , .{});
+    defer unknown.deinit();
+    try testing.expect(sawMessage(&unknown, "pointer arithmetic requires a known pointee"));
+
+    var relational = try Fixture.check(
+        \\fn main() -> i32 { var x = 1; var y = 2; if &x < &y { return 1; } return 0; }
+    , .{});
+    defer relational.deinit();
+    try testing.expect(sawMessage(&relational, "expects two operands of the same integer type"));
+}
+
+test "sema: typed pointers can pass through generic pointer fields and parameters" {
+    var f = try Fixture.check(
+        \\struct Box { p: ptr }
+        \\fn boxed(p: ptr) -> Box { return Box { p: p }; }
+        \\fn main() -> i32 {
+        \\    var x: i32 = 3;
+        \\    var b: Box = boxed(&x);
+        \\    b.p = &x;
+        \\    if b.p != &x { return 1; }
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try testing.expectEqual(@as(usize, 0), f.diags.count());
+}
+
+test "sema: erased pointer cannot regain a known pointee by assignment" {
+    var f = try Fixture.check(
+        \\fn erase(p: ptr) -> ptr { return p; }
+        \\fn main() -> i32 {
+        \\    var x: i32 = 3;
+        \\    var typed: ptr = &x;
+        \\    typed = erase(&x);
+        \\    return *typed;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .type_mismatch);
+    try testing.expect(sawMessage(&f, "ptr<i32>"));
+}
+
+test "sema: pointers to different structs preserve nominal identity" {
+    var f = try Fixture.check(
+        \\struct A { x: i32 }
+        \\struct B { x: i32 }
+        \\fn main() -> i32 {
+        \\    var a: A = A { x: 1 };
+        \\    var b: B = B { x: 2 };
+        \\    var p = &a;
+        \\    p = &b;
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .type_mismatch);
+    try testing.expect(sawMessage(&f, "ptr<A>"));
+    try testing.expect(sawMessage(&f, "ptr<B>"));
 }

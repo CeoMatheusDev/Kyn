@@ -1,0 +1,14 @@
+// expect-exit: 0
+// Operations on u32 above INT_MAX must remain unsigned in both backends.
+fn main() -> i32 {
+    let large: u32 = (0 - 1) as u32;
+    let small: u32 = 2 as u32;
+    if large < small { return 1; }
+    if !(large > small) { return 2; }
+    if large / small != (2147483647 as u32) { return 3; }
+    if large % small != (1 as u32) { return 4; }
+    if large >> small != (1073741823 as u32) { return 5; }
+    let signed: i32 = 0 - 16;
+    if signed >> (2 as u8) != (0 - 4) { return 6; }
+    return 0;
+}

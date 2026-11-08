@@ -1,0 +1,2 @@
+// A constant has no addressable storage; do not accept &42.
+fn main() -> i32 { let p: ptr = &42; return 0; }

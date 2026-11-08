@@ -1,0 +1,12 @@
+// expect-exit: 0
+// Internal struct layout: reserved base slot + one 8-byte slot per field.
+struct Pair { a: i32, b: i32 }
+fn main() -> i32 {
+    var point: Pair = Pair { a: 3, b: 4 };
+    let p: ptr = &point;
+    let one: ptr = p + 1;
+    if one - p != 1 { return 1; }
+    if (one - 1) != p { return 2; }
+    if (*p).a + (*p).b != 7 { return 3; }
+    return 0;
+}

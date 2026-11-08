@@ -87,8 +87,8 @@ fn llvmType(typ: sema.Type) codegen.Error![]const u8 {
         .enumeration => error.UnsupportedType,
         // `str` is pointer + length: represented by two slots.
         .str => error.UnsupportedType,
-        // A pointer is a 64-bit address.
-        .ptr => "i64",
+        // Opaque LLVM pointer; integer address arithmetic is explicit.
+        .ptr => "ptr",
         .unknown => error.UnsupportedType,
     };
 }
@@ -328,12 +328,19 @@ const FnEmitter = struct {
                 continue;
             }
             if (sym.typ == .aggregate) {
-                if (sym.struct_id >= self.checked.structs.len) return error.MiscompiledAst;
-                for (self.checked.structs[sym.struct_id].fields, 0..) |field, i| {
-                    const ty = try llvmType(field.typ);
-                    const align_value = try typeAlign(field.typ);
-                    const name = try self.varName(sym.slot + 1 + @as(u32, @intCast(i)));
-                    try self.emit("  {s} = alloca {s}, align {d}\n", .{ name, ty, align_value });
+                const fields = try self.structFields(sym.struct_id);
+                // Address-taken structs must have contiguous, stable storage.
+                // Mirror the native frame: a base word followed by fields at
+                // offsets -8, -16, ... from that base. LLVM can SROA the array
+                // when the address never escapes.
+                const words = fields.len + 1;
+                const base = try self.varName(sym.slot);
+                try self.emit("  %struct{d} = alloca [{d} x i64], align 8\n", .{ sym.slot, words });
+                try self.emit("  {s} = getelementptr inbounds [{d} x i64], ptr %struct{d}, i64 0, i64 {d}\n", .{ base, words, sym.slot, fields.len });
+                for (fields, 0..) |_, i| {
+                    try self.emit("  {s} = getelementptr inbounds i64, ptr {s}, i64 -{d}\n", .{
+                        try self.varName(sym.slot + 1 + @as(u32, @intCast(i))), base, i + 1,
+                    });
                 }
                 continue;
             }
@@ -771,18 +778,29 @@ const FnEmitter = struct {
 
             .field_access => |access| {
                 // An enum case (`Color.Red`) is tag + payload slots, not an operand.
-                if (access.resolved_enum != null) return error.UnsupportedNode;
-                const base = self.symbolAt(access.base.resolved orelse return error.MiscompiledAst);
-                if (base.typ != .aggregate) return error.MiscompiledAst;
+                if (access.resolved_enum != null) return error.MiscompiledAst;
                 const field_index = access.field_index orelse return error.MiscompiledAst;
-                if (base.struct_id >= self.checked.structs.len) return error.MiscompiledAst;
-                const field_type = self.checked.structs[base.struct_id].fields[field_index].typ;
-
-                const ty = try llvmType(field_type);
-                const align_value = try typeAlign(field_type);
-                const name = try self.varName(base.slot + 1 + field_index);
+                var struct_id: u32 = undefined;
+                var name: []const u8 = undefined;
+                if (access.base.kind == .unary and access.base.kind.unary.op == .dereference) {
+                    // `(*p).field`: the pointee is the same reverse-word
+                    // layout as a local struct, so field i is at -(i+1)*8.
+                    const value = try self.emitExpr(access.base.kind.unary.operand);
+                    if (!value.typ.isPtr() or !value.typ.ptr.has_struct_id) return error.MiscompiledAst;
+                    struct_id = value.typ.ptr.struct_id;
+                    name = try self.newTemp();
+                    try self.emit("  {s} = getelementptr inbounds i64, ptr {s}, i64 -{d}\n", .{ name, value.text, field_index + 1 });
+                } else {
+                    const base = self.symbolAt(access.base.resolved orelse return error.MiscompiledAst);
+                    if (base.typ != .aggregate) return error.MiscompiledAst;
+                    struct_id = base.struct_id;
+                    name = try self.varName(base.slot + 1 + field_index);
+                }
+                const fields = try self.structFields(struct_id);
+                if (field_index >= fields.len) return error.MiscompiledAst;
+                const field_type = fields[field_index].typ;
                 const result = try self.newTemp();
-                try self.emit("  {s} = load {s}, ptr {s}, align {d}\n", .{ result, ty, name, align_value });
+                try self.emit("  {s} = load {s}, ptr {s}, align {d}\n", .{ result, try llvmType(field_type), name, try typeAlign(field_type) });
                 return .{ .text = result, .typ = field_type };
             },
 
@@ -803,69 +821,33 @@ const FnEmitter = struct {
             // `expr as Type` — explicit integer width conversion.
             .cast => |cast_expr| {
                 const operand = try self.emitExpr(cast_expr.expr);
-                if (operand.typ == .void) return error.UnsupportedNode;
+                const dst_type = sema.Type.fromName(cast_expr.type_name.name) orelse return error.MiscompiledAst;
+                if (!operand.typ.isInteger() or !dst_type.isInteger()) return error.MiscompiledAst;
 
-                const dst_width = try self.intWidthOfTypeName(cast_expr.type_name);
+                const dst_width = dst_type.bitWidth();
                 const src_width = operand.typ.bitWidth();
-                if (dst_width == 0 or src_width == 0) return error.UnsupportedType;
-
-                const dst_typ = try llvmTypeOfWidth(dst_width);
                 if (dst_width == src_width) {
-                    // No-op conversion: keep the value, just retype it.
-                    return .{ .text = operand.text, .typ = operand.typ };
+                    // A same-width cast changes signedness even though it needs no IR instruction.
+                    return .{ .text = operand.text, .typ = dst_type };
                 }
                 const result = try self.newTemp();
+                const dst_ir = try llvmType(dst_type);
                 if (dst_width < src_width) {
-                    try self.emit("  {s} = trunc {s} {s} to {s}\\n", .{
-                        result, try llvmType(operand.typ), operand.text, dst_typ,
+                    try self.emit("  {s} = trunc {s} {s} to {s}\n", .{
+                        result, try llvmType(operand.typ), operand.text, dst_ir,
                     });
                 } else if (operand.typ.isSigned()) {
-                    try self.emit("  {s} = sext {s} {s} to {s}\\n", .{
-                        result, try llvmType(operand.typ), operand.text, dst_typ,
+                    try self.emit("  {s} = sext {s} {s} to {s}\n", .{
+                        result, try llvmType(operand.typ), operand.text, dst_ir,
                     });
                 } else {
-                    try self.emit("  {s} = zext {s} {s} to {s}\\n", .{
-                        result, try llvmType(operand.typ), operand.text, dst_typ,
+                    try self.emit("  {s} = zext {s} {s} to {s}\n", .{
+                        result, try llvmType(operand.typ), operand.text, dst_ir,
                     });
                 }
-                // Retype the operand to the destination type for the caller.
-                return .{ .text = result, .typ = try typeOfWidth(dst_width) };
+                return .{ .text = result, .typ = dst_type };
             },
         }
-    }
-
-    /// Maps an integer bit width to its LLVM type string.
-    fn llvmTypeOfWidth(width: u32) Error![]const u8 {
-        return switch (width) {
-            8 => "i8",
-            16 => "i16",
-            32 => "i32",
-            64 => "i64",
-            else => error.UnsupportedType,
-        };
-    }
-
-    /// Maps an integer bit width back to a sema.Type for result typing.
-    fn typeOfWidth(width: u32) Error!sema.Type {
-        return switch (width) {
-            8 => .i8,
-            16 => .i16,
-            32 => .i32,
-            64 => .i64,
-            else => error.UnsupportedType,
-        };
-    }
-
-    /// Resolves a type name written in `expr as Type` to its bit width.
-    /// Only fixed-width integer names are accepted here.
-    fn intWidthOfTypeName(self: *FnEmitter, tn: ast.TypeName) Error!u32 {
-        _ = self;
-        const name = tn.name;
-        if (std.mem.eql(u8, name, "i8") or std.mem.eql(u8, name, "u8")) return 8;
-        if (std.mem.eql(u8, name, "i16") or std.mem.eql(u8, name, "u16")) return 16;
-        if (std.mem.eql(u8, name, "i32") or std.mem.eql(u8, name, "u32")) return 32;
-        if (std.mem.eql(u8, name, "i64") or std.mem.eql(u8, name, "u64") or std.mem.eql(u8, name, "usize")) return 64;
-        return error.UnsupportedType;
     }
 
     /// Writes a `str` value (pointer and length) into the two slots of `dst`:
@@ -938,59 +920,183 @@ const FnEmitter = struct {
         }
     }
 
-        fn emitUnary(self: *FnEmitter, expr: *ast.Expr, unary: ast.Expr.Unary) Error!Operand {
+    fn emitUnary(self: *FnEmitter, expr: *ast.Expr, unary: ast.Expr.Unary) Error!Operand {
+        _ = expr;
+        if (unary.op == .address_of) {
+            var storage: []const u8 = undefined;
+            var pointee: sema.Type = undefined;
+            var struct_id: u32 = 0;
+            var has_struct_id = false;
+            switch (unary.operand.kind) {
+                .identifier => {
+                    const symbol = self.symbolAt(unary.operand.resolved orelse return error.MiscompiledAst);
+                    pointee = symbol.typ;
+                    storage = try self.varName(symbol.slot);
+                    if (symbol.typ == .aggregate) {
+                        struct_id = symbol.struct_id;
+                        has_struct_id = true;
+                    }
+                },
+                .field_access => |field| {
+                    const base = self.symbolAt(field.base.resolved orelse return error.MiscompiledAst);
+                    if (base.typ != .aggregate) return error.MiscompiledAst;
+                    const index = field.field_index orelse return error.MiscompiledAst;
+                    const fields = try self.structFields(base.struct_id);
+                    if (index >= fields.len) return error.MiscompiledAst;
+                    pointee = fields[index].typ;
+                    storage = try self.varName(base.slot + 1 + index);
+                },
+                else => return error.MiscompiledAst,
+            }
+            const ty = try self.arena.create(sema.Type);
+            ty.* = pointee;
+            return .{ .text = storage, .typ = .{ .ptr = .{
+                .pointee = ty,
+                .struct_id = struct_id,
+                .has_struct_id = has_struct_id,
+            } } };
+        }
+
         const operand = try self.emitExpr(unary.operand);
-        if (operand.typ == .void) return error.UnsupportedNode;
+        if (unary.op == .dereference) {
+            if (!operand.typ.isPtr()) return error.MiscompiledAst;
+            const pointee = operand.typ.ptr.pointee.*;
+            if (pointee == .unknown or pointee == .aggregate or pointee == .str) return error.MiscompiledAst;
+            const value = try self.newTemp();
+            try self.emit("  {s} = load {s}, ptr {s}, align {d}\n", .{
+                value, try llvmType(pointee), operand.text, try typeAlign(pointee),
+            });
+            return .{ .text = value, .typ = pointee };
+        }
+        if (operand.typ == .void) return error.MiscompiledAst;
         const ty = try llvmType(operand.typ);
         const result = try self.newTemp();
         switch (unary.op) {
             .neg => try self.emit("  {s} = sub {s} 0, {s}\n", .{ result, ty, operand.text }),
             .not => try self.emit("  {s} = xor i1 {s}, true\n", .{ result, operand.text }),
             .bitnot => try self.emit("  {s} = xor {s} {s}, -1\n", .{ result, ty, operand.text }),
-            .address_of, .dereference => return error.UnsupportedNode,
+            .address_of, .dereference => unreachable,
         }
-        _ = expr;
-        return .{
-            .text = result,
-            .typ = if (unary.op == .not) .bool else operand.typ,
+        return .{ .text = result, .typ = if (unary.op == .not) .bool else operand.typ };
+    }
+
+    fn isStrExpr(self: *FnEmitter, expr: *ast.Expr) bool {
+        return switch (expr.kind) {
+            .str_literal => true,
+            .identifier => if (expr.resolved) |index| self.symbolAt(index).typ == .str else false,
+            .call => |call| if (call.callee_fn) |index| self.checked.functions[index].return_type == .str else false,
+            .method_call => |call| if (call.resolved_fn) |index| self.checked.functions[index].return_type == .str else false,
+            else => false,
         };
     }
 
-        fn emitBinary(self: *FnEmitter, binary: ast.Expr.Binary) Error!Operand {
+    fn emitBinary(self: *FnEmitter, binary: ast.Expr.Binary) Error!Operand {
         if (binary.op.isLogical()) return self.emitLogical(binary);
+        if (self.isStrExpr(binary.lhs)) {
+            if (binary.op != .eq and binary.op != .ne) return error.MiscompiledAst;
+            const lhs = try self.strOperand(binary.lhs);
+            const rhs = try self.strOperand(binary.rhs);
+            const same_ptr = try self.newTemp();
+            try self.emit("  {s} = icmp eq ptr {s}, {s}\n", .{ same_ptr, lhs.ptr, rhs.ptr });
+            const same_len = try self.newTemp();
+            try self.emit("  {s} = icmp eq i64 {s}, {s}\n", .{ same_len, lhs.len, rhs.len });
+            const equal = try self.newTemp();
+            try self.emit("  {s} = and i1 {s}, {s}\n", .{ equal, same_ptr, same_len });
+            if (binary.op == .eq) return .{ .text = equal, .typ = .bool };
+            const different = try self.newTemp();
+            try self.emit("  {s} = xor i1 {s}, true\n", .{ different, equal });
+            return .{ .text = different, .typ = .bool };
+        }
 
         const lhs = try self.emitExpr(binary.lhs);
         const rhs = try self.emitExpr(binary.rhs);
-        if (lhs.typ == .void or rhs.typ == .void) return error.UnsupportedNode;
-        if (!lhs.typ.eq(rhs.typ)) return error.UnsupportedNode;
+        if (lhs.typ == .void or rhs.typ == .void) return error.MiscompiledAst;
+        if (binary.op.isArithmetic() and (lhs.typ.isPtr() or rhs.typ.isPtr())) {
+            return self.emitPointerBinary(binary.op, lhs, rhs);
+        }
+        const both_pointers = lhs.typ.isPtr() and rhs.typ.isPtr();
+        if (!lhs.typ.eq(rhs.typ) and !binary.op.isShift() and
+            !((binary.op == .eq or binary.op == .ne) and both_pointers)) return error.MiscompiledAst;
 
         const ty = try llvmType(lhs.typ);
+        var rhs_text = rhs.text;
+        // LLVM requires the shift amount to have the same bit width as the
+        // value, while Kyn permits independently typed integer operands.
+        if (binary.op.isShift() and lhs.typ.bitWidth() != rhs.typ.bitWidth()) {
+            if (!lhs.typ.isInteger() or !rhs.typ.isInteger()) return error.MiscompiledAst;
+            const casted = try self.newTemp();
+            const cast_op = if (rhs.typ.bitWidth() > lhs.typ.bitWidth()) "trunc" else "zext";
+            try self.emit("  {s} = {s} {s} {s} to {s}\n", .{ casted, cast_op, try llvmType(rhs.typ), rhs.text, ty });
+            rhs_text = casted;
+        }
         const result = try self.newTemp();
+        const signed = lhs.typ.isSigned();
 
         switch (binary.op) {
             .add => try self.emit("  {s} = add {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
             .sub => try self.emit("  {s} = sub {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
             .mul => try self.emit("  {s} = mul {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
-            .div => try self.emit("  {s} = sdiv {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
-            .mod => try self.emit("  {s} = srem {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
-            .lt => try self.emit("  {s} = icmp slt {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
-            .le => try self.emit("  {s} = icmp sle {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
-            .gt => try self.emit("  {s} = icmp sgt {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
-            .ge => try self.emit("  {s} = icmp sge {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
+            .div => try self.emit("  {s} = {s} {s} {s}, {s}\n", .{ result, if (signed) @as([]const u8, "sdiv") else "udiv", ty, lhs.text, rhs.text }),
+            .mod => try self.emit("  {s} = {s} {s} {s}, {s}\n", .{ result, if (signed) @as([]const u8, "srem") else "urem", ty, lhs.text, rhs.text }),
+            .lt => try self.emit("  {s} = icmp {s}lt {s} {s}, {s}\n", .{ result, if (signed) @as([]const u8, "s") else "u", ty, lhs.text, rhs.text }),
+            .le => try self.emit("  {s} = icmp {s}le {s} {s}, {s}\n", .{ result, if (signed) @as([]const u8, "s") else "u", ty, lhs.text, rhs.text }),
+            .gt => try self.emit("  {s} = icmp {s}gt {s} {s}, {s}\n", .{ result, if (signed) @as([]const u8, "s") else "u", ty, lhs.text, rhs.text }),
+            .ge => try self.emit("  {s} = icmp {s}ge {s} {s}, {s}\n", .{ result, if (signed) @as([]const u8, "s") else "u", ty, lhs.text, rhs.text }),
             .eq => try self.emit("  {s} = icmp eq {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
             .ne => try self.emit("  {s} = icmp ne {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
             .bitand => try self.emit("  {s} = and {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
             .bitor => try self.emit("  {s} = or {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
             .bitxor => try self.emit("  {s} = xor {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
-            .shl => try self.emit("  {s} = shl {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
-            .shr => try self.emit("  {s} = lshr {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs.text }),
+            .shl => try self.emit("  {s} = shl {s} {s}, {s}\n", .{ result, ty, lhs.text, rhs_text }),
+            .shr => try self.emit("  {s} = {s} {s} {s}, {s}\n", .{ result, if (signed) @as([]const u8, "ashr") else "lshr", ty, lhs.text, rhs_text }),
             .and_op, .or_op => unreachable,
         }
 
-        return .{
-            .text = result,
-            .typ = if (binary.op.isLogical()) .bool else lhs.typ,
-        };
+        return .{ .text = result, .typ = if (binary.op.isComparison() or binary.op == .eq or binary.op == .ne) .bool else lhs.typ };
+    }
+
+    /// Pointer math uses signed i32 offsets scaled to the pointee size. The
+    /// difference of two compatible pointers is measured in the same units.
+    fn emitPointerBinary(self: *FnEmitter, op: ast.Expr.BinaryOp, lhs: Operand, rhs: Operand) Error!Operand {
+        if (lhs.typ.isPtr() and rhs.typ.isPtr()) {
+            if (op != .sub or !lhs.typ.eq(rhs.typ)) return error.MiscompiledAst;
+            const stride = try codegen.pointeeStride(lhs.typ, self.checked.structs);
+            const left = try self.newTemp();
+            try self.emit("  {s} = ptrtoint ptr {s} to i64\n", .{ left, lhs.text });
+            const right = try self.newTemp();
+            try self.emit("  {s} = ptrtoint ptr {s} to i64\n", .{ right, rhs.text });
+            const difference = try self.newTemp();
+            try self.emit("  {s} = sub i64 {s}, {s}\n", .{ difference, left, right });
+            var units = difference;
+            if (stride != 1) {
+                units = try self.newTemp();
+                try self.emit("  {s} = sdiv i64 {s}, {d}\n", .{ units, difference, stride });
+            }
+            const result = try self.newTemp();
+            try self.emit("  {s} = trunc i64 {s} to i32\n", .{ result, units });
+            return .{ .text = result, .typ = .i32 };
+        }
+
+        const pointer = if (lhs.typ.isPtr()) lhs else rhs;
+        const offset = if (lhs.typ.isPtr()) rhs else lhs;
+        if (offset.typ != .i32 or (op != .add and op != .sub) or (op == .sub and !lhs.typ.isPtr())) return error.MiscompiledAst;
+        const stride = try codegen.pointeeStride(pointer.typ, self.checked.structs);
+        const extended = try self.newTemp();
+        try self.emit("  {s} = sext i32 {s} to i64\n", .{ extended, offset.text });
+        var delta = extended;
+        if (stride != 1) {
+            delta = try self.newTemp();
+            try self.emit("  {s} = mul i64 {s}, {d}\n", .{ delta, extended, stride });
+        }
+        if (op == .sub) {
+            const negated = try self.newTemp();
+            try self.emit("  {s} = sub i64 0, {s}\n", .{ negated, delta });
+            delta = negated;
+        }
+        const result = try self.newTemp();
+        // No 'inbounds': the language has no bounds/lifetime proof yet.
+        try self.emit("  {s} = getelementptr i8, ptr {s}, i64 {s}\n", .{ result, pointer.text, delta });
+        return .{ .text = result, .typ = pointer.typ };
     }
 
     /// `&&` and `||` with short-circuit, using blocks and `phi`.
@@ -1303,7 +1409,7 @@ test "llvm: code after return is not emitted" {
     try support.expectAllBlocksTerminated(ir);
 }
 
-test "llvm: struct becomes one alloca per field (scalar replacement)" {
+test "llvm: struct has contiguous reverse-word storage for address-of" {
     var f = try support.Fixture.build(
         \\struct Ponto { x: i32, y: bool }
         \\fn main() -> i32 {
@@ -1316,13 +1422,15 @@ test "llvm: struct becomes one alloca per field (scalar replacement)" {
     defer f.deinit();
     const ir = try emitFixture(&f);
 
-    try support.expectContains(ir, "%v1 = alloca i32, align 4");
-    try support.expectContains(ir, "%v2 = alloca i1, align 1");
+    try support.expectContains(ir, "%struct0 = alloca [3 x i64], align 8");
+    try support.expectContains(ir, "%v0 = getelementptr inbounds [3 x i64], ptr %struct0, i64 0, i64 2");
+    try support.expectContains(ir, "%v1 = getelementptr inbounds i64, ptr %v0, i64 -1");
+    try support.expectContains(ir, "%v2 = getelementptr inbounds i64, ptr %v0, i64 -2");
     try support.expectContains(ir, "store i32 7, ptr %v1, align 4");
     try support.expectContains(ir, "store i1 true, ptr %v2, align 1");
     try support.expectContains(ir, "load i32, ptr %v1, align 4");
     try support.expectContains(ir, "ret i32");
-    // No aggregate types: a struct never appears as an LLVM type.
+    // By-value calls still flatten parameters and return an aggregate.
     try std.testing.expect(std.mem.indexOf(u8, ir, "alloca %") == null);
 }
 
@@ -1337,8 +1445,10 @@ test "llvm: struct copy loads and stores each field" {
     );
     defer f.deinit();
     const ir = try emitFixture(&f);
-    try support.expectContains(ir, "%v1 = alloca i32, align 4");
-    try support.expectContains(ir, "%v4 = alloca i32, align 4");
+    try support.expectContains(ir, "%struct0 = alloca [3 x i64], align 8");
+    try support.expectContains(ir, "%struct3 = alloca [3 x i64], align 8");
+    try support.expectContains(ir, "%v1 = getelementptr inbounds i64, ptr %v0, i64 -1");
+    try support.expectContains(ir, "%v4 = getelementptr inbounds i64, ptr %v3, i64 -1");
     try support.expectContains(ir, "store i32 1, ptr %v1, align 4");
     try support.expectContains(ir, "ptr %v4, align 4");
 }
@@ -1691,6 +1801,77 @@ test "llvm: methods are mangled Type_method and the receiver is argument 0" {
     try testing.expect(std.mem.indexOf(u8, ir, "@moved(") == null);
 }
 
+test "llvm: casts preserve destination signedness and emit real line breaks" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    let a: u8 = 255 as u8;
+        \\    let b: u32 = a as u32;
+        \\    let c: i8 = (0 - 5) as i8;
+        \\    let d: i32 = c as i32;
+        \\    if (a as u8) > (128 as u8) { return (b as i32) + d; }
+        \\    return 0;
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+    try support.expectContains(ir, "trunc i32 255 to i8\n    store i8");
+    try support.expectContains(ir, "zext i8");
+    try support.expectContains(ir, "sext i8");
+    try support.expectContains(ir, "icmp ugt i8");
+    try testing.expect(std.mem.indexOf(u8, ir, "\\n  store") == null);
+    try support.expectAllBlocksTerminated(ir);
+}
+
+test "llvm: same-width shifts with different signedness need no cast" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    let signed: i32 = 0 - 16;
+        \\    let amount: u32 = 2 as u32;
+        \\    return signed >> amount;
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+    try support.expectContains(ir, "ashr i32");
+    try testing.expect(std.mem.indexOf(u8, ir, "zext i32") == null);
+    try testing.expect(std.mem.indexOf(u8, ir, "trunc i32") == null);
+}
+
+test "llvm: comparisons are i1 when stored and when returned" {
+    var f = try support.Fixture.build(
+        \\fn equal(a: i32, b: i32) -> bool { return a == b; }
+        \\fn main() -> i32 {
+        \\    let yes = 4 < 5;
+        \\    if yes && equal(1, 1) { return 0; }
+        \\    return 1;
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+    try support.expectContains(ir, "store i1 %t0, ptr %v0, align 1");
+    try support.expectContains(ir, "ret i1 %t2");
+    try support.expectAllBlocksTerminated(ir);
+}
+
+test "llvm: string equality compares both components and inequality negates it" {
+    var f = try support.Fixture.build(
+        \\fn different(a: str, b: str) -> bool { return a != b; }
+        \\fn main() -> i32 {
+        \\    let a = "same";
+        \\    let b = "same";
+        \\    if a == b && !different(a, b) { return 0; }
+        \\    return 1;
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+    try support.expectContains(ir, "icmp eq ptr");
+    try support.expectContains(ir, "icmp eq i64");
+    try support.expectContains(ir, "and i1");
+    try support.expectContains(ir, "xor i1");
+    try support.expectAllBlocksTerminated(ir);
+}
+
 test "llvm: an enum constructor returned from a function and stored from a call" {
     // Regression: `return Shape.Circle(2)` builds the aggregate with
     // `insertvalue`, while `let s = make()` destructures `{ i32, i32 }` with
@@ -1719,4 +1900,46 @@ test "llvm: an enum constructor returned from a function and stored from a call"
     try support.expectContains(ir, "insertvalue { i32, i32 } undef, i32 0, 0");
     try support.expectContains(ir, "call { i32, i32 } @make(i32 3)");
     try support.expectContains(ir, "extractvalue { i32, i32 }");
+}
+
+test "llvm: typed pointers use opaque ptr and contiguous struct fields" {
+    var f = try support.Fixture.build(
+        \\struct Point { x: i32, y: i32 }
+        \\fn main() -> i32 {
+        \\    var p = Point { x: 7, y: 8 };
+        \\    let sp: ptr = &p;
+        \\    let xp: ptr = &p.x;
+        \\    if sp == &p { return (*sp).y + *xp; }
+        \\    return 0;
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+    try support.expectContains(ir, "%struct0 = alloca [3 x i64], align 8");
+    try support.expectContains(ir, "store ptr %v0, ptr %v3, align 8");
+    try support.expectContains(ir, "store ptr %v1, ptr %v4, align 8");
+    try support.expectContains(ir, "getelementptr inbounds i64, ptr %t");
+    try support.expectContains(ir, "icmp eq ptr");
+    try support.expectContains(ir, "load i32, ptr %t");
+    try support.expectAllBlocksTerminated(ir);
+}
+
+test "llvm: pointer arithmetic scales signed offsets and returns i32 distance" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    var x: i32 = 4;
+        \\    let p = &x;
+        \\    let next = p + 1;
+        \\    let back = next - 1;
+        \\    return next - back;
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+    try support.expectContains(ir, "sext i32 1 to i64");
+    try support.expectContains(ir, "mul i64 %t");
+    try support.expectContains(ir, "getelementptr i8, ptr");
+    try support.expectContains(ir, "sdiv i64 %t");
+    try support.expectContains(ir, "trunc i64 %t");
+    try support.expectAllBlocksTerminated(ir);
 }

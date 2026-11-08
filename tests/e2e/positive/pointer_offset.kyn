@@ -1,0 +1,15 @@
+// expect-exit: 0
+// One-past addresses are not dereferenced; offsets are pointee-sized.
+fn main() -> i32 {
+    var value: i32 = 11;
+    let p: ptr = &value;
+    let one: ptr = p + 1;
+    let back: ptr = one - 1;
+    let also_one: ptr = 1 + p;
+    if one != also_one { return 1; }
+    if back != p { return 2; }
+    if one - p != 1 { return 3; }
+    if p - one != (0 - 1) { return 4; }
+    if *back != 11 { return 5; }
+    return 0;
+}
