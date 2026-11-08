@@ -1,8 +1,8 @@
-# Artefatos de build do Zig (build.zig / build.zig.zon)
+# Zig build artifacts (build.zig / build.zig.zon)
 .zig-cache/
 zig-cache/
 zig-out/
 
-# Binário instalado pela CLI
+# Binary installed by the CLI
 kync
 *.o
