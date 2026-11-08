@@ -21,7 +21,8 @@ test("indexes top-level declarations and methods with qualified names", () => {
 test("tokenAt returns only identifier spans", () => {
   const index = indexSource("fn main() {}", "file:///a.kyn");
   assert.equal(tokenAt(index, 3).text, "main");
-  assert.equal(tokenAt(index, 0), null);
+  assert.equal(tokenAt(index, 0).text, "fn");
+  assert.equal(tokenAt(index, 2), null);
   assert.equal(tokenAt(index, 7), null);
 });
 
