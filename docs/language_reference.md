@@ -170,8 +170,11 @@ operators. Use parentheses to disambiguate when mixing them with `+`/`-` or
 
 ### Pointers (`ptr`, `&`, `*`)
 
-**Implemented:** pointer values (`ptr<T>`), address-of (`&var`) and dereference
-(`*ptr`). A pointer is address-sized (one 64-bit register). The pointee type is
+**Implemented:** pointer values (described semantically as `ptr<T>`), address-of
+(`&var`) and dereference (`*ptr`). The source annotation syntax is `ptr`; the
+`ptr<T>` form describes the inferred pointee type and is not accepted as a
+source-level generic type expression. A pointer is address-sized (one 64-bit
+register). The pointee type is
 tracked: `&` applied to a value of type `T` yields `ptr<T>`, and `*` applied to
 a `ptr<T>` yields `T`. Writing `ptr` (without a pointee) means `ptr<unknown>`,
 which is assignment-compatible with any `ptr<T>`. Pointers can be stored in
