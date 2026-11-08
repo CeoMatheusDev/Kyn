@@ -8,9 +8,10 @@
 (`42421025867`). PR #17 (`print_i32`) mesclado como `87903db` e PR #18
 (docs) como `3be9df0`; CI verde nos runs `42423945656`/`42424327653` (PRs) e
 `42424147963`/`42424509215` (`main`). PR #19 (`str` por valor) → `9ec07be`;
-PR #20 e #21 (registros) → `2a68d9a`/`da92f44`; PR #22 (último registro) →
-`d6eb534`, base do ciclo atual (struct por valor), cujo PR será aberto sobre
-`0.3.7-alpha.1`.
+PR #20/#21/#22 (registros) → `2a68d9a`/`da92f44`/`d6eb534`. O ciclo atual
+(struct por valor) foi integrado pelo PR #23 como `1c80a7b`; CI verde nos runs
+`42427966554` (PR) e `42428126584` (`main`), e a tag **`v0.3.7-alpha.1`** foi
+publicada em `1c80a7b` com release no GitHub.
 **Versão do projeto:** `0.3.7-alpha.1`
 **Última validação:** 2026-11-07 — local (Zig 0.17.0 + GNU `as`/`ld`, Linux
 x86-64): `zig build`, `zig build test` (204 testes), `zig build e2e` (102/102,
@@ -179,9 +180,12 @@ qualificados/seletivos e pacotes.
 12. **Atribuição de diagnósticos por arquivo:** cada `ast.Function` carrega
     `file_id`, `Diagnostic.file` indexa `Result.sources` e a CLI imprime o
     `arquivo:linha:coluna` correto mesmo para erros em módulos importados.
-13. **Versionamento:** `0.3.6-alpha.1` (incrementada a cada ciclo integrado;
-    fonte única em `build.zig.zon`); entradas antigas do CHANGELOG (até
-    `v2.3.0`) marcadas como não comprovadas.
+13. **Versionamento e publicação:** SemVer com pré-release `alpha`;
+    `build.zig.zon` é a fonte única e a versão sobe a cada ciclo integrado.
+    Ciclo validado (testes + e2e + IR estrito verdes no CI de `main`) recebe
+    **tag anotada `vX.Y.Z-alpha.N`** e release no GitHub — a primeira é
+    `v0.3.7-alpha.1` (2026-11-07, commit `1c80a7b`); entradas antigas do
+    CHANGELOG (até `v2.3.0`) seguem marcadas como não comprovadas.
 14. **CI:** GitHub Actions em `ubuntu-24.04`; a toolchain Zig vem do wheel
     oficial do PyPI (`ziglang==0.17.0.post0`) em um venv, o mesmo caminho
     documentado para o desenvolvimento local — o CI valida a própria receita.
@@ -336,7 +340,7 @@ fix-it, JSON/LSP) → self-hosting em Kyn.
 | Ciclo 6 (2026-11-07) | `str` e `print`: literal de string como expressão, `ast.Expr.Call.builtin`, `Type.str` em dois slots (ponteiro + tamanho), `codegen.StrPool` deduplicando literais, texto em `.rodata` com syscall `write` no backend nativo e `@.strN` + `declare i64 @write` no IR; `print` embutido (um `str`, saída `void`, nome reservado) e restrições diagnosticadas (parâmetro/retorno/campo `str`, aritmética, condição, `==`/`!=`, literal solto); correção de contrato em `let`/`var` com `void`; `tools/e2e.sh` compara `// expect-stdout:`; 29 testes novos (169 no total), 4 fixtures com `print` + 1 módulo + 4 negativas (86/86), `validate-ir` com 71 módulos; versão `0.3.4-alpha.1`. Integrado via PR #15. | Sim: local (162 testes do compilador, 86/86 e2e com stdout, `fmt --check`, saída de binário via `as`/`ld`) e CI do PR #15 (run `42420648098`) verde com IR estrito; suíte local retestada em `main` após o merge |
 | Ciclo 7 (2026-11-07) | `print_i32`: `ast.Expr.Builtin` com `print_i32` e checagem genérica de builtins (aridade, tipo esperado e nome reservado derivados do enum); rotina `kyn_print_i32` emitida uma vez por programa em `.text` no backend nativo (`divl` unsigned, buffer de 12 bytes, sem libc) e `@kyn_print_i32` no IR (`alloca [12 x i8]`, `phi`, `urem`/`udiv`, `select`, `zext`); 12 testes novos (181 no total), 4 fixtures novas com stdout conferido (inclui INT_MIN) + 2 negativas (92/92), `validate-ir` com 75 módulos; versão `0.3.5-alpha.1`. Integrado via PR #17 (`87903db`). | Sim: local (174 testes do compilador, 92/92 e2e com stdout, `fmt --check`, execução via `as`/`ld`, IR conferido) e CI runs `42423945656` (PR) e `42424147963` (`main`), ambos verdes com IR estrito; suíte local retestada em `main` após o merge |
 | Ciclo 8 (2026-11-07) | `str` por valor em parâmetros e retornos: `Type.isValue()` inclui `.str` e novo `Type.registerWords()` (2 para `str`); limite de 6 registradores por assinatura contado em palavras (`função '...' ocupa N registradores...` / `chamada de '...' ocupa N ...`), substituindo `max_params`; backends com ABI própria (`(%rdi,%rsi)`, `(%rdx,%rcx)`, `(%r8,%r9)` e retorno `%rax`/`%rdx` no x86-64; `ptr`+`i64` e `{ ptr, i64 }` com `insertvalue`/`extractvalue` no IR), incluindo caminho rápido para um argumento e desempilhamento inverso para vários; 12 testes novos e 2 negativos obsoletos substituídos (193 no total), 3 fixtures novas com stdout + 1 módulo importado com `str` + 2 negativas novas (97/97), `validate-ir` com 79 módulos; versão `0.3.6-alpha.1`. Integrado via PR #19 (`9ec07be`). | Sim: local (186 testes do compilador, 97/97 e2e, `fmt --check`, execução via `as`/`ld` de `eco`/`titulo`/`marca` aninhados, IR conferido à mão) e CI runs `42425605484` (PR #19) e `42425757025` (`main`), ambos verdes com IR estrito; suíte local retestada em `main` após o merge |
-| Ciclo 9 (2026-11-07, atual) | Struct por valor em parâmetros, argumentos e retornos: `FunctionInfo.param_struct_ids`/`return_struct_id` e `structIdOfExpr` reconhecendo chamadas (inferência de `let` preserva o struct), `sema.registerWordsOf` como fonte única do limite de 6 registradores (campo = 1, `str` = 2), identidade nominal verificada em argumento/retorno/anotação e retorno limitado a 6 campos; x86-64 com entrada um registrador por campo, chamadas empilhando campo a campo e retorno em `%eax`/`%edx`/`%ecx`/`%r8d`/`%r9d`/`%r10d` (campos avaliados na pilha para não clobberar uns aos outros); IR com parâmetros achatados, retorno agregado `{ i32, i1, … }` e `insertvalue`/`extractvalue`; 11 testes novos (204 no total), 3 fixtures e2e novas + 1 módulo com struct por valor + 2 negativas (102/102), `validate-ir` com 83 módulos; **novo `docs/tutorial.md`** com 20 blocos verificados; versão `0.3.7-alpha.1`. | Sim: local (197 testes do compilador, 102/102 e2e, `fmt --check`, execução via `as`/`ld` de `origem`/`desloca`/`eco`/`par`, IR conferido à mão, tutorial verificado bloco a bloco); CI do PR e de `main` registrados no cabeçalho |
+| Ciclo 9 (2026-11-07, atual) | Struct por valor em parâmetros, argumentos e retornos: `FunctionInfo.param_struct_ids`/`return_struct_id` e `structIdOfExpr` reconhecendo chamadas (inferência de `let` preserva o struct), `sema.registerWordsOf` como fonte única do limite de 6 registradores (campo = 1, `str` = 2), identidade nominal verificada em argumento/retorno/anotação e retorno limitado a 6 campos; x86-64 com entrada um registrador por campo, chamadas empilhando campo a campo e retorno em `%eax`/`%edx`/`%ecx`/`%r8d`/`%r9d`/`%r10d` (campos avaliados na pilha para não clobberar uns aos outros); IR com parâmetros achatados, retorno agregado `{ i32, i1, … }` e `insertvalue`/`extractvalue`; 11 testes novos (204 no total), 3 fixtures e2e novas + 1 módulo com struct por valor + 2 negativas (102/102), `validate-ir` com 83 módulos; **novo `docs/tutorial.md`** com 20 blocos verificados; tag `v0.3.7-alpha.1`; versão `0.3.7-alpha.1`. Integrado via PR #23 (`1c80a7b`). | Sim: local (197 testes do compilador, 102/102 e2e, `fmt --check`, execução via `as`/`ld` de `origem`/`desloca`/`eco`/`par`, IR conferido à mão, tutorial verificado bloco a bloco) e CI runs `42427966554` (PR #23) e `42428126584` (`main`), ambos verdes com IR estrito; suíte local retestada em `main` após o merge; tag `v0.3.7-alpha.1` publicada |
 
 ---
 

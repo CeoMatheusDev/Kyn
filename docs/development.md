@@ -140,6 +140,22 @@ manualmente. Em `ubuntu-24.04` o workflow:
 A ausência de LLVM no CI **falha** o build, por isso a validação do IR não pode
 ser ignorada silenciosamente.
 
+## Publicação (SemVer)
+
+A versão vive só em `build.zig.zon` e é incrementada a cada ciclo integrado:
+
+- `MAJOR` muda quando a especificação da linguagem ganha contrato estável
+  (1.0.0 é o marco de estabilização).
+- `MINOR` acompanha cada conjunto de recursos integrado (`0.3.7`, `0.4.0`, …).
+- pré-release `-alpha.N` cobre ciclos incrementais dentro do mesmo `MINOR`.
+
+Um ciclo só recebe tag depois que o CI de `main` fica verde com
+`zig fmt --check`, `zig build test`, `zig build e2e` e
+`zig build validate-ir-strict`. As tags são anotadas
+(`git tag -a vX.Y.Z-alpha.N`) e acompanhadas de uma release no GitHub com
+destaques, evidências de validação e a lista do que **ainda não existe**.
+Primeira tag publicada: `v0.3.7-alpha.1` (commit `1c80a7b`).
+
 ## Estrutura
 
 ```text

@@ -46,7 +46,13 @@ retornos, com identidade nominal verificada.
   `docs/architecture.md` (contrato de chamada de struct),
   `docs/language_reference.md`, `docs/syntax.ebnf`, `docs/status.md`,
   `docs/development.md`, `README.md`, `ROADMAP.md` e `DEVELOPMENT_STATE.md`.
-- **Versão:** `0.3.7-alpha.1` (derivada de `build.zig.zon`).
+- **Versão:** `0.3.7-alpha.1` (derivada de `build.zig.zon`), publicada como tag
+  anotada `v0.3.7-alpha.1` com release no GitHub — primeira tag do projeto e
+  marco da política SemVer: todo ciclo validado (testes + e2e + IR estrito
+  verdes no CI de `main`) recebe tag `vX.Y.Z-alpha.N`.
+- **Integração:** PR #23 mesclado em `main` como `1c80a7b`; CI verde nos runs
+  `42427966554` (PR) e `42428126584` (`main`), com `zig fmt --check`, 204
+  testes, 102 casos e2e e `validate-ir-strict` sobre 83 módulos.
 
 ## [v0.3.6-alpha.1] — 2026-11-07
 
