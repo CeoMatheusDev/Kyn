@@ -12,6 +12,7 @@
 //!
 //! The AST is not modified structurally. Symbols, signatures and semantic
 //! metadata are allocated from the compilation arena supplied to Checker.
+
 const std = @import("std");
 const ast = @import("../ast/ast.zig");
 const diagnostics = @import("../diagnostics.zig");
