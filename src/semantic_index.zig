@@ -13,6 +13,7 @@ pub const Symbol = struct {
     name: []const u8,
     kind: []const u8,
     file: u32,
+    /// UTF-8 byte offsets in the source file (editor clients convert as needed).
     start: u32,
     end: u32,
     line: u32,
