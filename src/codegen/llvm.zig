@@ -512,9 +512,9 @@ const FnEmitter = struct {
                     self.block().terminated = true;
                 } else if (self.info.return_type == .enumeration) {
                     const expr = maybe_expr orelse return error.MiscompiledAst;
-                    // A call returning an enum already is the aggregate.
-                    if (expr.kind == .call or expr.kind == .method_call) {
-                        const ref = (try callRefOf(expr)) orelse return error.MiscompiledAst;
+                    // A call (free or method) returning an enum already is the
+                    // aggregate; a constructor is built by `enumOperand`.
+                    if (try callRefOf(expr)) |ref| {
                         const direct = try self.emitEnumCall(ref.index, ref.site);
                         try self.emit("  ret {{ i32, i32 }} {s}\n", .{direct});
                         self.block().terminated = true;
@@ -530,9 +530,9 @@ const FnEmitter = struct {
                 } else if (self.info.return_type == .aggregate) {
                     const expr = maybe_expr orelse return error.MiscompiledAst;
                     const aggregate_type = try self.structType(self.info.return_struct_id);
-                    // A call returning a struct already is the aggregate: return it directly.
-                    if (expr.kind == .call or expr.kind == .method_call) {
-                        const ref = (try callRefOf(expr)) orelse return error.MiscompiledAst;
+                    // A call (free or method) returning a struct already is the
+                    // aggregate: return it directly.
+                    if (try callRefOf(expr)) |ref| {
                         const direct = try self.emitStructCall(ref.index, ref.site);
                         try self.emit("  ret {s} {s}\n", .{ aggregate_type, direct });
                         self.block().terminated = true;
@@ -1607,4 +1607,34 @@ test "llvm: methods are mangled Type_method and the receiver is argument 0" {
     // No symbol leaks the unmangled name.
     try testing.expect(std.mem.indexOf(u8, ir, "@sum(") == null);
     try testing.expect(std.mem.indexOf(u8, ir, "@moved(") == null);
+}
+
+test "llvm: an enum constructor returned from a function and stored from a call" {
+    // Regression: `return Shape.Circle(2)` builds the aggregate with
+    // `insertvalue`, while `let s = make()` destructures `{ i32, i32 }` with
+    // `extractvalue`; a call in both positions must not be confused with a
+    // constructor.
+    var f = try support.Fixture.build(
+        \\enum Shape { Circle(i32), Empty }
+        \\fn make(size: i32) -> Shape { return Shape.Circle(size); }
+        \\fn width(shape: Shape) -> i32 {
+        \\    var result: i32 = 0;
+        \\    switch shape {
+        \\        Circle(r) => { result = r; }
+        \\        Empty => { result = 0; }
+        \\    }
+        \\    return result;
+        \\}
+        \\fn main() -> i32 {
+        \\    let shape = make(3);
+        \\    return width(shape) + width(make(4));
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+    try support.expectAllBlocksTerminated(ir);
+    try support.expectContains(ir, "define { i32, i32 } @make(i32 %arg0) {");
+    try support.expectContains(ir, "insertvalue { i32, i32 } undef, i32 0, 0");
+    try support.expectContains(ir, "call { i32, i32 } @make(i32 3)");
+    try support.expectContains(ir, "extractvalue { i32, i32 }");
 }
