@@ -1,21 +1,34 @@
 {
   "name": "kyn-language",
   "displayName": "Kyn Language Support",
-  "description": "Syntax highlighting and editor support for the Kyn programming language.",
-  "version": "0.1.0",
+  "description": "Language support, compiler diagnostics and build commands for the Kyn programming language.",
+  "version": "0.2.0",
   "publisher": "ceomatheusdev",
   "license": "Apache-2.0",
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Other"
   ],
   "keywords": [
     "kyn",
     "language",
-    "syntax"
+    "compiler",
+    "diagnostics",
+    "llvm",
+    "assembly"
   ],
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "onLanguage:kyn",
+    "workspaceContains:*.kyn"
+  ],
+  "scripts": {
+    "check": "node --check src/extension.js",
+    "package": "vsce package"
+  },
   "contributes": {
     "languages": [
       {
@@ -42,6 +55,85 @@
         "language": "kyn",
         "path": "./snippets/kyn.json"
       }
-    ]
-  }
+    ],
+    "configuration": {
+      "title": "Kyn",
+      "properties": {
+        "kyn.compilerPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to kync. Empty auto-detects zig-out/bin/kync, then searches PATH."
+        },
+        "kyn.checkOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run kync check when a Kyn file is saved."
+        },
+        "kyn.checkOnType": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run kync check after edits."
+        },
+        "kyn.checkDebounce": {
+          "type": "number",
+          "default": 450,
+          "minimum": 100,
+          "maximum": 5000,
+          "description": "Edit debounce in milliseconds."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "kyn.checkCurrentFile",
+        "title": "Kyn: Check Current File"
+      },
+      {
+        "command": "kyn.emitLLVM",
+        "title": "Kyn: Emit LLVM IR"
+      },
+      {
+        "command": "kyn.emitAssembly",
+        "title": "Kyn: Emit x86-64 Assembly"
+      },
+      {
+        "command": "kyn.checkWorkspace",
+        "title": "Kyn: Check Open Kyn Files"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "kyn.checkCurrentFile",
+          "when": "resourceLangId == kyn",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "kyn.checkCurrentFile",
+          "when": "resourceLangId == kyn",
+          "group": "navigation"
+        },
+        {
+          "command": "kyn.emitLLVM",
+          "when": "resourceLangId == kyn",
+          "group": "navigation@2"
+        },
+        {
+          "command": "kyn.emitAssembly",
+          "when": "resourceLangId == kyn",
+          "group": "navigation@3"
+        }
+      ]
+    }
+  },
+  "files": [
+    "src/**",
+    "syntaxes/**",
+    "snippets/**",
+    "language-configuration.json",
+    "README.md",
+    "LICENSE*"
+  ]
 }
