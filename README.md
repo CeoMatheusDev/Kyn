@@ -19,7 +19,7 @@ The repository currently contains a Zig bootstrap compiler, an experimental Kyn 
 | Language features | Fixed-width integers, booleans, strings, structs, enums, methods, pointers, imports and control flow |
 | Standard library | Experimental; APIs and contracts are incomplete |
 | Self-hosting | Not implemented; Kyn compiler files are prototypes/placeholders |
-| Editor support | VS Code extension with compiler diagnostics, static completions, document outline and LLVM/Assembly emit commands |
+| Editor support | VS Code extension with compiler diagnostics, compiler-resolved definition/reference navigation, workspace symbol search, static completions, outline and LLVM/Assembly emit commands |
 | Stability | Experimental; syntax, semantics and ABI may change |
 
 For exact feature coverage, limitations and validation evidence, see [Implementation status](docs/status.md).

@@ -19,6 +19,7 @@ const ast = @import("ast/ast.zig");
 const sema = @import("sema/sema.zig");
 const codegen = @import("codegen/codegen.zig");
 const diagnostics = @import("diagnostics.zig");
+const semantic_index = @import("semantic_index.zig");
 
 pub const Action = enum {
     /// Lexer + parser + semantics only.
@@ -47,6 +48,11 @@ pub const Source = struct {
     text: []const u8,
 };
 
+pub const SemanticSnapshot = struct {
+    program: *ast.Program,
+    checked: sema.Checked,
+};
+
 pub const Result = struct {
     gpa: std.mem.Allocator,
     arena: *std.heap.ArenaAllocator,
@@ -55,6 +61,8 @@ pub const Result = struct {
     output: ?[]const u8 = null,
     /// Arquivos lidos, indexados por `diagnostics.Diagnostic.file`.
     sources: []const Source = &.{},
+    /// Compiler-resolved AST and symbol tables, present after successful semantics.
+    semantic: ?SemanticSnapshot = null,
 
     pub fn deinit(self: Result) void {
         self.arena.deinit();
@@ -310,6 +318,7 @@ fn runPipeline(result: *Result, program: *ast.Program, options: Options) Error!v
     const checked = try checker.checkProgram(program);
 
     if (diags.hasErrors()) return;
+    result.semantic = .{ .program = program, .checked = checked };
     if (options.action == .check) return;
 
     const output = codegen.generate(a, program, &checked, options.backend) catch |err| switch (err) {
@@ -326,6 +335,17 @@ fn runPipeline(result: *Result, program: *ast.Program, options: Options) Error!v
     };
 
     result.output = output;
+}
+
+/// Serializes the successful semantic snapshot for language tooling.
+pub const SemanticError = Error || error{SemanticSnapshotUnavailable};
+
+pub fn semanticJson(result: *Result) SemanticError![]const u8 {
+    const snapshot = result.semantic orelse return error.SemanticSnapshotUnavailable;
+    const arena = result.arena.allocator();
+    const paths = try arena.alloc([]const u8, result.sources.len);
+    for (result.sources, 0..) |source, i| paths[i] = source.path;
+    return semantic_index.generate(arena, snapshot.program, &snapshot.checked, paths);
 }
 
 /// Renders every diagnostic, each with its correct source file.
@@ -686,4 +706,19 @@ test "driver: duplicated struct across modules cites the source file" {
     const diag = result.diags.last().?;
     try testing.expectEqual(@as(u32, 1), diag.file); // the imported module repeats 'P'
     try testing.expect(std.mem.indexOf(u8, diag.message, "struct 'P' already declared in 'main.kyn'") != null);
+}
+
+test "driver: semantic JSON exposes resolved symbol identities" {
+    var result = try compile(
+        testing.allocator,
+        "fn twice(x: i32) -> i32 { let y: i32 = x; return y + x; } fn main() -> i32 { return twice(21); }",
+        .{ .require_main = true },
+    );
+    defer result.deinit();
+    try testing.expect(!result.diags.hasErrors());
+    const json = try semanticJson(&result);
+    try testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"function\"") != null);
+    try testing.expect(std.mem.indexOf(u8, json, "\"role\":\"call\"") != null);
+    try testing.expect(std.mem.indexOf(u8, json, "\"role\":\"read\"") != null);
+    try testing.expect(std.mem.indexOf(u8, json, "\"target\":\"function:0\"") != null);
 }

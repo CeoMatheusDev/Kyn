@@ -52,12 +52,14 @@ zig build run -- --help
 kync <command> [options] <file.kyn>      # loads the file and its imports
 
 check <file>      validates syntax and semantics, no code generation
+symbols <file>    emits compiler-resolved symbols and references as JSON
 emit <file>       emits the selected backend artifact
 
 --llvm            textual LLVM IR (default)
 --asm             x86-64 assembly (Linux, System V)
 -o <file>         writes the output to a file (default: stdout)
 --lib             does not require 'fn main' (library unit)
+--json            JSON output for the symbols command
 -h, --help        help
 -V, --version     version and backends
 ```
@@ -80,6 +82,7 @@ Examples:
 
 ```sh
 zig-out/bin/kync check tests/e2e/modules/import_nested/main.kyn
+zig-out/bin/kync symbols --json --lib tests/e2e/modules/import_nested/main.kyn
 zig-out/bin/kync check tests/e2e/positive/fib.kyn
 zig-out/bin/kync emit --llvm tests/e2e/positive/fib.kyn -o /tmp/fib.ll
 zig-out/bin/kync emit --asm  tests/e2e/positive/fib.kyn -o /tmp/fib.s
@@ -164,6 +167,7 @@ src/
   root.zig             # public API ("kyn" module)
   main.zig             # kync CLI
   driver.zig           # lexer -> parser -> sema -> backend pipeline + import loader
+  semantic_index.zig   # compiler-resolved symbol/reference JSON index
   span.zig             # offsets/line/column
   diagnostics.zig      # diagnostics and rendering
   lexer/lexer.zig      # tokens with spans

@@ -1,8 +1,8 @@
 {
   "name": "kyn-language",
   "displayName": "Kyn Language Support",
-  "description": "Language support, compiler diagnostics and build commands for the Kyn programming language.",
-  "version": "0.2.0",
+  "description": "Compiler-resolved navigation, diagnostics and language tooling for the Kyn programming language.",
+  "version": "0.4.0",
   "publisher": "ceomatheusdev",
   "license": "Apache-2.0",
   "engines": {
@@ -18,7 +18,12 @@
     "compiler",
     "diagnostics",
     "llvm",
-    "assembly"
+    "assembly",
+    "go-to-definition",
+    "references",
+    "workspace-symbols",
+    "semantic-navigation",
+    "compiler-index"
   ],
   "main": "./src/extension.js",
   "activationEvents": [
@@ -26,8 +31,9 @@
     "workspaceContains:*.kyn"
   ],
   "scripts": {
-    "check": "node --check src/extension.js",
-    "package": "vsce package"
+    "check": "node --check src/extension.js && node --check src/index.js",
+    "package": "vsce package",
+    "test": "node --test"
   },
   "contributes": {
     "languages": [

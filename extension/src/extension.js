@@ -3,6 +3,7 @@ const vscode = require("vscode");
 const cp = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
+const { validateSnapshot, filePathOf, targetAt, findSymbol, referencesFor, remapSnapshotOffsets } = require("./index");
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const SELECTOR = { language: "kyn", scheme: "file" };
 
@@ -51,6 +52,7 @@ class KynClient {
     this.generations = new Map();
     this.published = new Map();
     this.dead = false;
+    this.semanticGeneration = 0;
     context.subscriptions.push(this.diagnostics, this.output);
   }
   schedule(doc, immediate = false) {
@@ -157,6 +159,57 @@ class KynClient {
       child.on("close", code => resolve({ code: overflow ? -1 : code, stdout, stderr }));
     });
   }
+  async semanticIndex(doc) {
+    if (this.dead || doc.isClosed || doc.languageId !== "kyn" || doc.uri.scheme !== "file") return null;
+    const executable = compilerOf(doc), cwd = cwdOf(doc);
+    const originalPath = doc.uri.fsPath;
+    let sourcePath = originalPath, temporaryPath = null;
+    if (doc.isDirty) {
+      const generation = ++this.semanticGeneration;
+      temporaryPath = path.join(path.dirname(originalPath),
+        "." + path.basename(originalPath) + "." + process.pid + "." + generation + ".symbols.tmp.kyn");
+      try {
+        await fs.promises.writeFile(temporaryPath, doc.getText(), "utf8");
+        sourcePath = temporaryPath;
+      } catch (error) {
+        if (temporaryPath) void fs.promises.unlink(temporaryPath).catch(() => {});
+        this.fail(error, "temporary semantic source");
+        return null;
+      }
+    }
+    try {
+      const result = await this.run(executable, ["symbols", "--json", "--lib", sourcePath], cwd);
+      if (result.error) { this.fail(result.error, executable); return null; }
+      if (result.code !== 0) {
+        this.output.appendLine("[symbols] semantic analysis failed for " + doc.uri.fsPath);
+        return null;
+      }
+      let snapshot;
+      try { snapshot = JSON.parse(result.stdout); }
+      catch {
+        this.output.appendLine("[symbols] kync returned invalid semantic JSON.");
+        return null;
+      }
+      if (!validateSnapshot(snapshot)) {
+        this.output.appendLine("[symbols] unsupported semantic index schema.");
+        return null;
+      }
+      const temporaryKey = canonical(sourcePath);
+      for (const file of snapshot.files) {
+        if (canonical(file.path) === temporaryKey) file.path = canonical(originalPath);
+      }
+      const sourceTextByFile = new Map();
+      for (const file of snapshot.files) {
+        const source = canonical(file.path) === canonical(originalPath)
+          ? doc.getText()
+          : await fs.promises.readFile(file.path, "utf8");
+        sourceTextByFile.set(file.id, source);
+      }
+      return remapSnapshotOffsets(snapshot, sourceTextByFile);
+    } finally {
+      if (temporaryPath) void fs.promises.unlink(temporaryPath).catch(() => {});
+    }
+  }
   async emit(doc, backend) {
     if (!doc || doc.languageId !== "kyn" || doc.uri.scheme !== "file") {
       void vscode.window.showInformationMessage("Open a local .kyn file first."); return;
@@ -257,26 +310,131 @@ function symbols(document) {
   return result;
 }
 
+
+class WorkspaceSymbolIndex {
+  constructor(client) {
+    this.client = client;
+    this.cache = new Map();
+    this.pending = new Map();
+    this.revision = 0;
+  }
+  invalidate() {
+    this.revision++;
+    this.cache.clear();
+    this.pending.clear();
+  }
+  async get(document) {
+    const key = document.uri.toString();
+    const cached = this.cache.get(key);
+    if (cached && cached.version === document.version) return cached.snapshot;
+    if (this.pending.has(key)) return this.pending.get(key);
+    const revision = this.revision, version = document.version;
+    const pending = this.client.semanticIndex(document).then(snapshot => {
+      if (document.isClosed) return null;
+      if (revision !== this.revision || version !== document.version) return null;
+      if (snapshot) this.cache.set(key, { version, snapshot });
+      return snapshot;
+    }).finally(() => {
+      if (this.pending.get(key) === pending) this.pending.delete(key);
+    });
+    this.pending.set(key, pending);
+    return pending;
+  }
+  filePath(snapshot, fileId) {
+    return filePathOf(snapshot, fileId);
+  }
+  symbolAt(snapshot, document, offset) {
+    return targetAt(snapshot, document.uri.fsPath, offset, canonical);
+  }
+  async location(snapshot, entry) {
+    const file = this.filePath(snapshot, entry.file);
+    if (!file) return null;
+    const uri = vscode.Uri.file(file);
+    const document = await vscode.workspace.openTextDocument(uri);
+    return new vscode.Location(uri, new vscode.Range(
+      document.positionAt(entry.start), document.positionAt(entry.end)
+    ));
+  }
+  async definition(document, position) {
+    const snapshot = await this.get(document);
+    if (!snapshot) return null;
+    const id = this.symbolAt(snapshot, document, document.offsetAt(position));
+    if (!id) return null;
+    const symbol = findSymbol(snapshot, id);
+    return symbol ? this.location(snapshot, symbol) : null;
+  }
+  async references(document, position, includeDeclaration) {
+    const snapshot = await this.get(document);
+    if (!snapshot) return [];
+    const id = this.symbolAt(snapshot, document, document.offsetAt(position));
+    if (!id) return [];
+    const locations = [];
+    for (const entry of referencesFor(snapshot, id, includeDeclaration)) {
+      const location = await this.location(snapshot, entry);
+      if (location) locations.push(location);
+    }
+    return locations;
+  }
+  async workspaceSymbols(query) {
+    const needle = query.toLowerCase(), result = [], seen = new Set();
+    const documents = vscode.workspace.textDocuments.filter(doc =>
+      doc.languageId === "kyn" && doc.uri.scheme === "file" && !doc.isClosed);
+    for (const document of documents) {
+      const snapshot = await this.get(document);
+      if (!snapshot) continue;
+      for (const symbol of snapshot.symbols) {
+        if (needle && !symbol.name.toLowerCase().includes(needle) &&
+            !(symbol.container || "").toLowerCase().includes(needle)) continue;
+        const file = this.filePath(snapshot, symbol.file);
+        if (!file) continue;
+        const key = canonical(file) + ":" + symbol.start + ":" + symbol.end;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const kind = symbol.kind === "function" ? vscode.SymbolKind.Function :
+          symbol.kind === "method" ? vscode.SymbolKind.Method :
+          symbol.kind === "struct" ? vscode.SymbolKind.Struct :
+          symbol.kind === "enum" ? vscode.SymbolKind.Enum :
+          symbol.kind === "enum_case" ? vscode.SymbolKind.EnumMember :
+          symbol.kind === "field" ? vscode.SymbolKind.Field : vscode.SymbolKind.Variable;
+        const location = await this.location(snapshot, symbol);
+        if (location) result.push(new vscode.SymbolInformation(
+          symbol.name, kind, symbol.container || "", location
+        ));
+      }
+    }
+    return result;
+  }
+}
 function activate(context) {
   const client = new KynClient(context);
+  const symbolIndex = new WorkspaceSymbolIndex(client);
   context.subscriptions.push(
     vscode.languages.registerCompletionItemProvider(SELECTOR, { provideCompletionItems: completions }, ".", ":", " "),
     vscode.languages.registerDocumentSymbolProvider(SELECTOR, { provideDocumentSymbols: symbols }),
-    vscode.workspace.onDidOpenTextDocument(doc => client.schedule(doc, true)),
+    vscode.languages.registerDefinitionProvider(SELECTOR, { provideDefinition: (doc, pos) => symbolIndex.definition(doc, pos) }),
+    vscode.languages.registerReferenceProvider(SELECTOR, { provideReferences: (doc, pos, ctx) => symbolIndex.references(doc, pos, ctx.includeDeclaration) }),
+    vscode.languages.registerWorkspaceSymbolProvider({ provideWorkspaceSymbols: query => symbolIndex.workspaceSymbols(query) }),
+    vscode.workspace.onDidOpenTextDocument(doc => { symbolIndex.invalidate(); client.schedule(doc, true); }),
     vscode.workspace.onDidChangeTextDocument(event => {
+      symbolIndex.invalidate();
       if (vscode.workspace.getConfiguration("kyn", event.document.uri).get("checkOnType", true)) client.schedule(event.document);
     }),
     vscode.workspace.onDidSaveTextDocument(doc => {
+      symbolIndex.invalidate();
       if (vscode.workspace.getConfiguration("kyn", doc.uri).get("checkOnSave", true)) client.schedule(doc, true);
     }),
     vscode.workspace.onDidCloseTextDocument(doc => {
+      symbolIndex.invalidate();
       const key = doc.uri.toString(), timer = client.pending.get(key), child = client.children.get(key);
       client.generations.set(key, (client.generations.get(key) || 0) + 1);
       if (timer) clearTimeout(timer);
       if (child) child.kill();
       client.pending.delete(key); client.children.delete(key); client.clearRoot(doc.uri);
     }),
-    vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration("kyn")) client.checkOpen(); }),
+    vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration("kyn")) { symbolIndex.invalidate(); client.checkOpen(); } }),
+    vscode.workspace.onDidCreateFiles(() => symbolIndex.invalidate()),
+    vscode.workspace.onDidDeleteFiles(() => symbolIndex.invalidate()),
+    vscode.workspace.onDidRenameFiles(() => symbolIndex.invalidate()),
     vscode.commands.registerCommand("kyn.checkCurrentFile", () => {
       const editor = vscode.window.activeTextEditor;
       if (editor) client.schedule(editor.document, true);

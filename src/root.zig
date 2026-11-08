@@ -21,6 +21,7 @@ pub const sema = @import("sema/sema.zig");
 pub const unsafe_checks = @import("sema/unsafe.zig");
 pub const codegen = @import("codegen/codegen.zig");
 pub const driver = @import("driver.zig");
+pub const semantic_index = @import("semantic_index.zig");
 pub const ffi = @import("ffi/ffi.zig");
 
 test {
