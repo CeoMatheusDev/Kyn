@@ -259,10 +259,11 @@ fn main() -> i32 {
 ```
 
 Current limits, all diagnosed: struct field of type `str`, `str` in arithmetic,
-condition or `==`/`!=` (comparing would require comparing bytes), concatenation,
+condition or relational operators (`<`, `<=`, `>`, `>=`), concatenation,
 formatting, `main` returning `str`, more than six registers in
 parameters/arguments (each `str` counts two) and an unused `str` expression
-(`print(...)` or assignment).
+(`print(...)` or assignment). String equality (`str == str`, `str != str`) is
+supported: it compares both the pointer and the length and yields `bool`.
 
 Not stable contracts yet: sizes and alignments of the other types, run-time
 overflow, implicit conversions, `char` representation and the `str` lifetime

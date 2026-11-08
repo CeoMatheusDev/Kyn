@@ -116,16 +116,18 @@ field access through a pointer `(*ptr).field` (the pointee must be a known
 struct, the struct_id is tracked from `&struct_var`), pointer arithmetic
 (`ptr + i32`, `i32 + ptr`, `ptr - i32` yield `ptr`; `ptr - ptr` yields `i32`)
 and pointer comparison (`ptr == ptr`, `ptr != ptr` yield `bool`). Pointers
-count as one register in the six-register limit.
+count as one register in the six-register limit. String comparison
+(`str == str`, `str != str`) compares both pointer and length and yields `bool`.
 
 Outside the subset (diagnosed or rejected): enum **struct fields**, enum payload
 types other than `i32`, operators on enum values (`==`, arithmetic), `switch`
 over a constructed value, associated functions without a receiver, receiver
 literal or field read on a call result, references (`&self`), `unsafe`,
 `#[...]` attributes, struct with a struct field, empty struct, struct field of
-type `str`, `str` comparison (`==`/`!=`), concatenation and formatting of `str`,
-`f32`/`f64` and other types, `[]T` slices, generics, `Result<T, E>`/`?`,
-closures, `for`, visibility (`pub`), qualified/selective imports and packages.
+type `str`, `str` relational operators (`<`, `<=`, `>`, `>=`), concatenation
+and formatting of `str`, `f32`/`f64` and other types, `[]T` slices, generics,
+`Result<T, E>`/`?`, closures, `for`, visibility (`pub`), qualified/selective
+imports and packages.
 
 ## Validation executed in this cycle
 

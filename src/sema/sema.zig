@@ -2234,17 +2234,22 @@ pub const Checker = struct {
             return .unknown;
         }
 
-        // `str` is a slice (pointer + length): comparing would require comparing
-        // bytes, which does not exist yet; diagnose instead of silently
-        // comparing pointers.
+        // `str` is a slice (pointer + length): comparing two `str` values
+        // compares both the pointer and the length. `str == str` and
+        // `str != str` yield `bool`. Relational operators (`<`, `<=`, `>`,
+        // `>=`) on `str` remain unsupported.
         if (lhs.eq(.str) or rhs.eq(.str)) {
             if (op == .eq or op == .ne) {
-                try self.diags.add(
-                    .unsupported,
-                    span,
-                    "comparison of 'str' with '{s}' is not supported yet",
-                    .{op.spelling()},
-                );
+                if (!lhs.eq(.str) or !rhs.eq(.str)) {
+                    try self.diags.add(
+                        .type_mismatch,
+                        span,
+                        "operator '{s}' expects two 'str', found '{s}' and '{s}'",
+                        .{ op.spelling(), lhs.name(), rhs.name() },
+                    );
+                    return .unknown;
+                }
+                return .bool;
             } else {
                 try self.diags.add(
                     .type_mismatch,
@@ -2252,8 +2257,8 @@ pub const Checker = struct {
                     "operator '{s}' expects two 'i32', found '{s}' and '{s}'",
                     .{ op.spelling(), lhs.name(), rhs.name() },
                 );
+                return .unknown;
             }
-            return .unknown;
         }
 
         const both_bool = lhs.eq(.bool) and rhs.eq(.bool);
@@ -3291,17 +3296,32 @@ test "sema: 'str' takes part in no arithmetic" {
     try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "'str'") != null);
 }
 
-test "sema: 'str' comparison is diagnosed (no pointer comparison)" {
+test "sema: 'str' comparison with == and != is accepted" {
     var f = try Fixture.check(
         \\fn main() -> i32 {
         \\    let s = "a";
-        \\    if s == "a" { return 1; }
+        \\    let t = "b";
+        \\    if s == t { return 1; }
+        \\    if s != "a" { return 2; }
         \\    return 0;
         \\}
     , .{});
     defer f.deinit();
-    try expectOnly(&f, .unsupported);
-    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "comparison of 'str'") != null);
+    try testing.expectEqual(@as(usize, 0), f.diags.count());
+}
+
+test "sema: 'str' comparison with relational operators is rejected" {
+    var f = try Fixture.check(
+        \\fn main() -> i32 {
+        \\    let s = "a";
+        \\    let t = "b";
+        \\    if s < t { return 1; }
+        \\    return 0;
+        \\}
+    , .{});
+    defer f.deinit();
+    try expectOnly(&f, .type_mismatch);
+    try testing.expect(std.mem.indexOf(u8, f.diags.items.items[0].message, "expects two 'i32'") != null);
 }
 
 test "sema: 'str' as a condition is rejected" {

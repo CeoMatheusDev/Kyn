@@ -1049,6 +1049,16 @@ const FnEmitter = struct {
     }
 
     fn emitBinaryOp(self: *FnEmitter, binary: ast.Expr.Binary) Error!void {
+        // `str == str` / `str != str`: compare both pointer and length.
+        // `str` is two 8-byte slots (ptr, len). Result in %eax as bool.
+        if (binary.op == .eq or binary.op == .ne) {
+            const lhs_type = self.checkedExprType(binary.lhs);
+            const rhs_type = self.checkedExprType(binary.rhs);
+            if (lhs_type == .str and rhs_type == .str) {
+                return self.emitStrCmp(binary);
+            }
+        }
+
         try self.emitExpr(binary.lhs);
         try self.print("    pushq %rax\n", .{});
         try self.emitExpr(binary.rhs);
@@ -1089,6 +1099,70 @@ const FnEmitter = struct {
             .shr => try self.print("    shrl %cl, %eax\n", .{}),
             .and_op, .or_op => unreachable,
         }
+    }
+
+    /// Returns the type of an expression without emitting code, or `.unknown`
+    /// when the type cannot be determined statically.
+    fn checkedExprType(self: *FnEmitter, expr: *const ast.Expr) sema.Type {
+        return self.exprType(expr) catch .unknown;
+    }
+
+    /// `str == str` / `str != str`: compare both pointer (8 bytes) and length
+    /// (8 bytes). Two `str` values are equal iff both pointers and lengths
+    /// match. Result (bool) is left in `%eax`.
+    fn emitStrCmp(self: *FnEmitter, binary: ast.Expr.Binary) Error!void {
+        // Emit lhs str: pointer in %rax, length in %rdx.
+        try self.emitStrValue(binary.lhs);
+        // Save lhs pointer and length on the stack.
+        try self.print("    pushq %rax\n", .{});
+        try self.print("    pushq %rdx\n", .{});
+
+        // Emit rhs str: pointer in %rax, length in %rdx.
+        try self.emitStrValue(binary.rhs);
+
+        // Compare pointers: %rax (rhs ptr) vs (%rsp) (lhs ptr).
+        try self.print("    cmpq (%rsp), %rax\n", .{});
+
+        // Labels for the two comparison outcomes.
+        const ptr_diff_label = try self.label("str_cmp_ptr_diff");
+        const end_label = try self.label("str_cmp_end");
+
+        // If pointers differ, jump to length comparison only matters for == vs !=.
+        // For !=: pointers differ => true. For ==: pointers differ => false.
+        // We handle this by falling through to compare lengths only when ==,
+        // and setting the result directly when !=.
+        if (binary.op == .ne) {
+            // != : pointers differ => true (1), otherwise fall through to compare lengths.
+            try self.print("    jne {s}\n", .{end_label});
+        } else {
+            // == : pointers differ => false (0).
+            try self.print("    jne {s}\n", .{ptr_diff_label});
+        }
+
+        // Pointers are equal: compare lengths.
+        // %rdx = rhs len, (%rsp+8) = lhs len.
+        try self.print("    cmpq 8(%rsp), %rdx\n", .{});
+
+        if (binary.op == .ne) {
+            // != : lengths differ => true (1), lengths equal => false (0).
+            try self.print("    setne %al\n", .{});
+        } else {
+            // == : lengths equal => true (1), lengths differ => false (0).
+            try self.print("    sete %al\n", .{});
+        }
+        try self.print("    jmp {s}\n", .{end_label});
+
+        // Pointers differ: for ==, result is false (0).
+        try self.print("{s}:\n", .{ptr_diff_label});
+        if (binary.op == .eq) {
+            try self.print("    movb $0, %al\n", .{});
+        }
+        // For !=, we already jumped to end_label when pointers differ.
+
+        try self.print("{s}:\n", .{end_label});
+        try self.print("    movzbl %al, %eax\n", .{});
+        // Clean up the stack.
+        try self.print("    addq $16, %rsp\n", .{});
     }
 
     /// Short-circuit: `&&` only evaluates the right side when the left is true.

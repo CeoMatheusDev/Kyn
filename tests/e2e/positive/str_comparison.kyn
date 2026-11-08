@@ -1,0 +1,8 @@
+// expect-exit: 1
+// Comparação de strings com == (strings iguais)
+fn main() -> i32 {
+    let a = "hello";
+    let b = "hello";
+    if a == b { return 1; }
+    return 0;
+}
