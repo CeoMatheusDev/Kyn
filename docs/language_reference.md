@@ -112,8 +112,10 @@ Suggested initial set:
 
 **Implemented today:** all fixed-width integer types above (`i8`/`i16`/`i32`/`i64`,
 `u8`/`u16`/`u32`/`u64`, `usize`), `bool` and `void`, plus `str` for static
-literals. All integer types share the same semantics: operators require operands
-of the same type, integer literals default to `i32` and overflow is diagnosed.
+literals. Arithmetic, ordering and bitwise operators require operands of the
+same integer type; shifts accept an independently typed integer count. Integer
+literals default to `i32`; literal overflow is diagnosed. Full native behavior
+at every declared width is still pending (see `status.md`).
 
 ### Numeric conversion (`as`)
 
@@ -134,8 +136,9 @@ Only fixed-width integer names are accepted as cast targets: `i8`, `i16`,
 
 ### Bitwise operators
 
-All fixed-width integer types support bitwise operators. Operands must have the
-same type; the result has that same type:
+All fixed-width integer types have bitwise operators. AND/XOR/OR require
+operands of the same type; shifts accept an independently typed integer count.
+The result has the type of the left operand:
 
 | Operator | Meaning | Precedence | Associativity |
 | --- | --- | --- | --- |
@@ -145,8 +148,9 @@ same type; the result has that same type:
 | `^` | bitwise XOR | 6 | left |
 | \| | bitwise OR | 5 | left |
 
-Shifts use the same type for both operands; the result type is the left operand's
-type. Bitwise AND/XOR/OR require both operands to have the same type:
+The right shift is arithmetic for signed left operands, logical otherwise.
+Shift counts outside the left operand's width have no portable behavior yet.
+Bitwise AND/XOR/OR require both operands to have the same type:
 
 ```kyn
 fn main() -> i32 {
@@ -176,10 +180,11 @@ operators. Use parentheses to disambiguate when mixing them with `+`/`-` or
 source-level generic type expression. A pointer is address-sized (one 64-bit
 register). The pointee type is
 tracked: `&` applied to a value of type `T` yields `ptr<T>`, and `*` applied to
-a `ptr<T>` yields `T`. Writing `ptr` (without a pointee) means `ptr<unknown>`,
-which is assignment-compatible with any `ptr<T>`. Pointers can be stored in
-variables, passed as arguments and returned from functions. They count as one
-register in the six-register limit.
+a `ptr<T>` yields `T`. A generic `ptr` parameter or field has an unknown
+pointee: a known `ptr<T>` can be passed or stored there (type erasure), but an
+unknown pointer cannot be assigned to a variable with a known pointee. A local
+`let p: ptr = &x` retains `x`'s inferred pointee type. Pointers can be stored,
+passed and returned; they count as one register in the six-register limit.
 
 ```kyn
 fn main() -> i32 {
@@ -189,11 +194,22 @@ fn main() -> i32 {
 }
 ```
 
-Pointer arithmetic and comparison are supported:
-- `ptr<T> + i32`, `i32 + ptr<T>`, `ptr<T> - i32` yield `ptr<T>`
-- `ptr<T> - ptr<T>` yields `i32` (difference in units of pointee size)
-- `ptr<T> == ptr<T>` and `ptr<T> != ptr<T>` yield `bool`
-- `ptr<T> + ptr<T>` (and other combinations of two pointers) is rejected.
+Pointer arithmetic and comparison are supported for **known pointee types**:
+- `ptr<T> + i32`, `i32 + ptr<T>`, `ptr<T> - i32` yield `ptr<T>`; offsets
+  are signed and scaled by the pointee size (1/2/4/8 bytes for the scalar types;
+  structs currently use their internal `(field_count + 1) * 8` byte frame size).
+- `ptr<T> - ptr<T>` yields `i32`, the difference in those units; both operands
+  must have the same pointee type, including nominal struct identity.
+- `ptr<T> == ptr<U>` and `ptr<T> != ptr<U>` compare full addresses and yield
+  `bool`, even when `T` and `U` differ. No dereference occurs.
+- Pointer multiplication/division, `ptr + ptr`, untyped `ptr + i32` and
+  relational comparisons are rejected by the frontend.
+
+There are no arrays, bounds checks, ownership, aliasing or lifetime checks yet:
+only use offsets inside an object (or one-past it), and never dereference a
+one-past/dangling address. The layout is **not** `repr(C)`; no FFI guarantee
+follows from the internal stride. Pointer distance is represented as `i32`, so
+out-of-range differences cannot be represented by this subset.
 
 Field access through a pointer is supported via `(*ptr).field`. The pointer
 must point to a struct, and the struct's layout must be known (the pointer must
@@ -208,10 +224,13 @@ fn main() -> i32 {
 }
 ```
 
-Current limits, all diagnosed: `&` applied to a non-lvalue (literal, call
-result), `*` applied to a non-pointer type, `ptr` used with `<`, `<=`, `>`,
-`>=` (relational comparison of pointers is not supported yet), `(*ptr).field`
-when the pointee type is unknown (`ptr` without a tracked struct).
+Current limits, all diagnosed: `&` applied to a temporary or a `str` slice;
+`*` on a non-pointer or an unknown/aggregate pointee as a scalar expression;
+`ptr` used with `<`, `<=`, `>`, `>=`; `(*ptr).field` when the pointee's struct
+identity is unknown. `&variable.field` is supported for direct struct fields;
+`&(*ptr).field`, stores through raw pointers, `volatile` and const-qualified
+pointers are not supported. A `ptr` function parameter has an unknown pointee
+until a future typed-parameter syntax provides a contract.
 
 At this stage `str` is a **static slice**: pointer to constant bytes + length,
 kept in two slots. It exists to give the program text output:

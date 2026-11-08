@@ -44,20 +44,27 @@ implementation and reproducible tests.
       enums, receiver passed by value as argument 1, `Type_method` mangling,
       per-type name spaces, nominal receiver rules and a shared argument checker
       for free and method calls.
-- [x] Add fixed-width signed/unsigned integers, `usize`, explicit integer
-      casts, bitwise operators and shifts; validate width-aware semantics in
-      both backends.
+- [x] Add fixed-width signed/unsigned integer types, `usize`, explicit casts,
+      bitwise operators and shifts; validate the currently tested operations
+      in both backends. Full native arithmetic at every declared width remains
+      open below (the LLVM representation is not a native parity guarantee).
 - [x] Add typed pointers, address-of, dereference, pointer field access,
       pointer arithmetic and pointer equality/inequality for the current target.
+      Generic pointer parameters/struct fields now preserve full addresses, but
+      the language still lacks bounds, lifetime and pointer-safety contracts.
+- [ ] Close remaining native integer-width/overflow and ABI gaps before making
+      cross-backend parity claims: an `i64` overflow-boundary probe currently
+      differs between native assembly and LLVM (see `docs/status.md`). Add
+      executable regressions as these paths become correct.
 - [ ] Complete the language beyond the implemented subset: slices, arrays,
       nested aggregates, enum struct fields, richer payloads, `unsafe`,
       attributes, generics and a formal ownership/lifetime model.
 - [ ] Extend semantic analysis with floating-point types, richer flow
       analysis, ownership/lifetime checking and a complete error model.
 - [ ] Define and validate the official backend. The x86-64 backend is validated
-      by execution; the LLVM backend IR is accepted by `llvm-as` in CI, but the
-      choice of the official backend (and a configurable `target triple`)
-      remains pending.
+      by execution; earlier LLVM IR passed `llvm-as` in CI, but the current
+      changes still need a green strict verifier run. The choice of the
+      official backend and a configurable `target triple` remain pending.
 
 ## Phase 2 — Freestanding and embedded targets
 
@@ -104,6 +111,13 @@ covers the additional target and memory contracts required for firmware.
 - [x] Add CI for build, tests and formatting: `.github/workflows/ci.yml` runs
       `zig fmt --check`, `zig build test`, `zig build e2e` and
       `zig build validate-ir-strict` (with LLVM installed on the runner).
+- [x] Repair strict-IR fixture parity for casts, bitwise, pointers and string
+      equality, including cross-backend pointer arithmetic and the native
+      slice-comparison stack order; add positive and negative regressions.
+      Locally: Zig 0.17.0 unit/E2E, LLVM 20 verification and JIT execution;
+      this is not evidence of green CI until the PR checks complete.
+- [ ] Run strict `llvm-as` and the complete CI on the integration PR and on
+      `main`; do not merge target foundations while a required check is red.
 - [ ] Cover diagnostics, malformed input and boundary cases systematically.
 - [ ] Define targets and the supported platform matrix (the native backend is
       Linux x86-64).

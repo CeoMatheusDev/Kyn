@@ -114,16 +114,15 @@ The project only declares a step complete when there is an executable test:
    requires a specific excerpt in the message (cycle, missing file, duplicated
    symbol).
 3. **LLVM IR** (`zig build validate-ir-strict`): runs `llvm-as` (or `clang`) over
-   the IR of every supported fixture, including the multi-file programs and the
-   `struct`/`print`/`print_i32`, `str`, struct-by-value, enum and method
-   fixtures (90 modules). LLVM is not installed in the default development environment, so
-   locally the `validate-ir` step only warns; CI installs LLVM and uses the
-   **strict** variant, which fails if the verifier is missing or rejects any
-   module.
+   every accepted positive/integration/module fixture; the current suite has
+   106 such modules. CI installs LLVM and uses the **strict** variant: a missing
+   verifier or rejected module fails the build. Without LLVM installed, the
+   non-strict local command prints a skip rather than validating anything.
 
-The LLVM backend unit tests only check structure (terminated blocks, types,
-instructions). Proof that the IR is accepted by an LLVM tool comes from CI, not
-from the local tests.
+The LLVM unit tests check structural properties only. In this local iteration,
+all 106 emitted modules were also parsed and verified with LLVM 20 via
+`llvmlite`, and 13 selected programs were executed via its MCJIT; those commands
+are separate from (and do not replace) the required CI `llvm-as` check.
 
 ## Continuous integration
 
@@ -133,11 +132,15 @@ requests and manual dispatch. On `ubuntu-24.04` the workflow:
 1. installs `python3-venv` and `llvm`;
 2. installs Zig 0.17.0 from the official PyPI wheel (the same path described
    above) and exposes it on `PATH`;
-3. runs `zig fmt --check build.zig src std`;
-4. runs `zig build test` (the current status snapshot records 246 compiler + 7 std
-tests) and `zig build e2e` (the current status snapshot records 130 cases);
-5. runs `zig build validate-ir-strict` (IR of 90 modules accepted by
-   `llvm-as`).
+3. runs `zig fmt --check` on the source set explicitly listed in the workflow
+   (the four legacy files not in that list still have pre-existing drift);
+4. runs `zig build test` and the semantic-index CLI smoke test;
+5. runs `zig build validate-ir-strict` (LLVM verifier required), then
+   `zig build e2e` if IR validation succeeds.
+
+The current local results are 272/272 unit tests, 151/151 E2E cases and
+106/106 LLVM 20-verified modules; these do **not** assert that the PR or `main`
+CI has passed.
 
 A missing LLVM in CI **fails** the build, so IR validation cannot be skipped
 silently.
