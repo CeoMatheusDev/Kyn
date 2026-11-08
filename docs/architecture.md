@@ -130,6 +130,13 @@ declaration order.
   pair-of-register representation. The semantic six-word budget is enforced
   for both emitters, but their machine-level ABIs are not interchangeable.
   `str` remains a pair of full 64-bit pointer/length values in native calls.
+- Shifts reduce the integer count modulo the left operand's 8/16/32/64-bit
+  width, including negative counts (low two's-complement bits). LLVM converts
+  independently typed counts to the left width, then masks by `width - 1`
+  **before** emitting `shl`/`ashr`/`lshr` so no out-of-range count becomes
+  poison. Native x86-64 implicitly masks 32-/64-bit counts; 8-/16-bit Kyn
+  shifts use the 32-bit ALU and explicitly mask `%ecx` by 7/15. Valid counts
+  require no additional native instructions on 32-/64-bit values.
 
 ### Strings and text output (`str`) — `print` + backends
 
@@ -240,10 +247,12 @@ index in declaration order) plus one **payload** word.
 - `llvm.zig`: textual IR for integers/casts, enums, strings, calls and control
   flow, plus opaque `ptr` values, address-of, scalar dereference and struct
   field reads through a pointer. It uses SSA, `phi` for `&&`/`||` and `alloca`
-  for locals. Signedness affects division, ordering and right shifts; LLVM
-  requires explicitly extending/truncating a differently sized shift amount.
-  `tools/validate-ir.sh` runs an LLVM verifier in CI; this iteration additionally
-  verified the accepted fixtures with LLVM 20 via `llvmlite` locally.
+  for locals. Signedness affects division, ordering and right shifts. LLVM
+  converts independently typed shift counts to the left operand's width and
+  masks by `width - 1` before shifting; the x86-64 backend applies the same
+  rule to narrow operands (wide counts are masked by the hardware).
+  `tools/validate-ir.sh` runs an LLVM verifier in CI; the accepted fixtures
+  were also checked with LLVM 20 via `llvmlite` locally.
 - Both backends use `codegen.pointeeStride` for the current x86-64 scalar/frame
   layout. `ptr<T> +/- i32` scales a signed offset, and compatible pointer
   subtraction divides the full 64-bit address difference before returning i32.

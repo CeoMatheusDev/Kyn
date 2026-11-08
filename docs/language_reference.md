@@ -116,8 +116,9 @@ literals. Arithmetic, ordering and bitwise operators require operands of the
 same integer type; shifts accept an independently typed integer count. Integer
 literals default to `i32`; literal overflow is diagnosed. Executed native
 regressions now cover selected 8-/16-/32-/64-bit operations and internal wide
-arguments; overflow, division-by-zero and out-of-range shifts still need
-portable language contracts (see `status.md`).
+arguments; this branch also defines shift counts modulo the left operand's
+width. Arithmetic overflow and division-by-zero still need portable language
+contracts (see `status.md`).
 
 ### Numeric conversion (`as`)
 
@@ -154,8 +155,14 @@ The result has the type of the left operand:
 | \| | bitwise OR | 5 | left |
 
 The right shift is arithmetic for signed left operands, logical otherwise.
-Shift counts outside the left operand's width have no portable behavior yet.
-Bitwise AND/XOR/OR require both operands to have the same type:
+In the implemented subset, shift counts use their low bits modulo the left
+operand's bit width (8, 16, 32 or 64), regardless of the count's integer type
+or signedness. Negative counts use their two's-complement low bits: shifting
+`1 as u8` left by `8 as i32` leaves it at 1, and shifting `1 as u64` left by
+`(0 - 1) as i32` uses a count of 63. This matches x86-64's full-width mask,
+adds an explicit mask for narrow native values, and avoids poison from an
+out-of-range LLVM shift. It does not specify arithmetic overflow or division
+by zero. Bitwise AND/XOR/OR require both operands to have the same type:
 
 ```kyn
 fn main() -> i32 {

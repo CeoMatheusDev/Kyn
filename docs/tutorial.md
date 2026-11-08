@@ -217,7 +217,10 @@ fn main() -> i32 {
 Precedence (tightest to loosest): unary operators, multiplicative operators,
 additive operators, shifts, relational comparisons, equality, bitwise AND,
 bitwise XOR, bitwise OR, logical AND and logical OR. Integer bitwise operators
-require matching integer types. Use parentheses when the intent is not obvious.
+require matching integer types (except shift counts, which may use another
+integer type). Shift counts wrap modulo the left operand's width: `u8` shifted
+by 8 uses count 0, and a negative count uses its two's-complement low bits.
+Use parentheses when the intent is not obvious.
 
 `&&` and `||` **short-circuit**: the right side is only evaluated when the result
 is not already decided.
