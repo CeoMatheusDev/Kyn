@@ -1,0 +1,3 @@
+// The bare `ptr` parameter has no known pointee: a dereference is invalid.
+fn read(p: ptr) -> i32 { return *p; }
+fn main() -> i32 { return 0; }

@@ -1,0 +1,7 @@
+// Pointer multiplication cannot be lowered as arithmetic on addresses.
+fn main() -> i32 {
+    var x: i32 = 1;
+    let p: ptr = &x;
+    let invalid = p * 2;
+    return 0;
+}

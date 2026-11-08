@@ -1,0 +1,2 @@
+// `str` is a two-slot slice, not an addressable scalar yet.
+fn main() -> i32 { let s = "hello"; let p: ptr = &s; return 0; }

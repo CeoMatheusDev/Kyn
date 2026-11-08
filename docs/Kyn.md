@@ -129,9 +129,11 @@ O compilador aceita inteiros com largura e sinal explícitos:
 | `usize` | 64 bits no alvo x86-64 atual | Sem sinal |
 
 Literais inteiros sem anotação são inferidos como `i32`. Operações binárias
-entre inteiros exigem operandos do mesmo tipo; não há conversão implícita entre
-larguras ou entre tipos com/sem sinal. Overflow de literal fora da faixa do tipo
-é diagnosticado. Para converter, use `as`:
+entre inteiros exigem operandos do mesmo tipo, **exceto deslocamentos**, cujo
+valor e contagem podem ser inteiros de tipos diferentes; não há conversão
+implícita entre larguras ou entre tipos com/sem sinal nos demais operadores.
+Overflow de literal fora da faixa do tipo é diagnosticado. Para converter, use
+`as`:
 
 ```kyn
 let small: u8 = 255 as u8;
@@ -201,8 +203,10 @@ let left: u8 = a << (2 as u8);
 let right: u8 = a >> (1 as u8);
 ```
 
-`&`, `|`, `^`, `~`, `<<` e `>>` preservam o tipo inteiro do operando esquerdo
-(para shifts, ambos os operandos precisam ter o mesmo tipo).
+`&`, `|`, `^` e `~` usam operandos do mesmo tipo. Em `<<` e `>>`, o operando
+esquerdo define o tipo do resultado e a contagem pode ter outro tipo inteiro;
+o deslocamento à direita é aritmético para tipos com sinal e lógico para tipos
+sem sinal. Contagens fora da largura do valor ainda não têm contrato portável.
 
 ### Conversão explícita (`as`)
 
@@ -417,9 +421,11 @@ let p: ptr = &x;
 let value: i32 = *p;   // 42
 ```
 
-O tipo apontado é acompanhado pelo compilador quando conhecido. Um `ptr` sem
-parâmetro de tipo é compatível com ponteiros tipados, mas perde informação de
-tipo na anotação. Ponteiros ocupam uma palavra/registrador no limite atual de
+O tipo apontado é acompanhado pelo compilador quando conhecido: a declaração
+`let p: ptr = &x` mantém o tipo de `x`. Parâmetros e campos declarados como `ptr` recebem
+ponteiros tipados, mas apagam essa informação; não é permitido atribuir um
+ponteiro de tipo apontado desconhecido a uma variável cujo tipo foi inferido
+como `ptr<T>`. Ponteiros ocupam uma palavra/registrador no limite atual de
 argumentos.
 
 ### Acesso a campos via ponteiro: `(*ptr).field`
@@ -451,11 +457,19 @@ let distance: i32 = q - p;
 let same: bool = p == q;
 ```
 
+**Semântica atual:** o deslocamento é um `i32` com sinal, multiplicado pelo
+tamanho do tipo apontado (1/2/4/8 bytes para escalares; structs usam seus slots
+internos de 8 bytes). A subtração exige ponteiros de tipos compatíveis e
+retorna uma distância `i32`; `==`/`!=` comparam o endereço inteiro de 64 bits,
+mesmo quando os tipos apontados diferem. `ptr` sem origem tipada não pode ser
+desreferenciado nem usado em aritmética; `let p: ptr = &x` preserva o tipo de
+`x`. O layout interno não garante compatibilidade com C.
+
 **Limites importantes:** não há verificação de bounds, lifetime, validade,
 nullability ou aliasing; não há referências (`&T`, `&mut T`) nem bloco `unsafe`
-integrado à linguagem. A aritmética aceita pelo frontend não deve ser entendida
-como garantia de segurança ou de compatibilidade com uma ABI externa. Comparações
-relacionais (`<`, `<=`, `>`, `>=`) e `ptr + ptr` não são suportados.
+integrado à linguagem. Os endereços podem ser inválidos; nunca desreferencie um
+endereço fora do objeto. Comparações relacionais (`<`, `<=`, `>`, `>=`) e
+`ptr + ptr` não são suportados.
 
 ---
 

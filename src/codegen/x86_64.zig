@@ -154,14 +154,6 @@ pub fn emit(
     return out.toOwnedSlice(arena);
 }
 
-/// Returns a pointer type whose pointee is `.unknown`. Used when the exact
-/// pointee type is not tracked (e.g. the result of `&x` before pointee
-/// tracking is fully integrated).
-fn ptr_to_unknown() sema.Type {
-    var unknown: sema.Type = .unknown;
-    return sema.Type{ .ptr = .{ .pointee = &unknown } };
-}
-
 const FnEmitter = struct {
     arena: std.mem.Allocator,
     func: *const ast.Function,
@@ -173,17 +165,6 @@ const FnEmitter = struct {
     label_count: u32 = 0,
     /// Has the current block already ended (return)? Avoids unreachable code.
     terminated: bool = false,
-    /// Type of the value left by the last `emitExpr` call. Used to know whether
-    /// the result is in `%eax` (32-bit scalar) or was spilled to memory (e.g.
-    /// a 64-bit pointer). `null` means no expression has been emitted yet.
-    last_expr_type: ?sema.Type = null,
-    /// Slot where the last expression was spilled, if `last_expr_type` is a
-    /// pointer (stored as a 64-bit value in memory rather than in `%eax`).
-    last_expr_slot: u32 = 0,
-    /// Number of extra stack slots reserved for pointer temporaries (beyond
-    /// the slots already counted by `info.slot_count`).
-    ptr_slots: u32 = 0,
-
     fn init(
         arena: std.mem.Allocator,
         func: *const ast.Function,
@@ -191,7 +172,7 @@ const FnEmitter = struct {
         info: sema.FunctionInfo,
         state: *codegen.ProgramState,
     ) FnEmitter {
-        return .{ .arena = arena, .func = func, .checked = checked, .info = info, .state = state, .last_expr_type = null, .last_expr_slot = 0, .ptr_slots = 0 };
+        return .{ .arena = arena, .func = func, .checked = checked, .info = info, .state = state };
     }
 
     fn print(self: *FnEmitter, comptime fmt: []const u8, args: anytype) !void {
@@ -212,21 +193,6 @@ const FnEmitter = struct {
 
     fn symbolAt(self: *FnEmitter, index: u32) *const sema.Symbol {
         return &self.checked.symbols[index];
-    }
-
-    /// Allocates an extra stack slot for a pointer temporary and returns its
-    /// slot index (counting from 0, after the regular `info.slot_count` slots).
-    fn allocPtrSlot(self: *FnEmitter) u32 {
-        const slot = self.info.slot_count + self.ptr_slots;
-        self.ptr_slots += 1;
-        return slot;
-    }
-
-    /// Offset of a stack slot (regular slots use `slot` directly; pointer
-    /// temporaries use `allocPtrSlot` which returns indices starting after
-    /// `info.slot_count`).
-    fn ptrSlotOffset(slot: u32) u32 {
-        return 8 * (slot + 1);
     }
 
     /// Register words the type consumes (struct: one per field).
@@ -251,16 +217,9 @@ const FnEmitter = struct {
         }
         if (register_words > arg_registers.len) return error.UnsupportedNode;
 
-        // Reserve extra slots for pointer temporaries (address-of results).
-        // Count pointer-typed locals/params: each may need an extra stack slot
-        // for an address-of temporary. This keeps the frame size unchanged for
-        // functions that don't use pointers.
-        var ptr_var_count: u32 = 0;
-        for (self.info.symbol_start .. self.info.symbol_start + self.info.symbol_count) |i| {
-            if (self.checked.symbols[i].typ.isPtr()) ptr_var_count += 1;
-        }
-        const total_slots: u32 = self.info.slot_count + ptr_var_count;
-        const frame_bytes: u32 = std.mem.alignForward(u32, total_slots * 8, 16);
+        // Address-of leaves the address in %rax; it needs no temporary frame
+        // slot. Reserve only the slots assigned by semantic analysis.
+        const frame_bytes: u32 = std.mem.alignForward(u32, self.info.slot_count * 8, 16);
 
         try self.print(".type kyn_{s}, @function\n", .{self.info.symbol_name});
         try self.print("kyn_{s}:\n", .{self.info.symbol_name});
@@ -277,9 +236,11 @@ const FnEmitter = struct {
             if (sym.typ == .aggregate) {
                 if (sym.struct_id >= self.checked.structs.len) return error.MiscompiledAst;
                 const fields = self.checked.structs[sym.struct_id].fields;
-                for (fields, 0..) |_, field_index| {
-                    try self.print("    movl {s}, -{d}(%rbp)\n", .{
-                        arg_registers[reg],
+                for (fields, 0..) |field, field_index| {
+                    const wide = field.typ.bitWidth() == 64;
+                    try self.print("    mov{s} {s}, -{d}(%rbp)\n", .{
+                        if (wide) @as([]const u8, "q") else "l",
+                        if (wide) arg_registers_64[reg] else arg_registers[reg],
                         slotOffset(sym.slot + 1 + @as(u32, @intCast(field_index))),
                     });
                     reg += 1;
@@ -296,7 +257,12 @@ const FnEmitter = struct {
                 try self.print("    movl {s}, -{d}(%rbp)\n", .{ arg_registers[reg + 1], slotOffset(sym.slot + 1) });
                 reg += 2;
             } else {
-                try self.print("    movl {s}, -{d}(%rbp)\n", .{ arg_registers[reg], slotOffset(sym.slot) });
+                const wide = sym.typ.isPtr();
+                try self.print("    mov{s} {s}, -{d}(%rbp)\n", .{
+                    if (wide) @as([]const u8, "q") else "l",
+                    if (wide) arg_registers_64[reg] else arg_registers[reg],
+                    slotOffset(sym.slot),
+                });
                 reg += 1;
             }
         }
@@ -335,16 +301,8 @@ const FnEmitter = struct {
                     try self.emitEnumStore(symbol, decl.init);
                 } else {
                     try self.emitExpr(decl.init);
-                    if (self.last_expr_type) |t| {
-                        if (t.isPtr()) {
-                            // Pointer value was spilled to memory by emitExpr;
-                            // store it into the variable's slot.
-                            try self.print("    mov %rax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
-                            self.last_expr_type = null;
-                            self.last_expr_slot = 0;
-                        } else {
-                            try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
-                        }
+                    if (symbol.typ.isPtr()) {
+                        try self.print("    movq %rax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
                     } else {
                         try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
                     }
@@ -361,16 +319,8 @@ const FnEmitter = struct {
                     try self.emitEnumStore(symbol, assign.value);
                 } else {
                     try self.emitExpr(assign.value);
-                    if (self.last_expr_type) |t| {
-                        if (t.isPtr()) {
-                            // Pointer value was spilled to memory by emitExpr;
-                            // store it into the variable's slot.
-                            try self.print("    mov %rax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
-                            self.last_expr_type = null;
-                            self.last_expr_slot = 0;
-                        } else {
-                            try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
-                        }
+                    if (symbol.typ.isPtr()) {
+                        try self.print("    movq %rax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
                     } else {
                         try self.print("    movl %eax, -{d}(%rbp)\n", .{slotOffset(symbol.slot)});
                     }
@@ -381,8 +331,13 @@ const FnEmitter = struct {
                 const base = self.symbolAt(field_assign.base.resolved orelse return error.MiscompiledAst);
                 if (base.typ != .aggregate) return error.MiscompiledAst;
                 const field_index = field_assign.field_index orelse return error.MiscompiledAst;
+                const fields = try self.structFields(base.struct_id);
+                if (field_index >= fields.len) return error.MiscompiledAst;
+                const wide = fields[field_index].typ.bitWidth() == 64;
                 try self.emitExpr(field_assign.value);
-                try self.print("    movl %eax, -{d}(%rbp)\n", .{
+                try self.print("    mov{s} %{s}, -{d}(%rbp)\n", .{
+                    if (wide) @as([]const u8, "q") else "l",
+                    if (wide) @as([]const u8, "rax") else "eax",
                     slotOffset(base.slot + 1 + field_index),
                 });
             },
@@ -586,8 +541,6 @@ const FnEmitter = struct {
                 if (symbol.typ.isPtr()) {
                     // Pointer values are 64-bit: load into %rax.
                     try self.print("    movq -{d}(%rbp), %rax\n", .{slotOffset(symbol.slot)});
-                    self.last_expr_type = ptr_to_unknown();
-                    self.last_expr_slot = 0; // in %rax, not memory
                 } else {
                     try self.print("    movl -{d}(%rbp), %eax\n", .{slotOffset(symbol.slot)});
                 }
@@ -596,42 +549,32 @@ const FnEmitter = struct {
             .unary => |unary| {
                 switch (unary.op) {
                     .address_of => {
-                        // `&var`: emit the address of a local variable.
-                        // The operand must be an identifier resolving to a
-                        // symbol with a stack slot.
-                        const operand_expr = unary.operand;
-                        if (operand_expr.kind != .identifier) {
-                            return error.UnsupportedNode;
-                        }
-                        const symbol = self.symbolAt(operand_expr.resolved orelse return error.MiscompiledAst);
-                        if (symbol.typ == .str) return error.MiscompiledAst;
-                        // Allocate a stack slot to hold the 64-bit pointer.
-                        const ptr_slot = self.allocPtrSlot();
-                        // lea -offset(%rbp), %rax
-                        try self.print("    lea -{d}(%rbp), %rax\n", .{slotOffset(symbol.slot)});
-                        // mov %rax, -ptr_slot(%rbp)
-                        try self.print("    mov %rax, -{d}(%rbp)\n", .{ptrSlotOffset(ptr_slot)});
-                        self.last_expr_type = ptr_to_unknown();
-                        self.last_expr_slot = ptr_slot;
+                        const slot: u32 = switch (unary.operand.kind) {
+                            .identifier => (self.symbolAt(unary.operand.resolved orelse return error.MiscompiledAst)).slot,
+                            .field_access => |field| blk: {
+                                const base = self.symbolAt(field.base.resolved orelse return error.MiscompiledAst);
+                                if (base.typ != .aggregate) return error.MiscompiledAst;
+                                break :blk base.slot + 1 + (field.field_index orelse return error.MiscompiledAst);
+                            },
+                            else => return error.MiscompiledAst,
+                        };
+                        // No temporary stack slot: the address is already in %rax.
+                        try self.print("    lea -{d}(%rbp), %rax\n", .{slotOffset(slot)});
                     },
                     .dereference => {
-                        // `*ptr`: load the value pointed to by the pointer.
-                        // The pointer operand should have been emitted already,
-                        // leaving either a 64-bit pointer in memory (last_expr_slot > 0)
-                        // or already in %rax (last_expr_slot == 0).
+                        const pointer_type = try self.exprType(unary.operand);
+                        if (!pointer_type.isPtr()) return error.MiscompiledAst;
+                        const pointee = pointer_type.ptr.pointee.*;
                         try self.emitExpr(unary.operand);
-                        if (self.last_expr_type) |t| {
-                            if (t.isPtr() and self.last_expr_slot != 0) {
-                                // Pointer was spilled to memory: load it into %rax.
-                                try self.print("    mov -{d}(%rbp), %rax\n", .{ptrSlotOffset(self.last_expr_slot)});
-                            }
+                        switch (pointee) {
+                            .bool, .u8 => try self.print("    movzbl (%rax), %eax\n", .{}),
+                            .i8 => try self.print("    movsbl (%rax), %eax\n", .{}),
+                            .u16 => try self.print("    movzwl (%rax), %eax\n", .{}),
+                            .i16 => try self.print("    movswl (%rax), %eax\n", .{}),
+                            .i32, .u32 => try self.print("    movl (%rax), %eax\n", .{}),
+                            .i64, .u64, .usize, .ptr => try self.print("    movq (%rax), %rax\n", .{}),
+                            else => return error.MiscompiledAst,
                         }
-                        // If last_expr_slot == 0, the pointer is already in %rax
-                        // (loaded by the .identifier case). Just dereference.
-                        // mov (%rax), %eax  -- load the i32 value pointed to.
-                        try self.print("    mov (%rax), %eax\n", .{});
-                        self.last_expr_type = .i32;
-                        self.last_expr_slot = 0;
                     },
                     .neg => {
                         try self.emitExpr(unary.operand);
@@ -648,11 +591,6 @@ const FnEmitter = struct {
                         try self.print("    notl %eax\n", .{});
                     },
                 }
-                self.last_expr_type = switch (unary.op) {
-                    .address_of => ptr_to_unknown(),
-                    .dereference => .i32,
-                    else => self.last_expr_type,
-                };
             },
 
             .binary => |binary| {
@@ -690,41 +628,21 @@ const FnEmitter = struct {
                 // An enum case (`Color.Red`) is tag + payload slots, not an operand.
                 if (access.resolved_enum != null) return error.UnsupportedNode;
                 const field_index = access.field_index orelse return error.MiscompiledAst;
+                const wide = (try self.exprType(expr)).bitWidth() == 64;
+                const suffix: []const u8 = if (wide) "q" else "l";
+                const dest: []const u8 = if (wide) "rax" else "eax";
 
-                // Support `(*ptr).field`: dereference a pointer to a struct,
-                // then access a field at the given offset.
-                if (access.base.kind == .unary) {
-                    const unary_expr = access.base.kind.unary;
-                    if (unary_expr.op == .dereference) {
-                        // Emit only the pointer operand (e.g. `ptr` in `*ptr`),
-                // leaving the 64-bit pointer in %rax or in a stack slot.
-                        try self.emitExpr(unary_expr.operand);
-                        if (self.last_expr_type) |t| {
-                            if (t.isPtr() and self.last_expr_slot != 0) {
-                                // Pointer was spilled to memory: load it into %rax.
-                                try self.print("    mov -{d}(%rbp), %rax\n", .{ptrSlotOffset(self.last_expr_slot)});
-                            }
-                        }
-                        // If last_expr_slot == 0, the pointer is already in %rax
-                        // (loaded by the .identifier case). Now load the field.
-                        // Struct layout: slot 0 is the struct base, fields start
-                        // at slot 1. Each slot is 8 bytes. Fields are at negative
-                        // offsets from the base: field i at -{(i+1)*8}(%rax).
-                        try self.print("    movl -{d}(%rax), %eax\n", .{(field_index + 1) * 8});
-                        self.last_expr_type = .i32;
-                        self.last_expr_slot = 0;
-                    } else {
-                        const base = self.symbolAt(access.base.resolved orelse return error.MiscompiledAst);
-                        if (base.typ != .aggregate) return error.MiscompiledAst;
-                        try self.print("    movl -{d}(%rbp), %eax\n", .{
-                            slotOffset(base.slot + 1 + field_index),
-                        });
-                    }
+                // `(*ptr).field`: field i is one reverse eight-byte slot.
+                if (access.base.kind == .unary and access.base.kind.unary.op == .dereference) {
+                    try self.emitExpr(access.base.kind.unary.operand);
+                    try self.print("    mov{s} -{d}(%rax), %{s}\n", .{
+                        suffix, (field_index + 1) * 8, dest,
+                    });
                 } else {
                     const base = self.symbolAt(access.base.resolved orelse return error.MiscompiledAst);
                     if (base.typ != .aggregate) return error.MiscompiledAst;
-                    try self.print("    movl -{d}(%rbp), %eax\n", .{
-                        slotOffset(base.slot + 1 + field_index),
+                    try self.print("    mov{s} -{d}(%rbp), %{s}\n", .{
+                        suffix, slotOffset(base.slot + 1 + field_index), dest,
                     });
                 }
             },
@@ -773,34 +691,63 @@ const FnEmitter = struct {
         }
     }
 
-    /// Determines the type of an expression without emitting code, walking only
-    /// the constructs that can appear as the source of a `cast`.
+    /// Recover the checked scalar type for operations that depend on signedness
+    /// or on the width of a pointee. The AST still owns source structure;
+    /// symbol/call identities come from semantic analysis.
     fn exprType(self: *FnEmitter, expr: *const ast.Expr) Error!sema.Type {
         return switch (expr.kind) {
             .int_literal => .i32,
             .bool_literal => .bool,
-            .identifier => {
-                const sym = self.symbolAt(expr.resolved orelse return error.MiscompiledAst);
-                return sym.typ;
+            .str_literal => .str,
+            .identifier => self.symbolAt(expr.resolved orelse return error.MiscompiledAst).typ,
+            .binary => |binary| blk: {
+                const lhs = try self.exprType(binary.lhs);
+                if (binary.op.isComparison() or binary.op.isLogical() or binary.op == .eq or binary.op == .ne) break :blk .bool;
+                const rhs = try self.exprType(binary.rhs);
+                if (binary.op == .sub and lhs.isPtr() and rhs.isPtr()) break :blk .i32;
+                if (binary.op == .add and rhs.isPtr()) break :blk rhs;
+                break :blk lhs;
             },
-            .binary => |binary| self.exprType(binary.lhs),
-            .unary => |unary| {
-                if (unary.op == .not) return .bool;
-                return self.exprType(unary.operand);
+            .unary => |unary| switch (unary.op) {
+                .not => .bool,
+                .address_of => blk: {
+                    const inner = try self.exprType(unary.operand);
+                    const pointee = try self.arena.create(sema.Type);
+                    pointee.* = inner;
+                    var struct_id: u32 = 0;
+                    var has_struct_id = false;
+                    if (inner == .aggregate and unary.operand.kind == .identifier) {
+                        const symbol = self.symbolAt(unary.operand.resolved orelse return error.MiscompiledAst);
+                        struct_id = symbol.struct_id;
+                        has_struct_id = true;
+                    }
+                    break :blk .{ .ptr = .{ .pointee = pointee, .struct_id = struct_id, .has_struct_id = has_struct_id } };
+                },
+                .dereference => blk: {
+                    const ptr_type = try self.exprType(unary.operand);
+                    if (!ptr_type.isPtr()) return error.MiscompiledAst;
+                    break :blk ptr_type.ptr.pointee.*;
+                },
+                else => self.exprType(unary.operand),
             },
-            .call => |call| {
-                const index = call.callee_fn orelse return error.MiscompiledAst;
-                return self.checked.functions[index].return_type;
-            },
-            .cast => |cast_expr| {
-                const width = try self.intWidthOfTypeName(cast_expr.type_name);
-                return try self.typeOfWidth(width);
-            },
-            .field_access => |access| {
-                const base = self.symbolAt(access.base.resolved orelse return error.MiscompiledAst);
-                if (base.typ != .aggregate) return error.MiscompiledAst;
+            .call => |call| if (call.callee_fn) |index| self.checked.functions[index].return_type else .void,
+            .method_call => |call| if (call.resolved_fn) |index| self.checked.functions[index].return_type else .unknown,
+            .cast => |cast_expr| sema.Type.fromName(cast_expr.type_name.name) orelse error.MiscompiledAst,
+            .field_access => |access| blk: {
                 const field_index = access.field_index orelse return error.MiscompiledAst;
-                return self.checked.structs[base.struct_id].fields[field_index].typ;
+                var struct_id: u32 = undefined;
+                if (access.base.kind == .unary and access.base.kind.unary.op == .dereference) {
+                    const ptr_type = try self.exprType(access.base.kind.unary.operand);
+                    if (!ptr_type.isPtr() or !ptr_type.ptr.has_struct_id) return error.MiscompiledAst;
+                    struct_id = ptr_type.ptr.struct_id;
+                } else {
+                    const base = self.symbolAt(access.base.resolved orelse return error.MiscompiledAst);
+                    if (base.typ != .aggregate) return error.MiscompiledAst;
+                    struct_id = base.struct_id;
+                }
+                const fields = try self.structFields(struct_id);
+                if (field_index >= fields.len) return error.MiscompiledAst;
+                break :blk fields[field_index].typ;
             },
             else => .unknown,
         };
@@ -829,18 +776,6 @@ const FnEmitter = struct {
         return error.UnsupportedType;
     }
 
-    /// Maps an integer bit width back to a sema.Type for result typing.
-    fn typeOfWidth(self: *FnEmitter, width: u32) Error!sema.Type {
-        _ = self;
-        return switch (width) {
-            8 => .i8,
-            16 => .i16,
-            32 => .i32,
-            64 => .i64,
-            else => error.UnsupportedType,
-        };
-    }
-
     /// Copies a struct value into the slots of `dst`: literal (each field
     /// evaluated and stored) or struct variable (field-by-field copy).
     fn emitStructStore(self: *FnEmitter, dst: *const sema.Symbol, value: *ast.Expr) Error!void {
@@ -852,8 +787,11 @@ const FnEmitter = struct {
                 for (info.fields, 0..) |field, i| {
                     const init_value = findFieldInit(lit.fields, field.name) orelse return error.MiscompiledAst;
                     const index: u32 = @intCast(i);
+                    const wide = field.typ.bitWidth() == 64;
                     try self.emitExpr(init_value);
-                    try self.print("    movl %eax, -{d}(%rbp)\n", .{
+                    try self.print("    mov{s} %{s}, -{d}(%rbp)\n", .{
+                        if (wide) @as([]const u8, "q") else "l",
+                        if (wide) @as([]const u8, "rax") else "eax",
                         slotOffset(dst.slot + 1 + index),
                     });
                 }
@@ -861,12 +799,17 @@ const FnEmitter = struct {
             .identifier => {
                 const src = self.symbolAt(value.resolved orelse return error.MiscompiledAst);
                 if (src.typ != .aggregate) return error.MiscompiledAst;
-                for (info.fields, 0..) |_, i| {
+                for (info.fields, 0..) |field, i| {
                     const index: u32 = @intCast(i);
-                    try self.print("    movl -{d}(%rbp), %eax\n", .{
+                    const wide = field.typ.bitWidth() == 64;
+                    try self.print("    mov{s} -{d}(%rbp), %{s}\n", .{
+                        if (wide) @as([]const u8, "q") else "l",
                         slotOffset(src.slot + 1 + index),
+                        if (wide) @as([]const u8, "rax") else "eax",
                     });
-                    try self.print("    movl %eax, -{d}(%rbp)\n", .{
+                    try self.print("    mov{s} %{s}, -{d}(%rbp)\n", .{
+                        if (wide) @as([]const u8, "q") else "l",
+                        if (wide) @as([]const u8, "rax") else "eax",
                         slotOffset(dst.slot + 1 + index),
                     });
                 }
@@ -875,10 +818,12 @@ const FnEmitter = struct {
                 const ref = (try callRefOf(value)) orelse return error.MiscompiledAst;
                 if (info.fields.len > struct_return_registers.len) return error.UnsupportedNode;
                 try self.emitCallWith(ref.index, ref.site);
-                for (info.fields, 0..) |_, i| {
+                for (info.fields, 0..) |field, i| {
                     const index: u32 = @intCast(i);
-                    try self.print("    movl {s}, -{d}(%rbp)\n", .{
-                        struct_return_registers[i],
+                    const wide = field.typ.bitWidth() == 64;
+                    try self.print("    mov{s} {s}, -{d}(%rbp)\n", .{
+                        if (wide) @as([]const u8, "q") else "l",
+                        if (wide) struct_return_registers_64[i] else struct_return_registers[i],
                         slotOffset(dst.slot + 1 + index),
                     });
                 }
@@ -898,11 +843,13 @@ const FnEmitter = struct {
             .identifier => {
                 const src = self.symbolAt(value.resolved orelse return error.MiscompiledAst);
                 if (src.typ != .aggregate) return error.MiscompiledAst;
-                for (fields, 0..) |_, i| {
+                for (fields, 0..) |field, i| {
                     const index: u32 = @intCast(i);
-                    try self.print("    movl -{d}(%rbp), {s}\n", .{
+                    const wide = field.typ.bitWidth() == 64;
+                    try self.print("    mov{s} -{d}(%rbp), {s}\n", .{
+                        if (wide) @as([]const u8, "q") else "l",
                         slotOffset(src.slot + 1 + index),
-                        struct_return_registers[i],
+                        if (wide) struct_return_registers_64[i] else struct_return_registers[i],
                     });
                 }
             },
@@ -921,7 +868,12 @@ const FnEmitter = struct {
                 while (i > 0) {
                     i -= 1;
                     try self.print("    popq %rax\n", .{});
-                    try self.print("    movl %eax, {s}\n", .{struct_return_registers[i]});
+                    const wide = fields[i].typ.bitWidth() == 64;
+                    try self.print("    mov{s} %{s}, {s}\n", .{
+                        if (wide) @as([]const u8, "q") else "l",
+                        if (wide) @as([]const u8, "rax") else "eax",
+                        if (wide) struct_return_registers_64[i] else struct_return_registers[i],
+                    });
                 }
             },
             else => return error.MiscompiledAst,
@@ -955,10 +907,13 @@ const FnEmitter = struct {
             .identifier => {
                 const src = self.symbolAt(value.resolved orelse return error.MiscompiledAst);
                 if (src.typ != .aggregate) return error.MiscompiledAst;
-                for (fields, 0..) |_, i| {
+                for (fields, 0..) |field, i| {
                     const index: u32 = @intCast(i);
-                    try self.print("    movl -{d}(%rbp), %eax\n", .{
+                    const wide = field.typ.bitWidth() == 64;
+                    try self.print("    mov{s} -{d}(%rbp), %{s}\n", .{
+                        if (wide) @as([]const u8, "q") else "l",
                         slotOffset(src.slot + 1 + index),
+                        if (wide) @as([]const u8, "rax") else "eax",
                     });
                     try self.print("    pushq %rax\n", .{});
                 }
@@ -1051,10 +1006,26 @@ const FnEmitter = struct {
         // `str == str` / `str != str`: compare both pointer and length.
         // `str` is two 8-byte slots (ptr, len). Result in %eax as bool.
         if (binary.op == .eq or binary.op == .ne) {
-            const lhs_type = self.checkedExprType(binary.lhs);
-            const rhs_type = self.checkedExprType(binary.rhs);
-            if (lhs_type == .str and rhs_type == .str) {
-                return self.emitStrCmp(binary);
+            const lhs_type = try self.exprType(binary.lhs);
+            const rhs_type = try self.exprType(binary.rhs);
+            if (lhs_type == .str and rhs_type == .str) return self.emitStrCmp(binary);
+            if (lhs_type.isPtr() and rhs_type.isPtr()) {
+                try self.emitExpr(binary.lhs);
+                try self.print("    pushq %rax\n", .{});
+                try self.emitExpr(binary.rhs);
+                try self.print("    popq %rcx\n", .{});
+                try self.print("    cmpq %rcx, %rax\n", .{});
+                try self.print("    {s} %al\n", .{if (binary.op == .eq) @as([]const u8, "sete") else "setne"});
+                try self.print("    movzbl %al, %eax\n", .{});
+                return;
+            }
+        }
+
+        if (binary.op.isArithmetic()) {
+            const lhs_type = try self.exprType(binary.lhs);
+            const rhs_type = try self.exprType(binary.rhs);
+            if (lhs_type.isPtr() or rhs_type.isPtr()) {
+                return self.emitPointerBinary(binary, lhs_type, rhs_type);
             }
         }
 
@@ -1063,27 +1034,27 @@ const FnEmitter = struct {
         try self.emitExpr(binary.rhs);
         try self.print("    movl %eax, %ecx\n", .{});
         try self.print("    popq %rax\n", .{});
+        const signed = (try self.exprType(binary.lhs)).isSigned();
 
         switch (binary.op) {
             .add => try self.print("    addl %ecx, %eax\n", .{}),
             .sub => try self.print("    subl %ecx, %eax\n", .{}),
             .mul => try self.print("    imull %ecx, %eax\n", .{}),
-            .div => {
-                try self.print("    cltd\n", .{});
-                try self.print("    idivl %ecx\n", .{});
-            },
-            .mod => {
-                try self.print("    cltd\n", .{});
-                try self.print("    idivl %ecx\n", .{});
-                try self.print("    movl %edx, %eax\n", .{});
+            .div, .mod => {
+                if (signed) {
+                    try self.print("    cltd\n    idivl %ecx\n", .{});
+                } else {
+                    try self.print("    xorl %edx, %edx\n    divl %ecx\n", .{});
+                }
+                if (binary.op == .mod) try self.print("    movl %edx, %eax\n", .{});
             },
             .lt, .le, .gt, .ge, .eq, .ne => {
                 try self.print("    cmpl %ecx, %eax\n", .{});
                 const setcc: []const u8 = switch (binary.op) {
-                    .lt => "setl",
-                    .le => "setle",
-                    .gt => "setg",
-                    .ge => "setge",
+                    .lt => if (signed) "setl" else "setb",
+                    .le => if (signed) "setle" else "setbe",
+                    .gt => if (signed) "setg" else "seta",
+                    .ge => if (signed) "setge" else "setae",
                     .eq => "sete",
                     .ne => "setne",
                     else => unreachable,
@@ -1095,72 +1066,77 @@ const FnEmitter = struct {
             .bitor => try self.print("    orl %ecx, %eax\n", .{}),
             .bitxor => try self.print("    xorl %ecx, %eax\n", .{}),
             .shl => try self.print("    shll %cl, %eax\n", .{}),
-            .shr => try self.print("    shrl %cl, %eax\n", .{}),
+            .shr => {
+                if (signed) {
+                    try self.print("    sarl %cl, %eax\n", .{});
+                } else {
+                    try self.print("    shrl %cl, %eax\n", .{});
+                }
+            },
             .and_op, .or_op => unreachable,
         }
     }
 
-    /// Returns the type of an expression without emitting code, or `.unknown`
-    /// when the type cannot be determined statically.
-    fn checkedExprType(self: *FnEmitter, expr: *const ast.Expr) sema.Type {
-        return self.exprType(expr) catch .unknown;
+    /// Preserve all 64 address bits and sign-extend the i32 offset before
+    /// scaling it to the pointee stride. Operands are evaluated once, in order.
+    fn emitPointerBinary(self: *FnEmitter, binary: ast.Expr.Binary, lhs_type: sema.Type, rhs_type: sema.Type) Error!void {
+        if (lhs_type.isPtr() and rhs_type.isPtr()) {
+            if (binary.op != .sub or !lhs_type.eq(rhs_type)) return error.MiscompiledAst;
+            const stride = try codegen.pointeeStride(lhs_type, self.checked.structs);
+            try self.emitExpr(binary.lhs);
+            try self.print("    pushq %rax\n", .{});
+            try self.emitExpr(binary.rhs);
+            try self.print("    popq %rcx\n", .{});
+            try self.print("    subq %rax, %rcx\n", .{});
+            try self.print("    movq %rcx, %rax\n", .{});
+            if (stride != 1) {
+                try self.print("    cqto\n    movq ${d}, %rcx\n    idivq %rcx\n", .{stride});
+            }
+            // The language's pointer distance is an i32; its low 32 bits
+            // remain in %eax after signed division.
+            return;
+        }
+
+        const pointer_type = if (lhs_type.isPtr()) lhs_type else rhs_type;
+        if (binary.op != .add and binary.op != .sub) return error.MiscompiledAst;
+        const stride = try codegen.pointeeStride(pointer_type, self.checked.structs);
+        try self.emitExpr(binary.lhs);
+        try self.print("    pushq %rax\n", .{});
+        try self.emitExpr(binary.rhs);
+        if (lhs_type.isPtr()) {
+            // %eax holds the signed i32 offset; saved %rax is the pointer.
+            try self.print("    movslq %eax, %rcx\n", .{});
+            try self.print("    popq %rax\n", .{});
+        } else {
+            // %rax holds the pointer; saved %ecx is the signed offset.
+            try self.print("    popq %rcx\n", .{});
+            try self.print("    movslq %ecx, %rcx\n", .{});
+        }
+        if (stride != 1) try self.print("    imulq ${d}, %rcx, %rcx\n", .{stride});
+        if (binary.op == .sub) {
+            if (!lhs_type.isPtr()) return error.MiscompiledAst;
+            try self.print("    subq %rcx, %rax\n", .{});
+        } else {
+            try self.print("    addq %rcx, %rax\n", .{});
+        }
     }
 
-    /// `str == str` / `str != str`: compare both pointer (8 bytes) and length
-    /// (8 bytes). Two `str` values are equal iff both pointers and lengths
-    /// match. Result (bool) is left in `%eax`.
+    /// Compare the two components of a static slice, not its contents.
+    /// After pushing pointer then length, length is at (%rsp) and the pointer
+    /// at 8(%rsp). Always normalize the result to 0 or 1 in %eax.
     fn emitStrCmp(self: *FnEmitter, binary: ast.Expr.Binary) Error!void {
-        // Emit lhs str: pointer in %rax, length in %rdx.
         try self.emitStrValue(binary.lhs);
-        // Save lhs pointer and length on the stack.
         try self.print("    pushq %rax\n", .{});
         try self.print("    pushq %rdx\n", .{});
-
-        // Emit rhs str: pointer in %rax, length in %rdx.
         try self.emitStrValue(binary.rhs);
 
-        // Compare pointers: %rax (rhs ptr) vs (%rsp) (lhs ptr).
-        try self.print("    cmpq (%rsp), %rax\n", .{});
-
-        // Labels for the two comparison outcomes.
-        const ptr_diff_label = try self.label("str_cmp_ptr_diff");
-        const end_label = try self.label("str_cmp_end");
-
-        // If pointers differ, jump to length comparison only matters for == vs !=.
-        // For !=: pointers differ => true. For ==: pointers differ => false.
-        // We handle this by falling through to compare lengths only when ==,
-        // and setting the result directly when !=.
-        if (binary.op == .ne) {
-            // != : pointers differ => true (1), otherwise fall through to compare lengths.
-            try self.print("    jne {s}\n", .{end_label});
-        } else {
-            // == : pointers differ => false (0).
-            try self.print("    jne {s}\n", .{ptr_diff_label});
-        }
-
-        // Pointers are equal: compare lengths.
-        // %rdx = rhs len, (%rsp+8) = lhs len.
-        try self.print("    cmpq 8(%rsp), %rdx\n", .{});
-
-        if (binary.op == .ne) {
-            // != : lengths differ => true (1), lengths equal => false (0).
-            try self.print("    setne %al\n", .{});
-        } else {
-            // == : lengths equal => true (1), lengths differ => false (0).
-            try self.print("    sete %al\n", .{});
-        }
-        try self.print("    jmp {s}\n", .{end_label});
-
-        // Pointers differ: for ==, result is false (0).
-        try self.print("{s}:\n", .{ptr_diff_label});
-        if (binary.op == .eq) {
-            try self.print("    movb $0, %al\n", .{});
-        }
-        // For !=, we already jumped to end_label when pointers differ.
-
-        try self.print("{s}:\n", .{end_label});
+        try self.print("    cmpq 8(%rsp), %rax\n", .{});
+        try self.print("    sete %al\n", .{});
+        try self.print("    cmpq (%rsp), %rdx\n", .{});
+        try self.print("    sete %cl\n", .{});
+        try self.print("    andb %cl, %al\n", .{});
         try self.print("    movzbl %al, %eax\n", .{});
-        // Clean up the stack.
+        if (binary.op == .ne) try self.print("    xorl $1, %eax\n", .{});
         try self.print("    addq $16, %rsp\n", .{});
     }
 
@@ -1230,7 +1206,11 @@ const FnEmitter = struct {
                 try self.print("    movl %edx, {s}\n", .{arg_registers[1]});
             } else {
                 try self.emitExpr(site.at(0));
-                try self.print("    movl %eax, {s}\n", .{arg_registers[0]});
+                if (callee.params[0].isPtr()) {
+                    try self.print("    movq %rax, {s}\n", .{arg_registers_64[0]});
+                } else {
+                    try self.print("    movl %eax, {s}\n", .{arg_registers[0]});
+                }
             }
             try self.print("    call kyn_{s}\n", .{callee.symbol_name});
             return;
@@ -1823,4 +1803,97 @@ test "x86_64: a method mangles the symbol and receives its receiver as argument 
 
     // A struct returned by a method lands in the struct return registers.
     try support.expectContains(asm_text, "movl %edx, -48(%rbp)");
+}
+
+test "x86_64: str equality compares pointer and length in stack order" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    let a = "same";
+        \\    let b = "same";
+        \\    if a == b && !(a != b) { return 0; }
+        \\    return 1;
+        \\}
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+
+    try support.expectContains(asm_text, "cmpq 8(%rsp), %rax\n    sete %al");
+    try support.expectContains(asm_text, "cmpq (%rsp), %rdx\n    sete %cl");
+    try support.expectContains(asm_text, "andb %cl, %al\n    movzbl %al, %eax");
+    try support.expectContains(asm_text, "xorl $1, %eax");
+}
+
+test "x86_64: address-of needs no extra frame slots and pointers compare in 64 bits" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    var x = 7;
+        \\    let same = &x == &x;
+        \\    if same { return *(&x); }
+        \\    return 0;
+        \\}
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+    // x is slot 0 and same is slot 1. The frame must be exactly 16 bytes;
+    // the address-of expressions only use lea, never an out-of-frame spill.
+    try support.expectContains(asm_text, "subq $16, %rsp");
+    try testing.expect(std.mem.indexOf(u8, asm_text, "subq $32, %rsp") == null);
+    try support.expectContains(asm_text, "cmpq %rcx, %rax");
+    try support.expectContains(asm_text, "movl (%rax), %eax");
+}
+
+test "x86_64: pointer arithmetic uses 64-bit address and pointee stride" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    var x: i32 = 4;
+        \\    let p = &x;
+        \\    let next = 1 + p;
+        \\    return next - p;
+        \\}
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+    try support.expectContains(asm_text, "movslq %ecx, %rcx");
+    try support.expectContains(asm_text, "imulq $4, %rcx, %rcx");
+    try support.expectContains(asm_text, "addq %rcx, %rax");
+    try support.expectContains(asm_text, "subq %rax, %rcx");
+    try support.expectContains(asm_text, "idivq %rcx");
+}
+
+test "x86_64: pointer parameters and struct fields keep 64-bit addresses" {
+    var f = try support.Fixture.build(
+        \\struct Box { p: ptr }
+        \\fn box(p: ptr) -> Box { return Box { p: p }; }
+        \\fn same(p: ptr, b: Box) -> bool { return p == b.p; }
+        \\fn main() -> i32 {
+        \\    var x: i32 = 5;
+        \\    let b: Box = box(&x);
+        \\    if same(&x, b) { return 0; }
+        \\    return 1;
+        \\}
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+    try support.expectContains(asm_text, "movq %rdi, -8(%rbp)");
+    try support.expectContains(asm_text, "movq %rax, %rdi");
+    try support.expectContains(asm_text, "movq %rsi, -24(%rbp)");
+    try support.expectContains(asm_text, "movq -24(%rbp), %rax");
+}
+
+test "x86_64: unsigned division, comparisons and signed shifts keep their width contract" {
+    var f = try support.Fixture.build(
+        \\fn main() -> i32 {
+        \\    let u: u32 = (0 - 1) as u32;
+        \\    let d: u32 = 2 as u32;
+        \\    if u < d { return 1; }
+        \\    if u / d > d { return (0 - 8) >> d; }
+        \\    return 0;
+        \\}
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+    try support.expectContains(asm_text, "setb %al");
+    try support.expectContains(asm_text, "seta %al");
+    try support.expectContains(asm_text, "xorl %edx, %edx\n    divl %ecx");
+    try support.expectContains(asm_text, "sarl %cl, %eax");
 }

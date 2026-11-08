@@ -1,0 +1,7 @@
+// Pointer ordering has no language contract, unlike equality.
+fn main() -> i32 {
+    var a: i32 = 1;
+    var b: i32 = 2;
+    if &a < &b { return 1; }
+    return 0;
+}

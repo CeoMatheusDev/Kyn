@@ -65,7 +65,7 @@ zig build validate-ir
 
 Use `zig build validate-ir-strict` to require an LLVM verifier. CI runs the strict validation step so a missing verifier cannot silently pass.
 
-The last recorded executed baseline in [Implementation status](docs/status.md) is **246 compiler unit tests + 7 standard-library tests** and **130 end-to-end cases**. This maintenance branch adds four regression tests; they have not yet been executed, so the verified count must be refreshed after CI or a local test run.
+On this branch, local Zig 0.17.0 runs passed **265 compiler unit tests + 7 standard-library tests** and **151 native end-to-end cases**. All **106 emitted LLVM IR modules** were parsed and verified with LLVM 20 (`llvmlite`); selected programs also ran under its JIT. This does **not** replace the required `llvm-as`/CI check, nor establish a green `main` build. See [Implementation status](docs/status.md).
 
 ## Quick start
 
@@ -142,7 +142,11 @@ The existing directory boundaries are intentional. In particular, `src/compiler/
 
 ## VS Code extension
 
-The `extension/` directory contains declarative language support for `.kyn` files: TextMate syntax highlighting, bracket/indentation configuration and snippets. It does not yet provide a language server, semantic diagnostics, completion, navigation, formatting or debugging.
+The `extension/` directory contains syntax highlighting, snippets and
+compiler-backed diagnostics, definition/reference navigation and workspace
+symbol search, plus static completions. It is not a language server and does
+not provide a formatter or debugger. Rename support remains in the separate,
+not-yet-integrated PR #36.
 
 See [extension/README.md](extension/README.md) for local development and packaging.
 

@@ -1,0 +1,2 @@
+// Only integer-to-integer casts are supported; bool must fail in semantics.
+fn main() -> i32 { return true as i32; }

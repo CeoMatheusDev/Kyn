@@ -1,0 +1,22 @@
+// expect-exit: 0
+// Generic ptr parameters and struct fields retain all 64 address bits.
+struct Box { p: ptr, ok: bool }
+fn identity(p: ptr) -> ptr { return p; }
+fn same(a: ptr, b: ptr) -> bool { return a == b; }
+fn make(p: ptr) -> Box { return Box { p: p, ok: true }; }
+fn copy(b: Box) -> Box { return b; }
+fn main() -> i32 {
+    var x: i32 = 5;
+    let addr: ptr = identity(&x);
+    if !same(addr, &x) { return 1; }
+    var boxed: Box = make(addr);
+    if !boxed.ok || boxed.p != &x { return 2; }
+    boxed.p = &x;
+    let copied: Box = copy(boxed);
+    if copied.p != &x { return 3; }
+    let ref: ptr = &boxed;
+    if (*ref).p != &x { return 4; }
+    let direct: Box = Box { p: &x, ok: true };
+    if direct.p != &x { return 5; }
+    return 0;
+}

@@ -1,0 +1,16 @@
+// expect-exit: 0
+// str equality compares the interned pointer AND the length.
+fn same(a: str, b: str) -> bool { return a == b; }
+
+fn main() -> i32 {
+    let a = "same";
+    let b = "same";
+    let different = "else";
+    let short = "s";
+    if !same(a, b) { return 1; }
+    if same(a, different) { return 2; }
+    if a != b { return 3; }
+    if !(a != different) { return 4; }
+    if a == short { return 5; }
+    return 0;
+}

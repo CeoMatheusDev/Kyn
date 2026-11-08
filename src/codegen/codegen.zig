@@ -119,6 +119,26 @@ pub const Error = error{
     UnsupportedType,
 } || std.mem.Allocator.Error;
 
+/// Size of one pointer-arithmetic step for the current x86-64 stack layout.
+/// Keep this out of the frontend: both backends must agree on the same scale.
+/// A struct pointer addresses its reserved base word, with fields at negative
+/// eight-byte offsets. This is NOT a C-compatible struct layout guarantee.
+pub fn pointeeStride(pointer: sema.Type, structs: []const sema.StructInfo) Error!u32 {
+    if (!pointer.isPtr()) return error.MiscompiledAst;
+    return switch (pointer.ptr.pointee.*) {
+        .bool, .i8, .u8 => 1,
+        .i16, .u16 => 2,
+        .i32, .u32 => 4,
+        .i64, .u64, .usize, .ptr => 8,
+        .aggregate => blk: {
+            if (!pointer.ptr.has_struct_id or pointer.ptr.struct_id >= structs.len) return error.MiscompiledAst;
+            const words = structs[pointer.ptr.struct_id].fields.len + 1;
+            break :blk std.math.cast(u32, words * 8) orelse return error.UnsupportedType;
+        },
+        else => error.MiscompiledAst,
+    };
+}
+
 pub fn generate(
     arena: std.mem.Allocator,
     program: *const ast.Program,
@@ -148,4 +168,14 @@ test "codegen: backend names for the CLI" {
     try std.testing.expectEqualStrings("asm", Backend.x86_64_asm.cliName());
     try std.testing.expectEqual(Backend.x86_64_asm, Backend.fromCliName("asm").?);
     try std.testing.expect(Backend.fromCliName("cobol") == null);
+}
+
+test "codegen: pointer stride follows the current scalar slot layout" {
+    var byte: sema.Type = .u8;
+    var word: sema.Type = .i32;
+    var wide: sema.Type = .u64;
+    try std.testing.expectEqual(@as(u32, 1), try pointeeStride(.{ .ptr = .{ .pointee = &byte } }, &.{}));
+    try std.testing.expectEqual(@as(u32, 4), try pointeeStride(.{ .ptr = .{ .pointee = &word } }, &.{}));
+    try std.testing.expectEqual(@as(u32, 8), try pointeeStride(.{ .ptr = .{ .pointee = &wide } }, &.{}));
+    try std.testing.expectError(error.MiscompiledAst, pointeeStride(.i32, &.{}));
 }

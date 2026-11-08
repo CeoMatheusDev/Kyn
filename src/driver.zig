@@ -679,8 +679,8 @@ test "driver: struct declared in an imported module" {
     defer result.deinit();
     try expectKinds(result, &.{});
     const ir = result.output.?;
-    try testing.expect(std.mem.indexOf(u8, ir, "alloca i32, align 4") != null);
-    try testing.expect(std.mem.indexOf(u8, ir, "store i32 6, ptr") != null);
+    try testing.expect(std.mem.indexOf(u8, ir, "%struct0 = alloca [3 x i64], align 8") != null);
+    try testing.expect(std.mem.indexOf(u8, ir, "store i32 6, ptr %v1, align 4") != null);
 }
 
 test "driver: duplicated struct across modules cites the source file" {

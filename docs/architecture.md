@@ -99,11 +99,14 @@ declaration order.
   and the **return** uses `%eax`, `%edx`, `%ecx`, `%r8d`, `%r9d`, `%r10d`
   (limit of 6 fields). Literal fields are evaluated on the stack before moving
   to the return registers, so one field cannot clobber another's result.
-- LLVM IR: scalar replacement for storage (one `alloca` per field) and
-  parameters **flattened** into scalar arguments (`define i32 @f(i32 %arg0,
-  i32 %arg1)` for `fn f(p: P)`); only the return is an aggregate (`{ i32, i1, … }`
-  built with `insertvalue` and read with `extractvalue`). No `getelementptr` is
-  needed.
+- LLVM IR: one `[n+1 x i64]` stack object per struct; the base address points
+  at the reserved last word and field `i` is at `-8*(i+1)` (inbounds GEP). This
+  keeps `&struct_var` and `(*ptr).field` stable and matches the native frame;
+  typed field loads/stores still use their actual width. By-value parameters
+  remain **flattened** into scalar arguments (`define i32 @f(i32 %arg0,
+  i32 %arg1)` for `fn f(p: P)`); the return remains an aggregate (`{ i32, i1, … }`
+  built with `insertvalue` and read with `extractvalue`). LLVM may scalarize
+  non-escaping stack objects during optimization. This is NOT a C ABI layout.
 - `sema.registerWordsOf` is the single source for the **6-register** limit: it
   counts 1 per struct field, 2 per `str`, 2 per enum and 1 per scalar; it applies
   to declaration, call, struct return and enum return.
@@ -133,7 +136,8 @@ scalar; it exists to give programs observable output (text) and to prepare
   break (`.Lnl`). No libc dependency.
 - LLVM IR: each text becomes `@.strN = private unnamed_addr constant [N x i8]`,
   `print` becomes `call i64 @write(i32 1, ptr @.strN, i64 N)` with
-  `declare i64 @write(i32, ptr, i64)`; the LLVM verifier in CI accepts the IR.
+  `declare i64 @write(i32, ptr, i64)`; this form is LLVM-verifier compatible.
+  The current branch still needs the required strict CI run.
 - `print` and `print_i32` are builtins (`ast.Expr.Call.builtin`) with the same
   rule: exactly one argument (`str`/`i32`), `void` result and a line break at
   the end. The names are reserved for functions declared in the source, and a
@@ -215,14 +219,22 @@ index in declaration order) plus one **payload** word.
 
 ### Backends — `src/codegen/`
 
-- `llvm.zig`: textual IR for integer operations/casts, enums, scalar-replaced
-  structs, strings, calls and control flow; address-of/dereference expressions
-  are currently unsupported by this backend. It uses simple SSA, basic blocks,
-  `phi` for `&&`/`||`, and `alloca` for variables. The native backend also
-  lowers pointer operations; `usize` is 64-bit and unsigned in semantic type
-  metadata. Without an LLVM tool in the local environment
-  validation is structural (every block ends with `ret`/`br`/`unreachable`) and
-  CI runs `llvm-as` over every fixture (`tools/validate-ir.sh`).
+- `llvm.zig`: textual IR for integers/casts, enums, strings, calls and control
+  flow, plus opaque `ptr` values, address-of, scalar dereference and struct
+  field reads through a pointer. It uses SSA, `phi` for `&&`/`||` and `alloca`
+  for locals. Signedness affects division, ordering and right shifts; LLVM
+  requires explicitly extending/truncating a differently sized shift amount.
+  `tools/validate-ir.sh` runs an LLVM verifier in CI; this iteration additionally
+  verified the accepted fixtures with LLVM 20 via `llvmlite` locally.
+- Both backends use `codegen.pointeeStride` for the current x86-64 scalar/frame
+  layout. `ptr<T> +/- i32` scales a signed offset, and compatible pointer
+  subtraction divides the full 64-bit address difference before returning i32.
+  The checker rejects unknown pointees, incompatible subtraction and invalid
+  lvalues (`&42`, `&str`). A known initializer preserves its inferred `T` for
+  local `ptr` annotations; generic parameters and struct fields erase it, but
+  unknown-to-known assignment is rejected. The native backend transports
+  pointer arguments and struct fields in full 64-bit registers/slots. No
+  bounds, lifetime or C-layout guarantee is provided.
 - `x86_64.zig`: System V assembly without libc. `_start` calls `kyn_main` and
   exits through the `exit` syscall. Variables in 8-byte frame slots, expressions
   in `%eax` with a temporary stack, calls with arguments in
