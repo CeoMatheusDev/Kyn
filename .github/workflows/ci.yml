@@ -83,7 +83,7 @@ jobs:
       - name: Validate extension manifests
         working-directory: extension
         run: |
-          node -e "for (const f of ['package.json', 'language-configuration.json', 'syntaxes/kyn.tmLanguage.json', 'snippets/kyn.json']) JSON.parse(require('node:fs').readFileSync(f, 'utf8')); console.log('Extension JSON manifests are valid.')"
+          node -e "for (const f of ['package.json', 'language-configuration.json', 'syntaxes/kyn.tmLanguage.json', 'snippets/kyn.json', '.vscode/launch.json']) JSON.parse(require('node:fs').readFileSync(f, 'utf8')); console.log('Extension JSON manifests are valid.')"
 
       - name: Package VSIX
         working-directory: extension
