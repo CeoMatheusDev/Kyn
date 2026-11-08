@@ -11,6 +11,7 @@ test {
     _ = @import("sema/sema.zig");
     _ = @import("sema/unsafe.zig");
     _ = @import("codegen/codegen.zig");
+    _ = @import("target/target.zig");
     _ = @import("driver.zig");
     _ = @import("ffi/ffi.zig");
 }
