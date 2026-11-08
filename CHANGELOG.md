@@ -14,8 +14,14 @@ Repository maintenance and documentation consistency.
   cycle-specific development log in favor of canonical status documents.
 - **VS Code extension:** corrected punctuation tokenization in the TextMate
   grammar; the extension remains declarative and does not yet include an LSP.
-- **Build metadata:** standardized the build runner description. No compiler
-  semantics or generated-code behavior changed in this maintenance cycle.
+- **Build metadata:** standardized the build runner description.
+- **Compiler robustness:** made source-span slicing safe for malformed/out-of-range
+  spans, made span merging preserve the earliest source origin, and fixed
+  keyword classification for `import`.
+- **Type metadata:** corrected `usize` to report its 64-bit unsigned target
+  representation, with regression tests for width and signedness.
+- **Backend contracts:** documented that pointer expressions are currently
+  lowered by the native backend but not by the LLVM text backend.
 
 > **Traceability warning:** the entries below `v0.3.0-alpha.1` record milestones
 > intended in earlier cycles of the project and do **not** constitute evidence of
