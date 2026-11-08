@@ -191,6 +191,86 @@ const FnEmitter = struct {
         return &self.checked.symbols[index];
     }
 
+    fn structFields(self: *FnEmitter, struct_id: u32) Error![]const sema.FieldInfo {
+        if (struct_id >= self.checked.structs.len) return error.MiscompiledAst;
+        return self.checked.structs[struct_id].fields;
+    }
+
+    /// Tipo agregado do IR para um struct: `{ i32, i1, ... }`, na ordem de
+    /// declaração. Usado só no retorno — parâmetros são achatados em valores
+    /// escalares, como no backend nativo.
+    fn structType(self: *FnEmitter, struct_id: u32) Error![]const u8 {
+        const fields = try self.structFields(struct_id);
+        var text: std.ArrayList(u8) = .empty;
+        try text.appendSlice(self.arena, "{ ");
+        for (fields, 0..) |field, i| {
+            if (i != 0) try text.appendSlice(self.arena, ", ");
+            try text.appendSlice(self.arena, try llvmType(field.typ));
+        }
+        try text.appendSlice(self.arena, " }");
+        return text.items;
+    }
+
+    fn returnType(self: *FnEmitter, typ: sema.Type, struct_id: u32) Error![]const u8 {
+        if (typ == .aggregate) return self.structType(struct_id);
+        return llvmReturnType(typ);
+    }
+
+    /// Valores campo a campo de uma expressão de struct, já em SSA:
+    /// literal (cada campo avaliado), variável (`load` por campo) ou chamada
+    /// que devolve struct (`extractvalue` por campo).
+    fn structFieldValues(self: *FnEmitter, expr: *ast.Expr, struct_id: u32) Error![][]const u8 {
+        const fields = try self.structFields(struct_id);
+        const values = try self.arena.alloc([]const u8, fields.len);
+
+        switch (expr.kind) {
+            .struct_literal => |lit| {
+                for (fields, 0..) |field, i| {
+                    const init_value = findFieldInit(lit.fields, field.name) orelse return error.MiscompiledAst;
+                    const operand = try self.emitExpr(init_value);
+                    if (operand.typ == .void) return error.UnsupportedNode;
+                    values[i] = operand.text;
+                }
+            },
+            .identifier => {
+                const src = self.symbolAt(expr.resolved orelse return error.MiscompiledAst);
+                if (src.typ != .aggregate) return error.MiscompiledAst;
+                for (fields, 0..) |field, i| {
+                    const ty = try llvmType(field.typ);
+                    const align_value = try typeAlign(field.typ);
+                    const name = try self.varName(src.slot + 1 + @as(u32, @intCast(i)));
+                    const tmp = try self.newTemp();
+                    try self.emit("  {s} = load {s}, ptr {s}, align {d}\n", .{ tmp, ty, name, align_value });
+                    values[i] = tmp;
+                }
+            },
+            .call => |call| {
+                const aggregate = try self.emitStructCall(call);
+                const aggregate_type = try self.structType(struct_id);
+                for (fields, 0..) |_, i| {
+                    const tmp = try self.newTemp();
+                    try self.emit("  {s} = extractvalue {s} {s}, {d}\n", .{ tmp, aggregate_type, aggregate, i });
+                    values[i] = tmp;
+                }
+            },
+            else => return error.MiscompiledAst,
+        }
+
+        return values;
+    }
+
+    /// Chamada cujo retorno é struct: devolve o temporário com o agregado.
+    fn emitStructCall(self: *FnEmitter, call: ast.Expr.Call) Error![]const u8 {
+        const fn_index = call.callee_fn orelse return error.MiscompiledAst;
+        const callee = self.checked.functions[fn_index];
+        if (callee.return_type != .aggregate) return error.MiscompiledAst;
+        const args = try self.emitArgs(call, callee.params, callee.param_struct_ids);
+        const aggregate_type = try self.structType(callee.return_struct_id);
+        const result = try self.newTemp();
+        try self.emit("  {s} = call {s} @{s}({s})\n", .{ result, aggregate_type, call.callee, args });
+        return result;
+    }
+
     fn emitFunction(self: *FnEmitter) !void {
         try self.startBlock("entry");
 
@@ -224,6 +304,17 @@ const FnEmitter = struct {
         var arg_index: usize = 0;
         for (self.func.params, 0..) |_, i| {
             const sym = &self.checked.symbols[sym_start + i];
+            if (sym.typ == .aggregate) {
+                const fields = try self.structFields(sym.struct_id);
+                for (fields, 0..) |field, field_index| {
+                    const ty = try llvmType(field.typ);
+                    const align_value = try typeAlign(field.typ);
+                    const name = try self.varName(sym.slot + 1 + @as(u32, @intCast(field_index)));
+                    try self.emit("  store {s} %arg{d}, ptr {s}, align {d}\n", .{ ty, arg_index, name, align_value });
+                    arg_index += 1;
+                }
+                continue;
+            }
             if (sym.typ == .str) {
                 try self.emit("  store ptr %arg{d}, ptr {s}, align 8\n", .{ arg_index, try self.varName(sym.slot) });
                 try self.emit("  store i64 %arg{d}, ptr {s}, align 8\n", .{ arg_index + 1, try self.varName(sym.slot + 1) });
@@ -264,6 +355,17 @@ const FnEmitter = struct {
         var arg_index: usize = 0;
         for (self.func.params, 0..) |_, i| {
             const param_type = self.info.params[i];
+            const struct_id = if (i < self.info.param_struct_ids.len) self.info.param_struct_ids[i] else 0;
+            if (param_type == .aggregate) {
+                // Struct: um argumento por campo, na ordem de declaração.
+                const fields = try self.structFields(struct_id);
+                for (fields) |field| {
+                    if (arg_index != 0) try signature.appendSlice(self.arena, ", ");
+                    try signature.print(self.arena, "{s} %arg{d}", .{ try llvmType(field.typ), arg_index });
+                    arg_index += 1;
+                }
+                continue;
+            }
             if (arg_index != 0) try signature.appendSlice(self.arena, ", ");
             if (param_type == .str) {
                 // Fatia: ponteiro e tamanho ocupam dois argumentos.
@@ -275,7 +377,7 @@ const FnEmitter = struct {
             }
         }
 
-        const ret_type = try llvmReturnType(self.info.return_type);
+        const ret_type = try self.returnType(self.info.return_type, self.info.return_struct_id);
         try out.print(self.arena, "define {s} @{s}({s}) {{\n", .{ ret_type, self.func.name, signature.items });
 
         for (self.blocks.items) |*b| {
@@ -356,6 +458,29 @@ const FnEmitter = struct {
                     const with_len = try self.newTemp();
                     try self.emit("  {s} = insertvalue {{ ptr, i64 }} {s}, i64 {s}, 1\n", .{ with_len, with_ptr, value.len });
                     try self.emit("  ret {{ ptr, i64 }} {s}\n", .{with_len});
+                    self.block().terminated = true;
+                } else if (self.info.return_type == .aggregate) {
+                    const expr = maybe_expr orelse return error.MiscompiledAst;
+                    const aggregate_type = try self.structType(self.info.return_struct_id);
+                    // Chamada que devolve struct já é o agregado: devolve direto.
+                    if (expr.kind == .call) {
+                        const direct = try self.emitStructCall(expr.kind.call);
+                        try self.emit("  ret {s} {s}\n", .{ aggregate_type, direct });
+                        self.block().terminated = true;
+                        return;
+                    }
+                    const fields = try self.structFields(self.info.return_struct_id);
+                    const values = try self.structFieldValues(expr, self.info.return_struct_id);
+                    var current: []const u8 = "undef";
+                    var current_type: []const u8 = aggregate_type;
+                    for (fields, 0..) |field, i| {
+                        const ty = try llvmType(field.typ);
+                        const next = try self.newTemp();
+                        try self.emit("  {s} = insertvalue {s} {s}, {s} {s}, {d}\n", .{ next, current_type, current, ty, values[i], i });
+                        current = next;
+                        current_type = aggregate_type;
+                    }
+                    try self.emit("  ret {s} {s}\n", .{ aggregate_type, current });
                     self.block().terminated = true;
                 } else {
                     const expr = maybe_expr orelse return error.MiscompiledAst;
@@ -526,37 +651,16 @@ const FnEmitter = struct {
         return .{ .text = "", .typ = .void };
     }
 
-    /// Copia um struct para os slots de `dst` (literal ou outra variável).
+    /// Copia um struct para os slots de `dst`: literal, outra variável ou
+    /// chamada que devolve struct (campo a campo, via `structFieldValues`).
     fn emitStructStore(self: *FnEmitter, dst: *const sema.Symbol, value: *ast.Expr) Error!void {
-        if (dst.struct_id >= self.checked.structs.len) return error.MiscompiledAst;
-        const info = &self.checked.structs[dst.struct_id];
-
-        switch (value.kind) {
-            .struct_literal => |lit| {
-                for (info.fields, 0..) |field, i| {
-                    const init_value = findFieldInit(lit.fields, field.name) orelse return error.MiscompiledAst;
-                    const operand = try self.emitExpr(init_value);
-                    const ty = try llvmType(field.typ);
-                    const align_value = try typeAlign(field.typ);
-                    const name = try self.varName(dst.slot + 1 + @as(u32, @intCast(i)));
-                    try self.emit("  store {s} {s}, ptr {s}, align {d}\n", .{ ty, operand.text, name, align_value });
-                }
-            },
-            .identifier => {
-                const src = self.symbolAt(value.resolved orelse return error.MiscompiledAst);
-                if (src.typ != .aggregate) return error.MiscompiledAst;
-                for (info.fields, 0..) |field, i| {
-                    const index: u32 = @intCast(i);
-                    const ty = try llvmType(field.typ);
-                    const align_value = try typeAlign(field.typ);
-                    const src_name = try self.varName(src.slot + 1 + index);
-                    const dst_name = try self.varName(dst.slot + 1 + index);
-                    const tmp = try self.newTemp();
-                    try self.emit("  {s} = load {s}, ptr {s}, align {d}\n", .{ tmp, ty, src_name, align_value });
-                    try self.emit("  store {s} {s}, ptr {s}, align {d}\n", .{ ty, tmp, dst_name, align_value });
-                }
-            },
-            else => return error.MiscompiledAst,
+        const fields = try self.structFields(dst.struct_id);
+        const values = try self.structFieldValues(value, dst.struct_id);
+        for (fields, 0..) |field, i| {
+            const ty = try llvmType(field.typ);
+            const align_value = try typeAlign(field.typ);
+            const name = try self.varName(dst.slot + 1 + @as(u32, @intCast(i)));
+            try self.emit("  store {s} {s}, ptr {s}, align {d}\n", .{ ty, values[i], name, align_value });
         }
     }
 
@@ -648,10 +752,26 @@ const FnEmitter = struct {
 
     /// Lista de argumentos no formato do IR. `str` contribui com dois
     /// (`ptr` + `i64`), na ordem em que a assinatura os declara.
-    fn emitArgs(self: *FnEmitter, call: ast.Expr.Call, params: []const sema.Type) Error![]const u8 {
+    fn emitArgs(
+        self: *FnEmitter,
+        call: ast.Expr.Call,
+        params: []const sema.Type,
+        param_struct_ids: []const u32,
+    ) Error![]const u8 {
         var args: std.ArrayList(u8) = .empty;
         for (call.args, 0..) |arg, i| {
             const ptype = if (i < params.len) params[i] else return error.MiscompiledAst;
+            const struct_id = if (i < param_struct_ids.len) param_struct_ids[i] else 0;
+            if (ptype == .aggregate) {
+                // Struct vira um argumento por campo, na ordem de declaração.
+                const fields = try self.structFields(struct_id);
+                const values = try self.structFieldValues(arg, struct_id);
+                for (fields, 0..) |field, field_index| {
+                    if (args.items.len != 0) try args.appendSlice(self.arena, ", ");
+                    try args.print(self.arena, "{s} {s}", .{ try llvmType(field.typ), values[field_index] });
+                }
+                continue;
+            }
             if (args.items.len != 0) try args.appendSlice(self.arena, ", ");
             if (ptype == .str) {
                 const text = try self.strOperand(arg);
@@ -669,7 +789,7 @@ const FnEmitter = struct {
     fn emitStrCall(self: *FnEmitter, call: ast.Expr.Call) Error![]const u8 {
         const fn_index = call.callee_fn orelse return error.MiscompiledAst;
         const callee = self.checked.functions[fn_index];
-        const args = try self.emitArgs(call, callee.params);
+        const args = try self.emitArgs(call, callee.params, callee.param_struct_ids);
         const result = try self.newTemp();
         try self.emit("  {s} = call {{ ptr, i64 }} @{s}({s})\n", .{ result, call.callee, args });
         return result;
@@ -683,10 +803,12 @@ const FnEmitter = struct {
 
         const fn_index = call.callee_fn orelse return error.MiscompiledAst;
         const callee = self.checked.functions[fn_index];
-        // `str` não cabe em um `Operand`: quem o consome usa `strOperand`.
+        // `str` e struct não cabem em um `Operand`: quem os consome usa
+        // `strOperand`/`emitStructCall`.
         if (callee.return_type == .str) return error.UnsupportedNode;
+        if (callee.return_type == .aggregate) return error.UnsupportedNode;
 
-        const args = try self.emitArgs(call, callee.params);
+        const args = try self.emitArgs(call, callee.params, callee.param_struct_ids);
 
         const ret_type = try llvmType(callee.return_type);
         if (callee.return_type == .void) {
@@ -1012,6 +1134,61 @@ test "llvm: assinatura mista expande só os parâmetros 'str'" {
     try support.expectContains(ir, "define i32 @marca(ptr %arg0, i64 %arg1, i32 %arg2)");
     try support.expectContains(ir, "store i32 %arg2, ptr %v2, align 4");
     try support.expectContains(ir, "call i32 @marca(ptr @.str0, i64 2, i32 42)");
+    try support.expectAllBlocksTerminated(ir);
+}
+
+test "llvm: struct por valor vira argumentos escalares e retorno agregado" {
+    var f = try support.Fixture.build(
+        \\struct P { x: i32, y: i32 }
+        \\fn eco(p: P) -> P { return p; }
+        \\fn main() -> i32 { return 0; }
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+
+    // Parâmetro achatado em um argumento por campo.
+    try support.expectContains(ir, "define { i32, i32 } @eco(i32 %arg0, i32 %arg1)");
+    try support.expectContains(ir, "store i32 %arg0, ptr %v1, align 4");
+    try support.expectContains(ir, "store i32 %arg1, ptr %v2, align 4");
+    // Retorno montado com insertvalue e devolvido como agregado.
+    try support.expectContains(ir, "insertvalue { i32, i32 } undef, i32 %t0, 0");
+    try support.expectContains(ir, "insertvalue { i32, i32 } %t2, i32 %t1, 1");
+    try support.expectContains(ir, "ret { i32, i32 } %t3");
+    try support.expectAllBlocksTerminated(ir);
+}
+
+test "llvm: chamada com struct achata argumentos e extrai o retorno" {
+    var f = try support.Fixture.build(
+        \\struct P { x: i32, y: i32 }
+        \\fn eco(p: P) -> P { return p; }
+        \\fn main() -> i32 {
+        \\    let b = eco(P { x: 7, y: 9 });
+        \\    return b.x;
+        \\}
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+
+    try support.expectContains(ir, "call { i32, i32 } @eco(i32 7, i32 9)");
+    try support.expectContains(ir, "extractvalue { i32, i32 } %t0, 0");
+    try support.expectContains(ir, "extractvalue { i32, i32 } %t0, 1");
+    try support.expectAllBlocksTerminated(ir);
+}
+
+test "llvm: struct com 'bool' mantém i1 nos argumentos e no agregado" {
+    var f = try support.Fixture.build(
+        \\struct Par { a: bool, b: i32 }
+        \\fn par(p: Par) -> i32 { return p.b; }
+        \\fn faz() -> Par { return Par { a: 1 < 2, b: 5 }; }
+        \\fn main() -> i32 { return par(faz()); }
+    );
+    defer f.deinit();
+    const ir = try emitFixture(&f);
+
+    try support.expectContains(ir, "define i32 @par(i1 %arg0, i32 %arg1)");
+    try support.expectContains(ir, "define { i1, i32 } @faz()");
+    try support.expectContains(ir, "call { i1, i32 } @faz()");
+    try support.expectContains(ir, "call i32 @par(i1 %t1, i32 %t2)");
     try support.expectAllBlocksTerminated(ir);
 }
 

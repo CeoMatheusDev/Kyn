@@ -1,0 +1,12 @@
+struct Ponto {
+    x: i32,
+    y: i32,
+}
+
+fn origem() -> Ponto {
+    return Ponto { x: 6, y: 7 };
+}
+
+fn espelha(p: Ponto) -> Ponto {
+    return Ponto { x: p.y, y: p.x };
+}

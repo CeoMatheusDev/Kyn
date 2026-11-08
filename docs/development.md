@@ -114,7 +114,7 @@ O projeto só declara uma etapa concluída quando existe teste executável:
 
 3. **LLVM IR** (`zig build validate-ir-strict`): roda `llvm-as` (ou `clang`)
    sobre o IR de todas as fixtures suportadas, incluindo os programas
-   multi-arquivo e as fixtures de `struct`/`print`/`print_i32`/`str` por valor (79 módulos).
+   multi-arquivo e as fixtures de `struct`/`print`/`print_i32`, `str` e struct por valor (83 módulos).
    Não há LLVM instalado no ambiente
    de desenvolvimento padrão, então localmente o passo `validate-ir` apenas
    avisa; o CI instala LLVM e usa a variante **estrita**, que falha se o
@@ -133,8 +133,8 @@ manualmente. Em `ubuntu-24.04` o workflow:
 2. instala Zig 0.17.0 a partir do wheel oficial do PyPI (o mesmo caminho
    descrito acima) e o expõe no `PATH`;
 3. executa `zig fmt --check build.zig src std`;
-4. executa `zig build test` (193 testes) e `zig build e2e` (97 casos);
-5. executa `zig build validate-ir-strict` (IR de 79 módulos aceito por
+4. executa `zig build test` (204 testes) e `zig build e2e` (102 casos);
+5. executa `zig build validate-ir-strict` (IR de 83 módulos aceito por
    `llvm-as`).
 
 A ausência de LLVM no CI **falha** o build, por isso a validação do IR não pode

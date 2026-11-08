@@ -1,0 +1,35 @@
+// Struct por valor em retorno: um registrador por campo (%eax, %edx, ...).
+// expect-stdout: 7
+// expect-stdout: 27
+// expect-stdout: 7
+// expect-exit: 27
+struct Ponto {
+    x: i32,
+    y: i32,
+}
+
+fn origem() -> Ponto {
+    return Ponto { x: 3, y: 4 };
+}
+
+fn desloca(p: Ponto, d: i32) -> Ponto {
+    return Ponto { x: p.x + d, y: p.y + d };
+}
+
+fn eco(p: Ponto) -> Ponto {
+    return p;
+}
+
+fn soma(p: Ponto) -> i32 {
+    return p.x + p.y;
+}
+
+fn main() -> i32 {
+    let p = origem();
+    print_i32(soma(p));
+    let q = desloca(p, 10);
+    print_i32(soma(q));
+    // Chamada que devolve struct como argumento de outra chamada.
+    print_i32(soma(eco(eco(p))));
+    return soma(q);
+}

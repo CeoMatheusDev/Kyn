@@ -18,8 +18,10 @@ implementação integrada e testes reproduzíveis.
       arquivo importador, deduplicação, ciclos/arquivos ausentes/símbolos
       duplicados diagnosticados) e fixtures e2e executadas.
 - [x] `struct` com campos escalares: declaração, literais, acesso e atribuição
-      a campo, cópia por valor, layout documentado nos dois backends e
-      restrições diagnosticadas (sem passagem por valor ainda).
+      a campo, cópia por valor, layout documentado nos dois backends.
+- [x] `struct` por valor em parâmetros, argumentos e retornos: um registrador
+      por campo, retorno agregado no IR e limite de seis registradores
+      compartilhado com `str` (identidade nominal verificada).
 - [x] Saída de texto: `str` como fatia estática (ponteiro + tamanho), literais
       deduplicados, `print(...)` embutido no backend nativo (syscall `write`) e
       no IR do LLVM (libc `write`), com stdout conferido na suíte e2e
@@ -33,10 +35,9 @@ implementação integrada e testes reproduzíveis.
       `str` como dois, e2e com helpers recebendo e devolvendo texto.
 - [ ] Completar o parser e a AST para a linguagem-alvo. Subconjunto atual:
       `fn`, `let`/`var`, atribuição, `return`, `if`/`else`, `while`, blocos,
-      expressões com precedência, `import`, `struct` (local) e `str` (inclusive
-      por valor entre funções). Faltam struct por valor entre funções, `enum`,
-      `impl`, `unsafe`, atributos, comparação/concatenação de `str`, slices,
-      ponteiros e generics.
+      expressões com precedência, `import`, `struct` e `str`, ambos por valor
+      entre funções. Faltam `enum`, `impl`, `unsafe`, atributos, comparação e
+      concatenação de `str`, slices, ponteiros e generics.
 - [ ] Completar a análise semântica e o sistema de tipos além de
       `i32`/`bool`/`void`/`str` (inteiros de outras larguras, `f32`/`f64`,
       `str` com ownership/lifetimes, checagem de fluxo).

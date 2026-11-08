@@ -88,17 +88,27 @@ há estado global: toda a memória vem da arena do `Result`.
 
 ### Structs (layout) — `src/sema/sema.zig` + backends
 
-Um valor de struct é **nominal** (`Symbol.struct_id` → `Checked.structs`) e vive
-apenas em variáveis locais: não há passagem por valor em parâmetros/retorno nem
-campo de tipo struct nesta etapa, então um struct nunca escapa da função.
+Um valor de struct é **nominal** (`Symbol.struct_id` → `Checked.structs`) e pode
+atravessar chamadas **por valor** (Ciclo 9): um campo escalar = uma palavra de
+registrador, na ordem de declaração.
 
 - `Symbol.typ == .aggregate` reserva `1 + n` slots: o primeiro é a base
   (reservado) e cada campo usa `slot + 1 + índice`, na ordem da declaração.
 - x86-64: cada slot tem 8 bytes; leitura/escrita de campo é `movl` no offset do
-  slot, e a cópia de struct percorre os campos.
-- LLVM IR: substituição escalar — um `alloca` por campo, com o tipo do campo
-  (`i32`/`i1`). Não há tipos agregados nem `getelementptr`, e um struct que
-  nunca escapa tem a mesma semântica observável.
+  slot, e a cópia de struct percorre os campos. Parâmetros chegam em um
+  registrador por campo (`%rdi`, `%rsi`, …), chamadas empilham uma palavra por
+  campo e desempilham na ordem inversa, e o **retorno** usa `%eax`, `%edx`,
+  `%ecx`, `%r8d`, `%r9d`, `%r10d` (limite de 6 campos). Campos de literal são
+  avaliados na pilha antes de irem para os registradores de retorno, para que
+  um campo não clobbere o resultado do outro.
+- LLVM IR: substituição escalar para armazenamento (um `alloca` por campo) e
+  parâmetros **achatados** em argumentos escalares (`define i32 @f(i32 %arg0,
+  i32 %arg1)` para `fn f(p: P)`); só o retorno é agregado (`{ i32, i1, … }`
+  montado com `insertvalue` e lido com `extractvalue`). Nenhum
+  `getelementptr` é necessário.
+- `sema.registerWordsOf` é a fonte única do limite de **6 registradores**:
+  conta 1 por campo de struct, 2 por `str` e 1 por escalar; vale para
+  declaração, chamada e retorno de struct.
 - Literais exigem todos os campos exatamente uma vez, o que garante struct
   sempre inicializado (sem estado parcialmente construído).
 
@@ -187,8 +197,9 @@ APIs.
    ou backend nativo próprio) e definir critérios de aceitação para ele.
 2. Ampliar o contrato de módulos (visibilidade, imports qualificados, pacotes);
    hoje a resolução é por caminho relativo e os símbolos são achatados.
-3. Definir o contrato de struct por valor entre funções (ABI SysV para
-   agregados pequenos ou convenção própria) antes de `impl`/métodos.
+3. Definir a convenção de struct por valor para **agregados maiores** que a
+   tabela de registradores (hoje limitado a 6 campos) — passagem por pilha ou
+   `sret` — antes de `impl`/métodos com `self` grande.
 4. Adicionar à AST os nós hoje ausentes (`enum`, `impl`, `unsafe`, atributos) e
    conectar `src/sema/unsafe.zig`.
 5. Definir o modelo de memória executável (ownership, lifetimes, slices) antes
