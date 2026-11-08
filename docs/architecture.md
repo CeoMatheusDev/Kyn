@@ -205,7 +205,7 @@ index in declaration order) plus one **payload** word.
   declaration), then bodies;
 - nested scopes with shadowing allowed and duplicates diagnosed in the same
   scope;
-- fixed-width signed/unsigned integers, `usize`, `bool`, `str`, `void`, nominal
+- fixed-width signed/unsigned integers, 64-bit unsigned `usize`, `bool`, `str`, `void`, nominal
   structs/enums and inferred pointer types; operators and casts are checked by
   type category and integer width;
 - assignment requires `var`;
@@ -218,8 +218,9 @@ index in declaration order) plus one **payload** word.
 - `llvm.zig`: textual IR for integer operations/casts, enums, scalar-replaced
   structs, strings, calls and control flow; address-of/dereference expressions
   are currently unsupported by this backend. It uses simple SSA, basic blocks,
-  `phi` for `&&`/`||`,
-  `alloca` for variables. Without an LLVM tool in the local environment
+  `phi` for `&&`/`||`, and `alloca` for variables. The native backend also
+  lowers pointer operations; `usize` is 64-bit and unsigned in semantic type
+  metadata. Without an LLVM tool in the local environment
   validation is structural (every block ends with `ret`/`br`/`unreachable`) and
   CI runs `llvm-as` over every fixture (`tools/validate-ir.sh`).
 - `x86_64.zig`: System V assembly without libc. `_start` calls `kyn_main` and
