@@ -1,20 +1,21 @@
 # Implementation status
 
-This document separates integrated work (PRs #38–#40, including the
-post-merge `main` CI on `33a61cd`) from the current shift-count contract on
-`arena/e4fd71ba-kyn` (November 8, 2026). Local validation uses Zig 0.17.0,
-Linux x86-64, GNU `as`/`ld` and LLVM 20 (`llvmlite`). PR #41 passed strict
-`llvm-as` CI; post-merge `main` CI remains a separate gate. Earlier validation
-remains historical evidence, not a claim about outstanding feature branches.
+This document describes work integrated through PR #41 (November 8, 2026).
+The final PR head and its merge commit `c04a6a7` each passed both CI jobs,
+including strict `llvm-as`; post-merge `main`
+[run 42532984118](https://github.com/CeoMatheusDev/Kyn/actions/runs/42532984118)
+is green. Local validation used Zig 0.17.0, Linux x86-64, GNU `as`/`ld` and
+LLVM 20 (`llvmlite`). Earlier results remain historical evidence, not a claim
+about outstanding feature branches.
 
 ## Summary
 
 Kyn remains an **experimental prototype**. The integrated frontend pipeline
 is **validated by execution**: `.kyn` sources of the supported subset compile
-to x86-64 assembly, assemble, link and run with exit code/stdout checked. This
-branch defines shift counts modulo the left integer's width and tests the
-behavior across both backends; it does not claim a stable calling convention,
-pointer safety or a portable arithmetic overflow model.
+to x86-64 assembly, assemble, link and run with exit code/stdout checked. The
+integrated shift contract defines counts modulo the left integer's width and
+tests the behavior across both backends; it does not claim a stable calling
+convention, pointer safety or a portable arithmetic overflow model.
 
 There are also now **named composite types** (`struct` with scalar fields,
 literals, field access/assignment, copy by value) and **text and number
@@ -62,13 +63,13 @@ and embedded targets is analysed in `docs/embedded.md`.
 | Parser | `src/parser/parser.zig` | Whole program, `import` before declarations, `struct`, `enum` with optional payload, `impl` blocks (their methods join `Program.functions` in source order), `switch` arms (`Case`, `Case(name)`, `else`), struct literals and field access, enum constructors (`Shape.Circle(5)`), method calls (`value.method(args)`), precedence and associativity (including bitwise `|`/`^`/`&`/`<<`/`>>`), unary `~`, address-of `&`, dereference `*`, `expr as Type` cast syntax, errors with span | Unit and negative tests |
 | Modules | `src/driver.zig` | `compilePath` loads the import graph in pre-order, normalizes paths, deduplicates and flattens into one `Program` | Tests with a temporary directory + 3 executed e2e fixtures + 3 negative ones |
 | Semantics | `src/sema/sema.zig` | Nested scopes, name resolution, types `i8`/`i16`/`i32`/`i64`/`u8`/`u16`/`u32`/`u64`/`usize`/`bool`/`str`/`void`/struct/enum (`isInteger`, `isValue`, `bitWidth`, `isSigned`, `fromName`, `name`, `registerWords`), enum cases (unique name and case, `i32` payload only), enum nominality in annotations, assignments, arguments and returns (`param_enum_ids`/`return_enum_id`), exhaustive `switch` (missing cases listed, unreachable `else`, unknown/duplicated case, payload binding rules), struct fields and literals, methods (`impl` target resolution, per-type name space, `Type_method` mangling, receiver `self: Name` rules, field/duplicate/symbol clash checks, shared argument checking between free and method calls), `str` and struct by value in parameters/returns (nominal identity preserved), six-register limit through `registerWordsOf` (`str`/enum/64-bit scalar = 2, struct field/pointer = 1, receiver included), `print`/`print_i32` builtins (arity and type checked, reserved names), mutability, calls, stack slots, `main` validation, `checkBinary` width-aware (arithmetic/comparison/bitwise require same non-bool integer type; shift result = left operand type; logical requires bool; `==`/`!=` fallback via `isValue()`), `checkExpr` for unary `-`/`~` (integer only, same type) and `.cast` (int↔int only, `bool`/`str` rejected, clear diagnostic), implicit narrowing rejected (initializer of `u8` from `i32` literal `300` fails) | Unit tests |
-| LLVM IR backend | `src/codegen/llvm.zig` | Textual IR derived from the AST (arithmetic, comparisons, `&&`/`||` with `phi`, `if`, `while`, calls, `switch` lowered to `switch i32` on the tag with one block per arm); enums as two `alloca i32` slots (tag + payload), two `i32` parameters and a `{ i32, i32 }` return (`insertvalue`/`extractvalue`); structs in a contiguous `[n+1 x i64]` local frame with a reserved base word; `str` in `@.strN` with `declare i64 @write(i32, ptr, i64)`, `str` by value as `ptr`+`i64` in parameters and `{ ptr, i64 }` return, struct by value with parameters flattened into scalars and aggregate return `{ i32, i1, … }` (`insertvalue`/`extractvalue`); `print` calling `write` and `print_i32` through `@kyn_print_i32` (`urem`/`udiv`); `llvmType` maps `i8/u8`→`i8`, `i16/u16`→`i16`, `i32/u32`→`i32`, `i64/u64/usize`→`i64`; `typeAlign` maps 1/2/4/8; bitwise operators emit `and`/`or`/`xor`/`shl`/`ashr`/`lshr`; `~` emits `xor -1`; `as` emits `trunc`/`zext`/`sext`; address-of/typed scalar dereference and struct pointer-field reads use opaque `ptr`; pointer arithmetic scales signed offsets by `codegen.pointeeStride` | 111/111 modules locally verified via LLVM 20 `llvmlite`; strict `llvm-as` passed on integrated PR #40 and `main`, pending for this branch |
-| x86-64 backend | `src/codegen/x86_64.zig` | Linux assembly without libc, `_start` + `exit` syscall; enums (tag/payload) and `str` (pointer/length) use register pairs, structs use one register per field; 64-bit scalar integer parameters use low/high 32-bit halves in two registers while returns use `%rax`; pointers and wide struct fields use one 64-bit register. Narrow operations normalize results to 8/16 bits, wide operations use 64-bit ALU, casts extend/truncate without losing high bits. Typed pointer operations, strings and `print`/`print_i32` retain their tested paths. This is an internal Kyn ABI, not C-compatible. | `as` + `ld` execution (158/158 local fixtures; prior PR #40 CI and `main` green) |
+| LLVM IR backend | `src/codegen/llvm.zig` | Textual IR derived from the AST (arithmetic, comparisons, `&&`/`||` with `phi`, `if`, `while`, calls, `switch` lowered to `switch i32` on the tag with one block per arm); enums as two `alloca i32` slots (tag + payload), two `i32` parameters and a `{ i32, i32 }` return (`insertvalue`/`extractvalue`); structs in a contiguous `[n+1 x i64]` local frame with a reserved base word; `str` in `@.strN` with `declare i64 @write(i32, ptr, i64)`, `str` by value as `ptr`+`i64` in parameters and `{ ptr, i64 }` return, struct by value with parameters flattened into scalars and aggregate return `{ i32, i1, … }` (`insertvalue`/`extractvalue`); `print` calling `write` and `print_i32` through `@kyn_print_i32` (`urem`/`udiv`); `llvmType` maps `i8/u8`→`i8`, `i16/u16`→`i16`, `i32/u32`→`i32`, `i64/u64/usize`→`i64`; `typeAlign` maps 1/2/4/8; bitwise operators emit `and`/`or`/`xor`/`shl`/`ashr`/`lshr`; `~` emits `xor -1`; `as` emits `trunc`/`zext`/`sext`; address-of/typed scalar dereference and struct pointer-field reads use opaque `ptr`; pointer arithmetic scales signed offsets by `codegen.pointeeStride` | 111/111 modules verified locally via LLVM 20 `llvmlite`; strict `llvm-as` passed on PR #41 and its `main` merge commit |
+| x86-64 backend | `src/codegen/x86_64.zig` | Linux assembly without libc, `_start` + `exit` syscall; enums (tag/payload) and `str` (pointer/length) use register pairs, structs use one register per field; 64-bit scalar integer parameters use low/high 32-bit halves in two registers while returns use `%rax`; pointers and wide struct fields use one 64-bit register. Narrow operations normalize results to 8/16 bits, wide operations use 64-bit ALU, casts extend/truncate without losing high bits. Typed pointer operations, strings and `print`/`print_i32` retain their tested paths. This is an internal Kyn ABI, not C-compatible. | `as` + `ld` execution (158/158 local fixtures; PR #41 and post-merge `main` CI green) |
 | FFI | `src/ffi/ffi.zig` | Isolated `extern "c" printf` experiment | Not integrated |
 | `unsafe`/`repr(C)` | `src/sema/unsafe.zig` | Isolated, tested policy; the AST still has no such nodes | Unit tests of the module |
 | Self-hosting | `src/kyn/*.kyn`, `src/compiler/*.kyn` | Placeholders; not executed by `kync` | Not demonstrated |
 | Standard library | `std/core/core.zig`, `std/os/*.zig` | Experimental stubs; some APIs do no real I/O | Compile in the std tests |
-| Fixtures | `tests/` | Numbered integration fixtures plus positive/negative programs and multi-file module scenarios under `tests/e2e/`; unsupported language experiments are kept separate from the accepted subset | `zig build e2e` (158/158 locally on this branch; previous PR #40/main CI green) |
+| Fixtures | `tests/` | Numbered integration fixtures plus positive/negative programs and multi-file module scenarios under `tests/e2e/`; unsupported language experiments are kept separate from the accepted subset | `zig build e2e` (158/158 locally; PR #41 and post-merge `main` CI green) |
 
 ## Language subset accepted today
 
@@ -134,7 +135,7 @@ and formatting of `str`, `f32`/`f64` and other types, `[]T` slices, generics,
 `Result<T, E>`/`?`, closures, `for`, visibility (`pub`), qualified/selective
 imports and packages.
 
-## Shift-count contract (current branch, local November 8, 2026)
+## Shift-count contract (PR #41, integrated November 8, 2026)
 
 Before this change, shifting a `u8` value by 8 returned **0** natively: the
 32-bit x86 instruction shifted by 8 and only then truncated to 8 bits. LLVM
@@ -152,8 +153,8 @@ mask instruction for 8-/16-bit values. Valid in-range shifts are unchanged.
   types). No existing fixtures were removed.
 - LLVM 20 `llvmlite.parse_assembly` + `.verify`: **111/111** modules. The new
   fixture also returned 0 under MCJIT. These local checks are independent of
-  the passing strict `llvm-as` CI on PR #41; the final PR head and post-merge
-  `main` commit must each be validated separately.
+  strict `llvm-as` CI; both the final PR head (run 42532780270) and the
+  post-merge `main` commit (run 42532984118) passed.
 - Extension check/tests/manifests: 4/4 tests passed locally.
 
 **Not solved:** division by zero and signed division overflow have different
@@ -191,10 +192,12 @@ compiler checks and must not be merged red.
   [run 42531600138](https://github.com/CeoMatheusDev/Kyn/actions/runs/42531600138));
   post-merge `main` [run 42531803954](https://github.com/CeoMatheusDev/Kyn/actions/runs/42531803954)
   passed both jobs on that exact merge commit. The source branch was preserved.
-- [PR #41](https://github.com/CeoMatheusDev/Kyn/pull/41) passed both CI jobs,
-  including strict `llvm-as` and 158 executable E2E cases
-  ([run 42532559205](https://github.com/CeoMatheusDev/Kyn/actions/runs/42532559205)).
-  A green PR does not replace the final head check or post-merge `main` CI.
+- [PR #41](https://github.com/CeoMatheusDev/Kyn/pull/41) merged as
+  `c04a6a7828f969ff5eff3f60be552a080f51a4b1`. The final PR head passed
+  both jobs, including strict `llvm-as` and 158 executable E2E cases
+  ([run 42532780270](https://github.com/CeoMatheusDev/Kyn/actions/runs/42532780270));
+  post-merge `main` [run 42532984118](https://github.com/CeoMatheusDev/Kyn/actions/runs/42532984118)
+  passed both jobs on the merge commit.
 - PR #37 (target foundations, 10 exclusive commits) and PR #36 (editor rename,
   4 exclusive commits) remain open with failing compiler checks. Neither was
   merged or discarded; evaluate them independently after their required checks
@@ -224,14 +227,14 @@ wide struct field or pointer uses one full 64-bit register. Returns use `%rax`.
 LLVM IR uses scalar `i64` arguments, so this is **not** a shared C-compatible
 calling convention. Division by zero, signed division overflow, pointer
 validity/lifetimes and cross-target integer semantics still lack portable
-language contracts. Shift-count semantics are specified in the current cycle
-above. No freestanding target, kernel ABI, memory-safety guarantee or 1.0
-readiness is implied.
+language contracts. Shift-count semantics are specified in PR #41 above.
+No freestanding target, kernel ABI, memory-safety guarantee or 1.0 readiness
+is implied.
 
 ## Historical validation baseline (previous cycles)
 
 The following older numbers and green CI runs describe earlier revisions,
-not the current branch or the present state of the open PRs.
+not the current `main` or the present state of the open PRs.
 
 - `zig build` — success.
 - `zig build test` — 246 tests in the compiler suite (spans, lexer,
@@ -287,8 +290,9 @@ fixed).
 5. Negative tests for invalid input and boundary cases. *(partial)*
 6. Memory and FFI contracts documented and tested. *(no)*
 7. Self-hosting proven by a reproducible bootstrap. *(no)*
-8. Release with artifacts, checksums and a compatibility policy. *(partial: tag
-   `v0.3.7-alpha.1` published, no build artifacts yet)*
+8. Release with artifacts, checksums and a compatibility policy. *(partial:
+   experimental tags and GitHub releases exist, but no build artifacts,
+   checksums or stable compatibility policy yet)*
 
 Until every criterion is met, use the terms **experimental**, **partial** and
 **under development**.

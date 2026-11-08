@@ -2,9 +2,7 @@
 
 ## Unreleased
 
-- Replace the repository-wide MIT licensing with Apache License 2.0, including the VS Code extension metadata and project documentation.
-- Expand the VS Code extension with compiler-backed diagnostics, unsaved-buffer checking, LLVM/Assembly emit commands, static completions, document outline, configurable compiler discovery and extension CI validation.
-- Add `kync symbols --json` to expose compiler-resolved declaration and reference identities for editor tooling; VS Code navigation now consumes these semantic snapshots instead of matching identifier spellings.
+No changes recorded for the next version yet.
 
 — Kyn
 
@@ -12,34 +10,48 @@ Rules: Semantic Versioning 2.0.0. Pre-1.0.0 = pre-release.
 
 ## [v0.3.12-alpha.1] — 2026-11-08
 
-Repository maintenance and documentation consistency.
+Experimental update since `v0.3.11-alpha.1` (PRs #32–#35 and #38–#41):
 
-- **Repository conventions:** added `.editorconfig`, normalized text attributes,
-  expanded generated-artifact exclusions and documented directory ownership.
-- **Documentation:** rewrote the project overview, added a maintainer guide,
-  refreshed the tutorial, reconciled the roadmap and embedded-target analysis
-  with implemented integer and pointer features, and retired the stale
-  cycle-specific development log in favor of canonical status documents.
-- **VS Code extension:** corrected punctuation tokenization in the TextMate
-  grammar; the extension remains declarative and does not yet include an LSP.
-- **Build metadata:** standardized the build runner description.
-- **Compiler robustness:** made source-span slicing safe for malformed/out-of-range
-  spans, made span merging preserve the earliest source origin, and fixed
-  keyword classification for `import`.
-- **Type metadata:** corrected `usize` to report its 64-bit unsigned target
-  representation, with regression tests for width and signedness.
-- **Backend contracts:** documented that pointer expressions are currently
-  lowered by the native backend but not by the LLVM text backend.
+- **Language and backends:** added `(*ptr).field` and pointer/length identity
+  comparisons (`==`/`!=`) for `str` (#32). Repaired LLVM IR for casts, mixed
+  shifts, string identity, boolean comparisons and typed pointers; preserved
+  full-width addresses in native pointer calls, fields and arithmetic (#38).
+  Fixed native signed/unsigned 8/16/32/64-bit operations, explicit casts and
+  the internal wide-argument ABI (#40). Shift counts now use the low bits modulo
+  the left operand's 8/16/32/64-bit width in both backends, including negative
+  counts, without LLVM shift poison for out-of-range counts (#41).
+- **Compiler and editor:** `kync symbols --json` exposes resolved declarations
+  and references for VS Code navigation (#35). The extension gained
+  compiler-backed diagnostics for saved/unsaved files, check and LLVM/assembly
+  emit commands, static completions, document outline, configurable compiler
+  discovery, navigation tests and VSIX packaging in CI (#34–#35). It is not an
+  LSP; rename support remains outside this release.
+- **Repository and documentation:** replaced MIT licensing with Apache License
+  2.0, added `.editorconfig` and repository ownership/maintainer guides, rewrote
+  the overview and user guide, refreshed the tutorial, architecture and
+  roadmap, and retired the stale cycle-specific development log (#32–#33).
+  Hardened source-span slicing/merging, fixed `import` keyword classification,
+  corrected `usize` metadata to 64-bit unsigned and improved TextMate grammar
+  punctuation handling (#33).
+- **Validation:** after #41 merged into `main` as `c04a6a7`, CI
+  [run 42532984118](https://github.com/CeoMatheusDev/Kyn/actions/runs/42532984118)
+  passed compiler tests (278 + 7 std), 158/158 native E2E cases, strict
+  `llvm-as` verification, and extension tests/checks/VSIX packaging; 111/111
+  emitted LLVM modules were also verified locally with LLVM 20 `llvmlite`.
+- **Not yet provided:** release binaries or checksums, stable C ABI, formal
+  division-by-zero/signed-division-overflow or pointer lifetime/bounds rules,
+  freestanding/embedded targets, LSP, rename and a 1.0 compatibility policy.
+  The compiler and language remain experimental on Linux x86-64.
 
 > **Traceability warning:** the entries below `v0.3.0-alpha.1` record milestones
 > intended in earlier cycles of the project and do **not** constitute evidence of
 > implementation. Several of them describe features the code does not have (for
 > example self-hosting, a "stable industrial release", `Result<T, E>` and module
 > organization). The real state, verified by build and tests, is in
-> [docs/status.md](docs/status.md). Versioning will be reconciled before any
-> public release.
+> [docs/status.md](docs/status.md). Historical headings are not evidence of
+> published releases; Git tags and GitHub Releases record the published ones.
 
-## [v0.3.11-alpha.1] — 2026-11-09
+## [v0.3.11-alpha.1] — 2026-11-08
 
 Methods (`impl`) for structs and enums, plus the freestanding/embedded analysis.
 
