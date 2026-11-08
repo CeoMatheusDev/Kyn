@@ -408,6 +408,8 @@ Enums cruzam funções por valor (2 registradores: tag + payload).
 O operador `&` obtém o endereço de uma variável e produz um ponteiro tipado
 `ptr<T>`. O operador `*` desreferencia o ponteiro e produz um valor do tipo
 apontado. A forma abreviada `ptr` em uma anotação representa `ptr<unknown>`.
+`ptr<T>` é notação descritiva do tipo inferido pelo compilador, não uma sintaxe
+de anotação genérica aceita pelo parser: no código-fonte, escreva `ptr`.
 
 ```kyn
 var x: i32 = 42;
