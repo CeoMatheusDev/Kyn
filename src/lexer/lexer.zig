@@ -151,7 +151,7 @@ pub const Token = struct {
 
     pub fn isKeyword(self: Token) bool {
         return switch (self.tag) {
-            .kw_fn, .kw_struct, .kw_let, .kw_var, .kw_return, .kw_if, .kw_else, .kw_while, .kw_enum, .kw_switch, .kw_impl, .kw_as, .kw_true, .kw_false => true,
+            .kw_fn, .kw_import, .kw_struct, .kw_let, .kw_var, .kw_return, .kw_if, .kw_else, .kw_while, .kw_enum, .kw_switch, .kw_impl, .kw_as, .kw_true, .kw_false => true,
             else => false,
         };
     }
@@ -464,6 +464,7 @@ test "lexer: string literal keeps the content without quotes" {
     var lex = Lexer.init("import \"lib/math.kyn\";");
     const import_tok = lex.next();
     try std.testing.expectEqual(Tag.kw_import, import_tok.tag);
+    try std.testing.expect(import_tok.isKeyword());
 
     const str = lex.next();
     try std.testing.expectEqual(Tag.string, str.tag);
