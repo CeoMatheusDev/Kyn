@@ -263,11 +263,17 @@ class WorkspaceSymbolIndex {
   constructor() { this.dirty = true; this.snapshot = null; this.refreshing = null; }
   invalidate() { this.dirty = true; }
   async get() {
-    if (!this.dirty && this.snapshot) return this.snapshot;
-    if (this.refreshing) return this.refreshing;
-    this.refreshing = this.rebuild();
-    try { return await this.refreshing; }
-    finally { this.refreshing = null; }
+    while (this.dirty || !this.snapshot) {
+      if (!this.refreshing) {
+        const pending = this.rebuild();
+        this.refreshing = pending;
+        try { await pending; }
+        finally { if (this.refreshing === pending) this.refreshing = null; }
+      } else {
+        await this.refreshing;
+      }
+    }
+    return this.snapshot;
   }
   async rebuild() {
     const files = await vscode.workspace.findFiles("**/*.kyn", "**/{.git,node_modules,zig-out}/**", 2000);
