@@ -2,6 +2,21 @@
 
 Rules: Semantic Versioning 2.0.0. Pre-1.0.0 = pre-release.
 
+## [v0.3.12-alpha.1] — 2026-11-08
+
+Repository maintenance and documentation consistency.
+
+- **Repository conventions:** added `.editorconfig`, normalized text attributes,
+  expanded generated-artifact exclusions and documented directory ownership.
+- **Documentation:** rewrote the project overview, added a maintainer guide,
+  refreshed the tutorial, reconciled the roadmap and embedded-target analysis
+  with implemented integer and pointer features, and retired the stale
+  cycle-specific development log in favor of canonical status documents.
+- **VS Code extension:** corrected punctuation tokenization in the TextMate
+  grammar; the extension remains declarative and does not yet include an LSP.
+- **Build metadata:** standardized the build runner description. No compiler
+  semantics or generated-code behavior changed in this maintenance cycle.
+
 > **Traceability warning:** the entries below `v0.3.0-alpha.1` record milestones
 > intended in earlier cycles of the project and do **not** constitute evidence of
 > implementation. Several of them describe features the code does not have (for
