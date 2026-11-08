@@ -10,7 +10,7 @@ language server or third-party runtime dependency is required.
 - Automatic checks on open, edit and save with configurable debounce.
 - Commands to check a file, emit LLVM IR and emit x86-64 Assembly.
 - Static completions for language keywords, primitive types, builtins and snippets.
-- Document outline for functions, structs, enums and implementation blocks.
+- Document outline for functions, structs, enums and implementation blocks.\n- Workspace-wide Go to Definition, Find All References and symbol search for uniquely named declarations.
 - Dedicated **Kyn** Output Channel with compiler activity and errors.
 - Configurable compiler executable; auto-detects `zig-out/bin/kync`, then PATH.
 
@@ -65,7 +65,7 @@ native backend.
 ## Development
 
 1. Open the `extension/` directory in VS Code.
-2. Run `npm run check` to syntax-check the extension JavaScript.
+2. Run `npm run check` and `npm test` to validate the extension and symbol index.
 3. Press `F5` to launch an Extension Development Host.
 4. Open a `.kyn` file in a workspace containing `zig-out/bin/kync`.
 5. Introduce a syntax or semantic error and verify it appears in Problems.
