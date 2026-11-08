@@ -338,7 +338,9 @@ fn runPipeline(result: *Result, program: *ast.Program, options: Options) Error!v
 }
 
 /// Serializes the successful semantic snapshot for language tooling.
-pub fn semanticJson(result: *Result) Error![]const u8 {
+pub const SemanticError = Error || error{SemanticSnapshotUnavailable};
+
+pub fn semanticJson(result: *Result) SemanticError![]const u8 {
     const snapshot = result.semantic orelse return error.SemanticSnapshotUnavailable;
     const arena = result.arena.allocator();
     const paths = try arena.alloc([]const u8, result.sources.len);
