@@ -257,15 +257,34 @@ layout still have to be formalized.
 
 ## 7. Enumerations and results
 
-`enum` can represent discriminated alternatives:
+`enum` represents discriminated alternatives. **Implemented today** (see
+`docs/syntax.ebnf`): cases in declaration order become the tag, one case may
+carry an `i32` payload, and `switch` over an enum variable must be exhaustive.
 
 ```kyn
-enum FileError {
-    NotFound,
-    PermissionDenied,
-    InvalidFormat,
+enum Shape {
+    Circle(i32),
+    Square(i32),
+    Empty,
+}
+
+fn main() -> i32 {
+    let shape = Shape.Circle(5);
+    var result: i32 = 0;
+    switch shape {
+        Circle(radius) => { result = radius; }
+        Square(side) => { result = side; }
+        Empty => { result = 0; }
+    }
+    return result;
 }
 ```
+
+Current limits, enforced by semantics: enums only live in local variables (no
+parameters, returns or struct fields), the payload is `i32` only, and no
+operator accepts an enum (`==` and arithmetic are diagnosed; `switch` is the
+only consumer). Payload types beyond `i32`, enums across calls and exhaustive
+checks over nested payloads are the next steps.
 
 A type family such as `Result<T, E>` is proposed for explicit errors:
 

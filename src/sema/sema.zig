@@ -1679,7 +1679,7 @@ pub const Checker = struct {
             try self.diags.add(
                 .invalid_call,
                 span,
-                "'{s}' espera {d} argumento(s), recebeu {d}",
+                "'{s}' expects {d} argument(s), received {d}",
                 .{ call.callee, func.params.len, arg_types.items.len },
             );
             return func.return_type;

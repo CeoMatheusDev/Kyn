@@ -1,7 +1,7 @@
 .{
     .fingerprint = 0xef34733307e8f5b9,
     .name = .kyn,
-    .version = "0.3.8-alpha.1",
+    .version = "0.3.9-alpha.1",
     .minimum_zig_version = "0.17.0",
     .dependencies = .{},
     .paths = .{

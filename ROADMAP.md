@@ -33,11 +33,16 @@ implementation and reproducible tests.
       length in register pairs, return in `%rax`/`%rdx`; `ptr`+`i64` and
       `{ ptr, i64 }` in the IR), six-register limit counting `str` as two, e2e
       with helpers receiving and returning text.
+- [x] `enum` with optional `i32` payload and exhaustive `switch` (`Case`,
+      `Case(name)` and `else` arms, tags in declaration order, tag + payload
+      slots in both backends, missing/redundant cases diagnosed).
 - [ ] Complete parser and AST for the target language. Current subset: `fn`,
-      `let`/`var`, assignment, `return`, `if`/`else`, `while`, blocks,
-      expressions with precedence, `import`, `struct` and `str`, both by value
-      across functions. Missing: `enum`, `impl`, `unsafe`, attributes, `str`
-      comparison and concatenation, slices, pointers and generics.
+      `let`/`var`, assignment, `return`, `if`/`else`, `while`, `switch` over
+      enums, blocks, expressions with precedence, `import`, `struct`, `enum` and
+      `str`, structs and `str` by value across functions. Missing: `impl`,
+      `unsafe`, attributes, enums across calls or in struct fields, payload
+      types other than `i32`, `str` comparison and concatenation, slices,
+      pointers and generics.
 - [ ] Complete semantic analysis and the type system beyond
       `i32`/`bool`/`void`/`str` (other integer widths, `f32`/`f64`, `str` with
       ownership/lifetimes, flow checking).

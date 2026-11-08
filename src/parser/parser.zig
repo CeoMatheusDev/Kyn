@@ -171,7 +171,7 @@ pub const Parser = struct {
                     .{name_tok.text},
                 );
             }
-            const field_name = try self.expectIdentifier("nome do campo");
+            const field_name = try self.expectIdentifier("field name");
             _ = try self.expect(.colon, "':' and the field type");
             const type_name = try self.parseTypeName("field type");
             try fields.append(self.arena, .{
@@ -797,7 +797,7 @@ pub const Parser = struct {
                     .{},
                 );
             }
-            const field_name = try self.expectIdentifier("nome do campo no literal");
+            const field_name = try self.expectIdentifier("field name in the literal");
             _ = try self.expect(.colon, "':' e o valor do campo");
             const value = try self.parseExpression();
             try fields.append(self.arena, .{

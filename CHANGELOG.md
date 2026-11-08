@@ -10,6 +10,60 @@ Rules: Semantic Versioning 2.0.0. Pre-1.0.0 = pre-release.
 > [docs/status.md](docs/status.md). Versioning will be reconciled before any
 > public release.
 
+## [v0.3.9-alpha.1] — 2026-11-07
+
+Enums with payload and exhaustive `switch`, in both backends.
+
+- **Lexer:** `enum` and `switch` are keywords and `=>` (fat arrow) is a single
+  token, distinct from `=` and `>`; `describe` reports it and `isKeyword`
+  classifies both keywords.
+- **AST:** `Program.enums`; `EnumDecl`/`EnumCase` (optional `payload` type name,
+  `file_id`, `span`); `Expr.Kind.method_call` (`MethodCall` with `base`, `name`,
+  `args`, `resolved_enum`, `resolved_case`) for constructors; `FieldAccess`
+  gained `resolved_enum`/`resolved_case` for `Color.Red`; `Stmt.Kind.switch_stmt`
+  (`SwitchStmt` with `scrutinee`, `arms`, `else_body`, `else_span`,
+  `resolved_enum`) and `SwitchArm` (`case_name`, optional `binding`, `body`,
+  `resolved_case`, `binding_symbol`).
+- **Parser:** `enum Name { Case, Case(i32), }` (trailing comma optional, stray
+  separators ignored), `switch` arms `Case => { }`, `Case(name) => { }` and
+  `else => { }` (a duplicate `else` is a syntax error), and dotted calls in
+  `parseFieldChain`, so `Shape.Circle(5)` becomes a `method_call`. The top-level
+  message now lists `enum`.
+- **Semantics:** `Type.enumeration`; a value is **two slots** (tag = declaration
+  order, plus a payload slot), `registerWords` = 2; `CaseInfo`/`EnumInfo` and
+  `Checked.enums`/`findEnum`; enums are nominal in annotations and assignments
+  (`is enum 'B', but the annotation is 'A'`); `switch` requires an enum
+  *variable*, rejects unknown and duplicated cases, enforces the payload binding
+  (`Circle` without binding, `Empty(x)` with binding), reports the missing cases
+  in `'switch' on 'Color' is not exhaustive: missing 'Green', 'Blue'` and the
+  redundant `else` in `'else' arm is unreachable`. Enums in parameters, returns
+  and struct fields, payload types other than `i32`, operators on enum values
+  and method calls other than constructors are diagnosed with dedicated
+  messages.
+- **x86-64:** enums in two consecutive slots; `let`/assignment store the tag
+  literal (or evaluate the payload first), a copy moves both slots, and `switch`
+  becomes a `cmpl`/`je` chain over the tag, copying the payload into the binding
+  slot at the arm start.
+- **LLVM IR:** enums as two `alloca i32`; `switch` lowers to `switch i32` with
+  one block per arm and the `else` block (or the end block) as default; the
+  payload is copied into the binding `alloca` at the arm start.
+- **Driver:** `enum` declarations of every module are flattened into
+  `Program.enums`; `file_id` is assigned by the loader.
+- **Tests:** **228** (`221` compiler + `7` std), including lexer, parser, sema
+  (12 new cases) and structural tests in both backends. **112/112** e2e cases
+  with 2 new positives (`enum_switch`, `enum_switch_else`) and 8 new negatives
+  (`enum_non_exhaustive`, `enum_unknown_case`, `enum_else_unreachable`,
+  `enum_payload_missing`, `enum_payload_binding`, `enum_in_parameter`,
+  `enum_in_field`, `enum_operator`).
+- **Docs:** `docs/syntax.ebnf` and `docs/grammar.ebnf` describe `enum`, `switch`
+  and `=>`; `docs/tutorial.md` gained section 11 ("Enums and `switch`", 19
+  sections and 21 verified blocks, the new one executed through `as`/`ld`);
+  `docs/language_reference.md` (§ 7) documents the implemented enum,
+  `docs/status.md`, `docs/language_design.md`, `ROADMAP.md` and
+  `DEVELOPMENT_STATE.md` updated. Residual Portuguese strings in compiler
+  headers/messages and in the e2e report were also translated.
+- **Version:** `0.3.9-alpha.1` (derived from `build.zig.zon`).
+
 ## [v0.3.8-alpha.1] — 2026-11-07
 
 Project-wide English conversion: documentation, comments, compiler/CLI messages,

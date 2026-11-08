@@ -22,7 +22,7 @@ pub const Tag = enum {
     /// Content of a string literal (no quotes, no escape interpretation).
     string,
 
-    // palavras-chave
+    // keywords
     kw_fn,
     kw_import,
     kw_struct,
@@ -86,7 +86,7 @@ pub const Token = struct {
     /// Human-readable description used in diagnostics.
     pub fn describe(self: Token) []const u8 {
         return switch (self.tag) {
-            .identifier => "identificador",
+            .identifier => "identifier",
             .integer => "integer",
             .string => "literal de string",
             .kw_fn => "'fn'",
@@ -359,13 +359,13 @@ fn expectTags(source: []const u8, expected: []const Tag) !void {
     }
 }
 
-test "lexer: identificadores e palavras-chave" {
+test "lexer: identifiers and keywords" {
     try expectTags("fn main let var return if else while true false x1 _y", &.{
         .kw_fn, .identifier, .kw_let, .kw_var, .kw_return, .kw_if, .kw_else, .kw_while, .kw_true, .kw_false, .identifier, .identifier, .eof,
     });
 }
 
-test "lexer: palavras-chave preservam o texto original" {
+test "lexer: keywords keep the original text" {
     var lex = Lexer.init("let");
     const tok = lex.next();
     try std.testing.expectEqual(Tag.kw_let, tok.tag);

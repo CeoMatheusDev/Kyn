@@ -131,7 +131,7 @@ from the local tests.
 2. installs Zig 0.17.0 from the official PyPI wheel (the same path described
    above) and exposes it on `PATH`;
 3. runs `zig fmt --check build.zig src std`;
-4. runs `zig build test` (204 tests) and `zig build e2e` (102 cases);
+4. runs `zig build test` (228 tests) and `zig build e2e` (112 cases);
 5. runs `zig build validate-ir-strict` (IR of 83 modules accepted by
    `llvm-as`).
 

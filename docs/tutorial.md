@@ -7,8 +7,8 @@ suite.
 
 > **Language state:** Kyn is under active development (`0.3.x`). The subset
 > described in this tutorial is what the compiler **accepts and runs today**.
-> Planned features (pointers, slices, `enum`, `defer`, generics, FFI, …) appear
-> in the last section with the real state of each one.
+> Planned features (pointers, slices, `defer`, generics, FFI, …) appear in the
+> last section with the real state of each one.
 
 ## Index
 
@@ -22,14 +22,15 @@ suite.
 8. [Control flow](#8-control-flow)
 9. [Functions](#9-functions)
 10. [Structs](#10-structs)
-11. [Text and output](#11-text-and-output)
-12. [Modules](#12-modules)
-13. [Diagnostics](#13-diagnostics)
-14. [Generating binaries and IR](#14-generating-binaries-and-ir)
-15. [Testing your code](#15-testing-your-code)
-16. [Common mistakes](#16-common-mistakes)
-17. [Current limits](#17-current-limits)
-18. [Where Kyn is going](#18-where-kyn-is-going)
+11. [Enums and `switch`](#11-enums-and-switch)
+12. [Text and output](#12-text-and-output)
+13. [Modules](#13-modules)
+14. [Diagnostics](#14-diagnostics)
+15. [Generating binaries and IR](#15-generating-binaries-and-ir)
+16. [Testing your code](#16-testing-your-code)
+17. [Common mistakes](#17-common-mistakes)
+18. [Current limits](#18-current-limits)
+19. [Where Kyn is going](#19-where-kyn-is-going)
 
 ---
 
@@ -361,7 +362,64 @@ Call contract (the same in both backends):
 
 ---
 
-## 11. Text and output
+## 11. Enums and `switch`
+
+An `enum` is a type with a closed set of cases. Cases are ordered: the position
+in the declaration is the **tag** stored in the value, and a case may carry one
+`i32` payload.
+
+```kyn
+enum Shape {
+    Circle(i32),
+    Square(i32),
+    Empty,
+}
+
+fn main() -> i32 {
+    let shape = Shape.Circle(5);
+    var area_class: i32 = 0;
+    switch shape {
+        Circle(radius) => {
+            area_class = radius;
+        }
+        Square(side) => {
+            area_class = side;
+        }
+        Empty => {
+            area_class = 0;
+        }
+    }
+    print_i32(area_class); // 5
+    return area_class;
+}
+```
+
+Rules the compiler enforces:
+
+- `Shape.Circle(5)` builds a case **with** payload; `Shape.Empty` (no
+  parentheses) is a case **without** payload. Using the wrong form is a
+  diagnostic, with the fix in the message.
+- `switch` works on an enum **variable** and must be exhaustive: either every
+  case has an arm or there is an `else` arm. Missing cases are listed:
+  `'switch' on 'Shape' is not exhaustive: missing 'Square', 'Empty'`.
+- An `else` arm in a switch that already covers every case is **unreachable**
+  and therefore an error.
+- `Case(name)` binds the payload to a new `i32` variable valid only inside that
+  arm; a bare `Case` matches a case without payload.
+- Enums compare equal by no operator: `==`, arithmetic and conditions on an
+  enum are rejected — `switch` is the only consumer.
+- For now enums are **local variables only**: parameters, returns and struct
+  fields of enum type are diagnosed as unsupported, and so is `switch` over a
+  constructed value (`switch Shape.Empty { ... }`).
+
+Representation (both backends): a tag slot plus a payload slot, the payload
+slot unused when no case declares one; `switch` reads the tag and compares it
+against the case order, and copies the payload into the binding slot at the
+start of the arm.
+
+---
+
+## 12. Text and output
 
 `str` is a **static slice**: pointer to constant bytes + length. Today only
 literals exist — there is no concatenation, no comparison by content and no
@@ -413,7 +471,7 @@ On x86-64, `str` travels as a register pair (`%rdi`/`%rsi`, `%rdx`/`%rcx`,
 
 ---
 
-## 12. Modules
+## 13. Modules
 
 `import "path.kyn";` comes before any declaration and loads another file,
 resolved **relative to the importing file**:
@@ -451,7 +509,7 @@ Current rules:
 
 ---
 
-## 13. Diagnostics
+## 14. Diagnostics
 
 The compiler reports **every** independent error in one run, with file, line,
 column, the source line and a marker:
@@ -483,7 +541,7 @@ Common messages and what they mean:
 
 ---
 
-## 14. Generating binaries and IR
+## 15. Generating binaries and IR
 
 Two backends, one semantics:
 
@@ -508,7 +566,7 @@ a struct as an aggregate in the return (parameters are flattened field by field)
 
 ---
 
-## 15. Testing your code
+## 16. Testing your code
 
 The repository's `e2e` suite is driven by comments at the top of the file:
 
@@ -534,7 +592,7 @@ zig build e2e        # 102 cases today
 
 ---
 
-## 16. Common mistakes
+## 17. Common mistakes
 
 **Forgetting to cover every path with `return`**
 
@@ -605,13 +663,16 @@ fn main() -> str {
 
 ---
 
-## 17. Current limits
+## 18. Current limits
 
 The compiler explicitly diagnoses every item below — nothing fails silently:
 
 - **Memory:** no pointers, slices, arrays, allocators, `defer`/`errdefer`.
-- **Types:** only `i32`, `bool`, `str`, `void` and structs of scalar fields (no
-  `i8`/`i64`/`u32`/`f32`, no `enum`, `union`, `char`).
+- **Types:** only `i32`, `bool`, `str`, `void`, structs of scalar fields and
+  local enums (no `i8`/`i64`/`u32`/`f32`, no `union`, no `char`).
+- **Enums:** no enum in parameters/returns/struct fields, no payload other than
+  `i32`, no operator on enum values, no `switch` over a constructed value, no
+  nested payload patterns.
 - **Structs:** no struct field, no `str` field, no empty struct, no
   methods/`impl`; struct by value in calls **exists** (up to 6 fields).
 - **Text:** no concatenation, interpolation, comparison by content, escapes
@@ -629,11 +690,12 @@ The compiler explicitly diagnoses every item below — nothing fails silently:
 
 ---
 
-## 18. Where Kyn is going
+## 19. Where Kyn is going
 
 Planned order (detailed in `DEVELOPMENT_STATE.md` §5 and `ROADMAP.md`):
 
-1. `enum`, `impl`/methods with `self`, exhaustive `switch`.
+1. `impl`/methods with `self`, enums across calls (parameters, returns, struct
+   fields) and payloads beyond `i32`.
 2. Larger numeric types (`i64`, `u8`, `f32`) with explicit conversion rules.
 3. Pointers, fixed arrays and slices with documented layout.
 4. `unsafe`, `volatile`, atomics and MMIO — the explicit border to hardware.
