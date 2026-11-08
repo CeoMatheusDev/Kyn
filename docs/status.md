@@ -109,9 +109,10 @@ registers, counting `str` as two and each struct field as one), `str`
 by value in parameters/returns and struct by value in parameters, arguments and
 returns (up to 6 fields), explicit conversion `expr as T` (int↔int only;
 `bool`/`str`/`void` rejected; same-width is a no-op; narrowing truncates,
-widening zero/sign-extends), address-of `&var` (yields `ptr`) and dereference
-`*ptr` (yields `.unknown` until pointee tracking is added). Pointers count as
-one register in the six-register limit.
+widening zero/sign-extends), address-of `&var` (yields `ptr<T>` where `T` is
+the type of `var`; written as `ptr` means `ptr<unknown>`, assignment-compatible
+with any `ptr<T>`) and dereference `*ptr` (yields the pointee type `T`).
+Pointers count as one register in the six-register limit.
 
 Outside the subset (diagnosed or rejected): enum **struct fields**, enum payload
 types other than `i32`, operators on enum values (`==`, arithmetic), `switch`

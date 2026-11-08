@@ -169,17 +169,18 @@ operators. Use parentheses to disambiguate when mixing them with `+`/`-` or
 
 ### Pointers (`ptr`, `&`, `*`)
 
-**Implemented:** pointer values (`ptr`), address-of (`&var`) and dereference
+**Implemented:** pointer values (`ptr<T>`), address-of (`&var`) and dereference
 (`*ptr`). A pointer is address-sized (one 64-bit register). The pointee type is
-not tracked by the type system yet: `&` applied to any value-typed expression
-yields `.ptr`, and `*` applied to a `.ptr` value yields `.unknown` until pointee
-tracking is added. Pointers can be stored in variables, passed as arguments and
-returned from functions. They count as one register in the six-register limit.
+tracked: `&` applied to a value of type `T` yields `ptr<T>`, and `*` applied to
+a `ptr<T>` yields `T`. Writing `ptr` (without a pointee) means `ptr<unknown>`,
+which is assignment-compatible with any `ptr<T>`. Pointers can be stored in
+variables, passed as arguments and returned from functions. They count as one
+register in the six-register limit.
 
 ```kyn
 fn main() -> i32 {
     var x: i32 = 42;
-    let p: ptr = &x;      // address of x
+    let p: ptr = &x;      // address of x; p has type ptr<i32>
     return *p;            // 42
 }
 ```
