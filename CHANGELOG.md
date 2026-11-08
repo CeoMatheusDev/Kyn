@@ -53,7 +53,11 @@ Methods (`impl`) for structs and enums, plus the freestanding/embedded analysis.
   `docs/grammar.ebnf`, `docs/language_reference.md`, `docs/language_design.md`,
   `docs/status.md`, `README.md`, `docs/development.md`, `ROADMAP.md` and
   `DEVELOPMENT_STATE.md` updated.
-- **Version:** `0.3.11-alpha.1` (derived from `build.zig.zon`).
+- **Version:** `0.3.11-alpha.1` (derived from `build.zig.zon`), published as the
+  annotated tag `v0.3.11-alpha.1` with a GitHub release.
+- **Integration:** PR #30 merged into `main` as `fcf49f1`; CI green in runs
+  `42441709768` (PR) and `42441832907` (`main`), with `zig fmt --check`, 244 + 7
+  tests, 121 e2e cases and `validate-ir-strict` over 90 modules.
 
 ## [v0.3.10-alpha.1] — 2026-11-08
 
