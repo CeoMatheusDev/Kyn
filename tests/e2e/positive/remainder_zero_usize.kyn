@@ -1,0 +1,9 @@
+// expect-exit: 136
+// Linux x86-64: usize remainder by zero traps with SIGFPE.
+fn main() -> i32 {
+    let value: usize = (1 as usize) << (40 as u8);
+    let zero: usize = 0 as usize;
+    let result: usize = value % zero;
+    if result == (0 as usize) { return 1; }
+    return 2;
+}

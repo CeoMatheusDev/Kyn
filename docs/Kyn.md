@@ -167,8 +167,17 @@ let a = 10 + 5;   // 15
 let b = 10 - 3;   // 7
 let c = 4 * 3;    // 12
 let d = 10 / 3;   // 3  (divisão inteira)
-let e = 10 % 3;   // 1  (módulo)
+let e = 10 % 3;   // 1  (resto)
 ```
+
+`/` trunca o quociente inteiro em direção a zero; `%` conserva o sinal do
+dividendo no resto. Em qualquer largura inteira, divisor zero em `/` ou `%`
+provoca um **trap fatal**, sem valor de retorno. Para tipos com sinal,
+`MIN / -1` e `MIN % -1` também provocam trap (o quociente não cabe no tipo).
+Não há exceção recuperável nem código de saída/sinal de SO garantido pela
+linguagem; verifique o divisor e o caso mínimo assinado antes da operação se
+o programa precisar continuar. Outros tipos de overflow aritmético ainda não
+têm contrato portátil.
 
 ### Comparações
 

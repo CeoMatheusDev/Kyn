@@ -1,0 +1,9 @@
+// expect-exit: 136
+// Linux x86-64: i32 MIN / -1 traps with SIGFPE.
+fn main() -> i32 {
+    let min: i32 = 0 - 2147483647 - 1;
+    let minus_one: i32 = 0 - 1;
+    let result: i32 = min / minus_one;
+    if result == min { return 1; }
+    return 2;
+}

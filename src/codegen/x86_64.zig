@@ -1053,20 +1053,60 @@ const FnEmitter = struct {
             .sub => try self.print("    sub{s} {s}, {s}\n", .{ suffix, right, acc }),
             .mul => try self.print("    imul{s} {s}, {s}\n", .{ suffix, right, acc }),
             .div, .mod => {
+                if (!lhs_type.isInteger()) return error.MiscompiledAst;
+                // A quotient must fit the *Kyn* operand width. The 32-bit ALU
+                // used by other narrow operations would silently truncate
+                // i8/i16 MIN / -1; narrow idiv instead traps just like idivl/q.
+                const width = lhs_type.bitWidth();
+                const div_suffix: []const u8 = switch (width) {
+                    8 => "b",
+                    16 => "w",
+                    32 => "l",
+                    64 => "q",
+                    else => return error.MiscompiledAst,
+                };
+                const divisor: []const u8 = switch (width) {
+                    8 => "%cl",
+                    16 => "%cx",
+                    32 => "%ecx",
+                    64 => "%rcx",
+                    else => unreachable,
+                };
                 if (signed) {
-                    if (wide) {
-                        try self.print("    cqto\n", .{});
-                    } else {
-                        try self.print("    cltd\n", .{});
-                    }
-                    try self.print("    idiv{s} {s}\n", .{ suffix, right });
+                    try self.print("    {s}\n", .{switch (width) {
+                        8 => @as([]const u8, "cbtw"), // AL -> AX
+                        16 => "cwtd", // AX -> DX:AX
+                        32 => "cltd", // EAX -> EDX:EAX
+                        64 => "cqto", // RAX -> RDX:RAX
+                        else => unreachable,
+                    }});
                 } else {
-                    const rem_reg: []const u8 = if (wide) "%rdx" else "%edx";
-                    try self.print("    xor{s} {s}, {s}\n", .{ suffix, rem_reg, rem_reg });
-                    try self.print("    div{s} {s}\n", .{ suffix, right });
+                    switch (width) {
+                        8 => try self.print("    movzbw %al, %ax\n", .{}),
+                        16 => try self.print("    xorw %dx, %dx\n", .{}),
+                        32 => try self.print("    xorl %edx, %edx\n", .{}),
+                        64 => try self.print("    xorq %rdx, %rdx\n", .{}),
+                        else => unreachable,
+                    }
                 }
+                // x86 #DE traps both zero divisors and signed MIN / -1.
+                try self.print("    {s}{s} {s}\n", .{ if (signed) @as([]const u8, "idiv") else "div", div_suffix, divisor });
                 if (binary.op == .mod) {
-                    try self.print("    mov{s} %{s}, {s}\n", .{ suffix, if (wide) @as([]const u8, "rdx") else "edx", acc });
+                    const remainder: []const u8 = switch (width) {
+                        8 => "%ah",
+                        16 => "%dx",
+                        32 => "%edx",
+                        64 => "%rdx",
+                        else => unreachable,
+                    };
+                    const destination: []const u8 = switch (width) {
+                        8 => "%al",
+                        16 => "%ax",
+                        32 => "%eax",
+                        64 => "%rax",
+                        else => unreachable,
+                    };
+                    try self.print("    mov{s} {s}, {s}\n", .{ div_suffix, remainder, destination });
                 }
             },
             .lt, .le, .gt, .ge, .eq, .ne => {
@@ -1342,6 +1382,31 @@ test "x86_64: division and modulo use idivl" {
     try support.expectContains(asm_text, "cltd");
     try support.expectContains(asm_text, "idivl %ecx");
     try support.expectContains(asm_text, "movl %edx, %eax");
+}
+
+test "x86_64: div/rem use the actual integer width so narrow MIN / -1 traps" {
+    var f = try support.Fixture.build(
+        \\fn signed8(a: i8, b: i8) -> i8 { return a / b; }
+        \\fn unsigned8(a: u8, b: u8) -> u8 { return a % b; }
+        \\fn signed16(a: i16, b: i16) -> i16 { return a % b; }
+        \\fn unsigned16(a: u16, b: u16) -> u16 { return a / b; }
+        \\fn signed32(a: i32, b: i32) -> i32 { return a / b; }
+        \\fn unsigned32(a: u32, b: u32) -> u32 { return a % b; }
+        \\fn signed64(a: i64, b: i64) -> i64 { return a % b; }
+        \\fn unsigned64(a: usize, b: usize) -> usize { return a / b; }
+        \\fn main() -> i32 { return 0; }
+    );
+    defer f.deinit();
+    const asm_text = try emitFixture(&f);
+    try support.expectContains(asm_text, "cbtw\n    idivb %cl");
+    try support.expectContains(asm_text, "movzbw %al, %ax\n    divb %cl\n    movb %ah, %al\n    movzbl %al, %eax");
+    try support.expectContains(asm_text, "cwtd\n    idivw %cx\n    movw %dx, %ax\n    movswl %ax, %eax");
+    try support.expectContains(asm_text, "xorw %dx, %dx\n    divw %cx");
+    try support.expectContains(asm_text, "cltd\n    idivl %ecx");
+    try support.expectContains(asm_text, "xorl %edx, %edx\n    divl %ecx");
+    try support.expectContains(asm_text, "cqto\n    idivq %rcx\n    movq %rdx, %rax");
+    try support.expectContains(asm_text, "xorq %rdx, %rdx\n    divq %rcx");
+    try testing.expect(std.mem.indexOf(u8, asm_text, "ud2") == null);
 }
 
 test "x86_64: comparisons use setcc" {

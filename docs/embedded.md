@@ -19,12 +19,12 @@ Verified facts, with the validation that backs each one (see
 
 | Capability | State | Evidence |
 | --- | --- | --- |
-| Lexer → parser → AST → semantics → backend pipeline | Implemented | 278 compiler unit tests + 7 std tests locally; integrated `main` CI green after PR #41 |
-| Native backend without libc (`_start`, `write`/`exit` syscalls, Kyn register ABI) | Implemented, executed | `as` + `ld` + exit code and stdout checked by 158 e2e cases locally; integrated `main` CI green after PR #41 |
-| Textual LLVM IR backend (fixed Linux x86-64 triple; not yet the chosen official backend) | Implemented for the current subset | 111/111 modules verified locally via LLVM 20; strict `llvm-as` CI green on PR #41 and its `main` merge commit |
+| Lexer → parser → AST → semantics → backend pipeline | Implemented | 280 compiler unit tests + 7 std tests locally; `v0.3.12-alpha.1` `main` CI previously green |
+| Native backend without libc (`_start`, `write`/`exit` syscalls, Kyn register ABI) | Implemented, executed | `as` + `ld` + exit code/stdout checked by 167 e2e cases locally, including eight SIGFPE trap cases |
+| Textual LLVM IR backend (fixed Linux x86-64 triple; not yet the chosen official backend) | Implemented for the current subset | 120/120 modules verified locally via LLVM 20, nine division cases executed under MCJIT; strict `llvm-as` required on the new PR and `main` |
 | Multi-file programs (`import "path.kyn";`) | Implemented | 9 executed module fixtures, 3 negative ones |
 | Nominal `struct`/`enum` with documented layout and call ABI | Implemented (tag/payload pair, one register per field) | Structural tests in both backends + executed fixtures |
-| `impl`/methods, by value, no hidden parameter | Implemented | 158 local e2e cases, mangled `Type_method` symbols |
+| `impl`/methods, by value, no hidden parameter | Implemented | 167 local e2e cases, mangled `Type_method` symbols |
 | Explicit register limit (6 words) instead of a silent ABI | Enforced with diagnostics | Declaration and call-site tests |
 | Arena allocation for compiler-owned data, no global state | Implemented | Architecture notes in `docs/architecture.md` |
 
@@ -47,10 +47,11 @@ down and tested. That is the part worth keeping.
    register read could be reordered or dropped with no diagnostic.
 4. **Integer widths exist, but target layout is not configurable.** The
    compiler supports `i8`/`i16`/`i32`/`i64`, `u8`/`u16`/`u32`/`u64` and
-   `usize`, with explicit integer casts and bitwise/shift operators. The current
-   target remains fixed to Linux x86-64; portable data layouts, overflow
-   contracts across targets and target-specific integer semantics still need
-   formalization.
+   `usize`, with explicit integer casts and bitwise/shift operators. Zero
+   divisors and signed MIN / -1 in `/`/`%` trap in both current backends, but
+   that does not define overflow for `+`, `-` and `*`. The current target
+   remains fixed to Linux x86-64; portable data layouts and target-specific
+   integer semantics still need formalization.
 5. **No layout control.** No `#[repr(C)]`, no explicit alignment, no
    compile-time offset assertions. A hardware register block must have a
    guaranteed layout.

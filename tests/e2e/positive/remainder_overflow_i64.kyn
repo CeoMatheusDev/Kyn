@@ -1,0 +1,9 @@
+// expect-exit: 136
+// Linux x86-64: i64 MIN % -1 traps with SIGFPE, not a remainder of zero.
+fn main() -> i32 {
+    let min: i64 = (1 as i64) << (63 as u8);
+    let minus_one: i64 = (0 - 1) as i64;
+    let result: i64 = min % minus_one;
+    if result == (0 as i64) { return 1; }
+    return 2;
+}

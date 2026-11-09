@@ -103,26 +103,32 @@ The project only declares a step complete when there is an executable test:
 
 1. **Unit tests** (`zig build test`): lexer, spans, diagnostics, AST, parser,
    semantics, backends and driver, plus the experimental std tests.
-2. **End to end** (`zig build e2e`): every positive fixture becomes a native
+2. **End to end** (`zig build e2e`): every accepted fixture becomes a native
    binary; the exit code is compared with `// expect-exit: N` and stdout with the
    `// expect-stdout: ...` lines (in order, one directive per line — that is how
-   the `str`/`print`/`print_i32` fixtures are validated). The same applies to
-   multi-file programs in `tests/e2e/modules/<case>/main.kyn`; the fixtures in
+   the `str`/`print`/`print_i32` fixtures are validated). Intentional division
+   traps expect 136 (Linux x86-64 SIGFPE) in this runner; this is **not** a
+   portable Kyn exit-code promise. Core dumps are disabled during the suite.
+   The same checks apply to multi-file programs in
+   `tests/e2e/modules/<case>/main.kyn`; fixtures in
    `tests/integration/case_N.kyn` must exit with code `N`; every negative
    fixture must fail with code `1` and an `error:` message; in
    `tests/e2e/modules_negative/<case>/` the optional `expect-error.txt` file
    requires a specific excerpt in the message (cycle, missing file, duplicated
    symbol).
 3. **LLVM IR** (`zig build validate-ir-strict`): runs `llvm-as` (or `clang`) over
-   every accepted positive/integration/module fixture; the current suite has
-   106 such modules. CI installs LLVM and uses the **strict** variant: a missing
-   verifier or rejected module fails the build. Without LLVM installed, the
-   non-strict local command prints a skip rather than validating anything.
+   every accepted positive/integration/module fixture; the local division
+   cycle has 120 such modules. CI installs LLVM and uses the **strict** variant:
+   a missing verifier or rejected module fails the build. Without LLVM
+   installed, the non-strict local command prints a skip, not a validation.
 
-The LLVM unit tests check structural properties only. In this local iteration,
-all 106 emitted modules were also parsed and verified with LLVM 20 via
-`llvmlite`, and 13 selected programs were executed via its MCJIT. The separate
-required `llvm-as` CI also passed on PR #38 and its merge into `main`.
+The LLVM unit tests check structural properties but do not execute IR. Locally,
+LLVM 20 `llvmlite` parsed/verified 120/120 modules; MCJIT executed the valid
+division fixture (exit 0, one stdout line) and confirmed all eight exceptional
+fixtures trap in separate processes. A verifier alone does not reject LLVM
+poison from invalid `sdiv`/`srem`, hence the runtime checks and guard tests.
+Strict `llvm-as` CI on the final PR head and post-merge `main` is required
+independently of this local evidence.
 
 ## Continuous integration
 
@@ -138,16 +144,14 @@ requests and manual dispatch. On `ubuntu-24.04` the workflow:
 5. runs `zig build validate-ir-strict` (LLVM verifier required), then
    `zig build e2e` if IR validation succeeds.
 
-The integrated shift-count work passed 278 compiler + 7 std tests (285/285),
-158/158 native E2E cases and 111/111 LLVM 20-verified modules via `llvmlite`
-locally. [PR #41](https://github.com/CeoMatheusDev/Kyn/pull/41) passed both CI
-jobs on its final head ([run 42532780270](https://github.com/CeoMatheusDev/Kyn/actions/runs/42532780270));
-its merge commit `c04a6a7` on `main` also passed both jobs, including strict
-`llvm-as` ([run 42532984118](https://github.com/CeoMatheusDev/Kyn/actions/runs/42532984118)).
-Earlier [PR #40](https://github.com/CeoMatheusDev/Kyn/pull/40) and its `main`
-merge commit `33a61cd` passed both jobs as well (runs
-42531600138/42531803954). PRs #36/#37 remain separate with failing compiler
-checks.
+The new division/remainder cycle passed 280 compiler + 7 std tests (287/287),
+167/167 native E2E cases and 120/120 LLVM 20-verified modules locally. The
+released `v0.3.12-alpha.1` baseline passed both CI jobs on `main` commit
+`f977b27`, including strict LLVM validation
+([run 42534639767](https://github.com/CeoMatheusDev/Kyn/actions/runs/42534639767)).
+That run does not validate this newer code; the final PR and its post-merge
+`main` commit require fresh green checks before a new tag. PRs #36/#37 remain
+separate with failing compiler checks.
 
 A missing LLVM in CI **fails** the build, so IR validation cannot be skipped
 silently.

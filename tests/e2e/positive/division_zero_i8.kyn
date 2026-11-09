@@ -1,0 +1,9 @@
+// expect-exit: 136
+// Linux x86-64: signed byte division by zero traps with SIGFPE (128 + 8).
+fn main() -> i32 {
+    let value: i8 = (0 - 7) as i8;
+    let zero: i8 = 0 as i8;
+    let result: i8 = value / zero;
+    if result == (0 as i8) { return 1; }
+    return 2;
+}

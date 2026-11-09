@@ -137,6 +137,17 @@ declaration order.
   poison. Native x86-64 implicitly masks 32-/64-bit counts; 8-/16-bit Kyn
   shifts use the 32-bit ALU and explicitly mask `%ecx` by 7/15. Valid counts
   require no additional native instructions on 32-/64-bit values.
+- Source-level integer `/` and `%` trap on divisor zero and signed MIN / -1,
+  for both quotient and remainder. The native backend uses width-matched
+  `divb/w/l/q` or `idivb/w/l/q`, relying on hardware #DE without inserting
+  branches on valid operations; narrow results are then normalized to Kyn's
+  existing representation. LLVM guards the operands before the division or
+  remainder, branching to a single cold `llvm.trap` block per function; its
+  `sdiv`/`srem`/`udiv`/`urem` never consumes an invalid pair on a continuing
+  path. Pointer-distance division uses a nonzero positive stride and the
+  internal decimal printer divides by 10; neither is a source-level `/` or `%`.
+  The exact process signal is outside the language contract, and no external
+  C runtime is introduced for arithmetic.
 
 ### Strings and text output (`str`) — `print` + backends
 

@@ -225,9 +225,12 @@ Use parentheses when the intent is not obvious.
 `&&` and `||` **short-circuit**: the right side is only evaluated when the result
 is not already decided.
 
-Division by zero is a case to handle in the code: there is no exception and no
-automatic `panic` — the program is a binary that performs the operation you
-asked for.
+`/` truncates integer quotients toward zero; `%` has the dividend's sign.
+For every integer width, **division or remainder by zero traps**; for signed
+integers, `MIN / -1` and `MIN % -1` trap as well. These traps end execution;
+there is no catchable exception or automatic `panic` message, and the OS
+signal/exit status is not a portable Kyn guarantee. Check the divisor (and
+the signed minimum case) before the operation if the program must continue.
 
 ---
 

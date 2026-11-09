@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # End-to-end validation of kync on the x86-64 Linux target.
 #
-# For each positive case: .kyn -> assembly -> as -> ld -> run -> check
-# the exit code (`// expect-exit: N`) and/or the printed text
-# (`// expect-stdout: ...`, one directive per line, compared in order).
-# For each negative case: `kync check` must fail (code 1).
+# For each accepted case: .kyn -> assembly -> as -> ld -> run -> check
+# the exit code (`// expect-exit: N`, including 128+signal for trap cases)
+# and/or the printed text (`// expect-stdout: ...`, one directive per line).
+# For each rejected case: `kync check` must fail (code 1).
 #
 # Usage: tools/e2e.sh [path-to-kync]
 # Requirements: bash, as (GNU binutils), ld. Without them the script reports it
@@ -28,6 +28,9 @@ if [ -n "$missing" ]; then
     echo "e2e: missing tools:$missing — executable suite skipped" >&2
     exit 0
 fi
+
+# Division trap fixtures intentionally receive SIGFPE; never leave core dumps.
+ulimit -c 0
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -95,7 +98,13 @@ run_positive() {
         return
     fi
 
-    "$bin_file" >"$WORK/$name.stdout"
+    if [ -n "$expected_exit" ] && [ "$expected_exit" -ge 128 ]; then
+        # Bash reports a child killed by a signal on its own stderr. Isolate
+        # that expected diagnostic without hiding the actual exit status.
+        bash -c '"$1" >"$2"' _ "$bin_file" "$WORK/$name.stdout" 2>"$WORK/$name.signal"
+    else
+        "$bin_file" >"$WORK/$name.stdout"
+    fi
     actual=$?
 
     if [ -n "$expected_exit" ]; then

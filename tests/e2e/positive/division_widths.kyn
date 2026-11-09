@@ -1,0 +1,56 @@
+// expect-exit: 0
+// expect-stdout: rhs
+// Valid signed and unsigned / and % at every supported integer width.
+// The printed divisor is evaluated once; short-circuited zero divisions are
+// not evaluated at all.
+fn twice() -> i32 { print("rhs"); return 2; }
+
+fn main() -> i32 {
+    let min8: i8 = (0 - 128) as i8;
+    if min8 / (2 as i8) != ((0 - 64) as i8) { return 1; }
+    if min8 % (3 as i8) != ((0 - 2) as i8) { return 2; }
+    if min8 / ((0 - 2) as i8) != (64 as i8) { return 22; }
+    if min8 % ((0 - 3) as i8) != ((0 - 2) as i8) { return 23; }
+    let near8: i8 = (0 - 127) as i8;
+    if near8 / ((0 - 1) as i8) != (127 as i8) { return 24; }
+    let max8: u8 = 255 as u8;
+    if max8 / (16 as u8) != (15 as u8) { return 3; }
+    if max8 % (16 as u8) != (15 as u8) { return 4; }
+
+    let min16: i16 = (0 - 32768) as i16;
+    if min16 / (2 as i16) != ((0 - 16384) as i16) { return 5; }
+    if min16 % (3 as i16) != ((0 - 2) as i16) { return 6; }
+    if min16 / ((0 - 2) as i16) != (16384 as i16) { return 25; }
+    if min16 % ((0 - 3) as i16) != ((0 - 2) as i16) { return 26; }
+    let max16: u16 = 65535 as u16;
+    if max16 / (257 as u16) != (255 as u16) { return 7; }
+    if max16 % (257 as u16) != (0 as u16) { return 8; }
+
+    let min32: i32 = 0 - 2147483647 - 1;
+    if min32 / 2 != (0 - 1073741824) { return 9; }
+    if min32 % 3 != (0 - 2) { return 10; }
+    if min32 / (0 - 2) != 1073741824 { return 27; }
+    if (min32 + 1) / (0 - 1) != 2147483647 { return 28; }
+    let max32: u32 = (0 - 1) as u32;
+    if max32 / (3 as u32) != (1431655765 as u32) { return 11; }
+    if max32 % (3 as u32) != (0 as u32) { return 12; }
+
+    let min64: i64 = (1 as i64) << (63 as u8);
+    if min64 / (2 as i64) != (0 as i64) - ((1 as i64) << (62 as u8)) { return 13; }
+    if min64 % (3 as i64) != ((0 - 2) as i64) { return 14; }
+    if min64 / ((0 - 2) as i64) != ((1 as i64) << (62 as u8)) { return 29; }
+    if (min64 + (1 as i64)) / ((0 - 1) as i64) != ~min64 { return 30; }
+    let max64: u64 = ~(0 as u64);
+    if max64 / (2 as u64) != ((1 as u64) << (63 as u8)) - (1 as u64) { return 15; }
+    if max64 % (2 as u64) != (1 as u64) { return 16; }
+
+    let size: usize = (1 as usize) << (63 as u8);
+    if size / (2 as usize) != ((1 as usize) << (62 as u8)) { return 17; }
+    if size % (3 as usize) != (2 as usize) { return 18; }
+
+    let zero: i32 = 0;
+    if false && (9 / zero == 1) { return 19; }
+    if true || (9 % zero == 0) { } else { return 20; }
+    if 20 / twice() != 10 { return 21; }
+    return 0;
+}
